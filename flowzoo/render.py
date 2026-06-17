@@ -27,6 +27,11 @@ FLOWZOO_EMBER = LinearSegmentedColormap.from_list("flowzoo_ember", [
     (0.00, "#05060d"), (0.30, "#3b0f55"), (0.6, "#c43c4e"),
     (0.82, "#ff8c2b"), (1.00, "#ffe9a8"),
 ])
+# Two-tone map for Rayleigh-Taylor: light fluid = cool teal, heavy = warm amber.
+FLOWZOO_RT = LinearSegmentedColormap.from_list("flowzoo_rt", [
+    (0.00, "#0e3d4d"), (0.35, "#2fb6c4"), (0.5, "#e9f6f4"),
+    (0.65, "#f2a23c"), (1.00, "#7a1f12"),
+])
 INK = "#0a0b12"  # canonical background / solid color
 
 

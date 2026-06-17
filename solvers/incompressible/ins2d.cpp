@@ -81,10 +81,16 @@ int main(int argc,char**argv){
             p[IX(i,j)]=0;
         }
         set_bc(div,0); set_bc(p,0);
+        const double omega=1.8;                 // SOR over-relaxation
         for(int it=0;it<a.iters;it++){
-            #pragma omp parallel for schedule(static)
-            for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++)
-                p[IX(i,j)]=(div[IX(i,j)]+p[IX(i-1,j)]+p[IX(i+1,j)]+p[IX(i,j-1)]+p[IX(i,j+1)])*0.25;
+            for(int color=0;color<2;color++){   // red-black Gauss-Seidel (parallel-safe)
+                #pragma omp parallel for schedule(static)
+                for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++) if(((i+j)&1)==color){
+                    double gs=(div[IX(i,j)]+p[IX(i-1,j)]+p[IX(i+1,j)]
+                              +p[IX(i,j-1)]+p[IX(i,j+1)])*0.25;
+                    p[IX(i,j)]+=omega*(gs-p[IX(i,j)]);
+                }
+            }
             set_bc(p,0);
         }
         #pragma omp parallel for schedule(static)
