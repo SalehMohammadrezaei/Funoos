@@ -27,6 +27,10 @@ FLOWZOO_EMBER = LinearSegmentedColormap.from_list("flowzoo_ember", [
     (0.00, "#05060d"), (0.30, "#3b0f55"), (0.6, "#c43c4e"),
     (0.82, "#ff8c2b"), (1.00, "#ffe9a8"),
 ])
+# Water map for SPH particles: deep blue -> cyan -> white foam at high speed.
+FLOWZOO_WATER = LinearSegmentedColormap.from_list("flowzoo_water", [
+    (0.00, "#0a1a3a"), (0.45, "#1f6fb2"), (0.78, "#56c5e8"), (1.00, "#eaffff"),
+])
 # Two-tone map for Rayleigh-Taylor: light fluid = cool teal, heavy = warm amber.
 FLOWZOO_RT = LinearSegmentedColormap.from_list("flowzoo_rt", [
     (0.00, "#0e3d4d"), (0.35, "#2fb6c4"), (0.5, "#e9f6f4"),
@@ -44,6 +48,12 @@ def vorticity(ux, uy):
 
 def speed(ux, uy):
     return np.sqrt(ux * ux + uy * uy)
+
+
+def schlieren(rho):
+    """|grad rho| — the classic visualization that lights up shock fronts."""
+    gy, gx = np.gradient(rho)
+    return np.sqrt(gx * gx + gy * gy)
 
 
 def field_to_rgb(field, cmap, vmin, vmax, mask=None, mask_color=INK,
