@@ -1,0 +1,104 @@
+"""FlowZoo shared rendering pipeline — the gallery's visual identity.
+
+Every exhibit renders through here so the whole zoo looks like one polished
+product: a custom cinematic colormap, dark background, crisp upscaling, and
+high-quality GIF + MP4 export.
+"""
+from __future__ import annotations
+
+import subprocess
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import matplotlib
+from matplotlib.colors import LinearSegmentedColormap
+from PIL import Image
+
+# --- FlowZoo signature colormaps ---------------------------------------------
+# Diverging "curl" map for vorticity: cyan -> teal -> ink -> rust -> amber,
+# dark-centered so structures glow on a near-black background.
+FLOWZOO_CURL = LinearSegmentedColormap.from_list("flowzoo_curl", [
+    (0.00, "#3fe0ff"), (0.25, "#1a6e8e"), (0.50, "#0a0b12"),
+    (0.75, "#b3432a"), (1.00, "#ffb02c"),
+])
+# Sequential "ember" map for speed / density / scalars.
+FLOWZOO_EMBER = LinearSegmentedColormap.from_list("flowzoo_ember", [
+    (0.00, "#05060d"), (0.30, "#3b0f55"), (0.6, "#c43c4e"),
+    (0.82, "#ff8c2b"), (1.00, "#ffe9a8"),
+])
+INK = "#0a0b12"  # canonical background / solid color
+
+
+def vorticity(ux, uy):
+    """omega_z = d(uy)/dx - d(ux)/dy on a unit-spaced grid."""
+    duy_dx = np.gradient(uy, axis=1)
+    dux_dy = np.gradient(ux, axis=0)
+    return duy_dx - dux_dy
+
+
+def speed(ux, uy):
+    return np.sqrt(ux * ux + uy * uy)
+
+
+def field_to_rgb(field, cmap, vmin, vmax, mask=None, mask_color=INK,
+                 upscale=2, gamma=1.0):
+    """Map a scalar field to an RGB uint8 image with the FlowZoo look."""
+    x = np.clip((field - vmin) / (vmax - vmin + 1e-30), 0, 1)
+    if gamma != 1.0:
+        x = x ** gamma
+    cmap = matplotlib.colormaps[cmap] if isinstance(cmap, str) else cmap
+    rgb = (cmap(x)[..., :3] * 255).astype(np.uint8)
+    if mask is not None:
+        mc = np.array(Image.new("RGB", (1, 1), mask_color))[0, 0]
+        rgb[mask.astype(bool)] = mc
+    img = Image.fromarray(rgb[::-1])  # flip so +y is up
+    if upscale and upscale != 1:
+        img = img.resize((img.width * upscale, img.height * upscale),
+                         Image.BILINEAR)
+    return np.asarray(img)
+
+
+def _write_pngs(frames, d):
+    for i, fr in enumerate(frames):
+        Image.fromarray(fr).save(str(Path(d) / f"f_{i:05d}.png"))
+    return str(Path(d) / "f_%05d.png")
+
+
+_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+
+
+def save_mp4(frames, path, fps=30):
+    """Encode frames to H.264 MP4 using the system ffmpeg."""
+    path = str(path)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as d:
+        inp = _write_pngs(frames, d)
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-framerate", str(fps),
+                        "-i", inp, "-vf", _EVEN, "-pix_fmt", "yuv420p",
+                        "-c:v", "libx264", "-crf", "18", path], check=True)
+    return path
+
+
+def save_gif(frames, path, fps=30):
+    """High-quality GIF via ffmpeg two-pass palettegen/paletteuse."""
+    path = str(path)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as d:
+        inp = _write_pngs(frames, d)
+        pal = str(Path(d) / "pal.png")
+        vf = f"fps={fps},{_EVEN}:flags=lanczos"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-framerate", str(fps),
+                        "-i", inp, "-vf", vf + ",palettegen=stats_mode=diff",
+                        pal], check=True)
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-framerate", str(fps),
+                        "-i", inp, "-i", pal, "-lavfi",
+                        vf + "[x];[x][1:v]paletteuse=dither=sierra2_4a",
+                        "-loop", "0", path], check=True)
+    return path
+
+
+def symmetric_limit(field, pct=99.5):
+    """A robust symmetric color limit for diverging fields (vorticity)."""
+    v = np.percentile(np.abs(field), pct)
+    return -v, v
