@@ -20,10 +20,13 @@ def cylinder(nx, ny, cx, cy, radius):
     return ((xx - cx) ** 2 + (yy - cy) ** 2 <= radius * radius).astype(np.uint8)
 
 
-def text(nx, ny, string, font_frac=0.55, font_path=None):
-    """Render `string` as a solid obstacle centered in the domain.
+def text(nx, ny, string, font_frac=0.55, x_frac=0.5, max_w_frac=0.9,
+         font_path=None):
+    """Render `string` as a solid obstacle in the domain.
 
-    font_frac sets the glyph height as a fraction of the domain height.
+    font_frac sets the glyph height as a fraction of the domain height;
+    x_frac sets where the text block is centered horizontally (0..1), so the
+    wake can trail downstream; max_w_frac caps the text width.
     """
     img = Image.new("L", (nx, ny), 0)
     draw = ImageDraw.Draw(img)
@@ -38,12 +41,15 @@ def text(nx, ny, string, font_frac=0.55, font_path=None):
     size = target_h
     font = ImageFont.truetype(path, size)
     # shrink to fit width
-    while font.getbbox(string)[2] > nx * 0.9 and size > 8:
+    while font.getbbox(string)[2] > nx * max_w_frac and size > 8:
         size -= 4
         font = ImageFont.truetype(path, size)
     bbox = draw.textbbox((0, 0), string, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(((nx - tw) / 2 - bbox[0], (ny - th) / 2 - bbox[1]), string,
+    margin = 0.03 * nx
+    left = x_frac * nx - tw / 2                       # desired left edge
+    left = min(max(left, margin), nx - margin - tw)  # clamp fully on-screen
+    draw.text((left - bbox[0], (ny - th) / 2 - bbox[1]), string,
               fill=255, font=font)
     arr = np.asarray(img)
     return (arr[::-1] > 127).astype(np.uint8)  # flip so text is upright in +y-up
