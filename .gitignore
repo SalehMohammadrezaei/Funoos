@@ -23,3 +23,7 @@ results/_still_check.png
 
 # stills (scratch previews)
 results/_still*.png
+solvers/incompressible/ins2d
+solvers/compressible/euler2d
+solvers/sph/sph2d
+results/_mask_check.png
