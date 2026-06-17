@@ -58,7 +58,7 @@ def main():
             if vlim is None:
                 vlim = np.percentile(np.abs(w), 99.0)
             imgs.append(render.field_to_rgb(w, render.FLOWZOO_CURL, -vlim, vlim,
-                                            upscale=2))
+                                            upscale=1))
         wh = sim.step(wh, dt)
     render.save_gif(imgs, ROOT / "results" / "turbulence.gif", fps=28)
     render.save_mp4(imgs, ROOT / "results" / "turbulence.mp4", fps=28)

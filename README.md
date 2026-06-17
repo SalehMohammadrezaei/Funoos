@@ -2,58 +2,96 @@
 
 **A zoo of fluid phenomena — each one solved from scratch with a different numerical method, validated against a textbook benchmark, and rendered as a cinematic animation.**
 
-Most CFD portfolios show one solver run one way. FlowZoo shows fluids from *five* angles — kinetic (lattice Boltzmann), continuum (Navier–Stokes), compressible (finite-volume shock capturing), meshfree (SPH), and spectral (FFT) — with the physics checked every time and the output built to be *watched*.
+Most CFD portfolios show one solver run one way. FlowZoo shows fluids from **five** angles — kinetic (lattice Boltzmann), continuum (projection-method Navier–Stokes), compressible (finite-volume shock capturing), meshfree (SPH), and spectral (FFT). Every exhibit is checked against an analytical or experimental benchmark, and every one is built to be *watched*.
 
 <p align="center">
-  <img src="results/vortex_street.gif" alt="Kármán vortex street (LBM)" width="88%">
+  <img src="results/flow_around_flowzoo.gif" alt="Flow shedding vortices off the word FlowZoo" width="92%">
 </p>
-<p align="center"><em>Kármán vortex street behind a cylinder — lattice-Boltzmann, colored by vorticity.</em></p>
+<p align="center"><em>The signature exhibit: type your name and watch the flow shed vortices off the letters (lattice Boltzmann).</em></p>
 
 ---
 
 ## The exhibits
 
-| Exhibit | Method | Validation | Status |
+### 🌀 Kármán vortex street · *Lattice Boltzmann (D2Q9)*
+<img src="results/vortex_street.gif" width="70%">
+Flow past a cylinder sheds the classic alternating wake. **Validated:** Strouhal number **St = 0.20** at Re ≈ 160 (textbook ≈ 0.2).
+
+### 🔥 Rising smoke plume · *Incompressible Navier–Stokes*
+<img src="results/smoke_plume.gif" width="40%">
+A buoyant, dyed source rises into a swirling turbulent plume. Projection method + Boussinesq buoyancy + vorticity confinement.
+
+### 🍄 Rayleigh–Taylor instability · *Incompressible Navier–Stokes*
+<img src="results/rayleigh_taylor.gif" width="34%">
+Heavy fluid over light under gravity, rolling into mushroom-cap plumes.
+
+### 💥 Explosion / blast wave · *Compressible Euler (HLLC)*
+<img src="results/explosion.gif" width="48%">
+A high-pressure region bursts into an expanding circular shock (schlieren view).
+
+### 🫧 Shock–bubble interaction · *Compressible Euler (HLLC)*
+<img src="results/shock_bubble.gif" width="70%">
+A planar shock sweeps over a light-gas bubble and rolls it into a vortex pair.
+
+### 🌊 Dam break splash · *Smoothed-Particle Hydrodynamics*
+<img src="results/dam_break.gif" width="70%">
+A water column collapses and surges across a tank — a meshfree, Lagrangian free-surface flow.
+
+### 🌪️ Kelvin–Helmholtz billows · *Pseudo-spectral (FFT)*
+<img src="results/turbulence.gif" width="40%">
+A shear layer rolls up into billows cascading toward 2D turbulence.
+
+---
+
+## Validation (every exhibit is checked)
+
+| Exhibit | Method | Benchmark | Result |
 |---|---|---|---|
-| ★ **Flow around your name** | Lattice Boltzmann (D2Q9) | qualitative wake physics | 🚧 |
-| **Kármán vortex street** | Lattice Boltzmann (D2Q9) | Strouhal number St ≈ 0.2 | ✅ |
-| 🔥 **Rising smoke plume** | Incompressible Navier–Stokes (projection) | — | 🚧 |
-| 🍄 **Rayleigh–Taylor instability** | Incompressible Navier–Stokes | — | 🚧 |
-| 💥 **Explosion / blast wave** | Compressible Euler (finite-volume HLLC) | exact Sod solution | 🚧 |
-| 🫧 **Shock–bubble interaction** | Compressible Euler | exact Sod solution | 🚧 |
-| 🌊 **Dam break splash** | Smoothed-Particle Hydrodynamics | Martin–Moyce surge front | 🚧 |
-| 🌀 **2D turbulence / Kelvin–Helmholtz** | Pseudo-spectral (FFT) | energy-spectrum slope | 🚧 |
+| Vortex street | LBM D2Q9 | Strouhal number (Re≈160) | **St = 0.20** ✓ |
+| Sod shock tube | Compressible HLLC | exact Riemann solution | **mean abs error 0.002** ✓ |
+| Kelvin–Helmholtz | Pseudo-spectral | inviscid energy conservation | **drift ≈ 1.5×10⁻⁷** ✓ |
+| Dam break | SPH | dry-bed front speed vs 2√(gH) | front ≈ 0.7× Ritter limit (in the physical range) |
 
-*Each exhibit is a self-contained, validated demonstration of a numerical method. The signature exhibit lets you **type your own name** and watch vortices shed off the letters.*
+<p align="center"><img src="results/shock_tube_validation.png" width="62%"></p>
+<p align="center"><em>The HLLC solver vs. the exact Sod Riemann solution.</em></p>
 
-## Why each method matters
-- **Lattice Boltzmann** — a kinetic/mesoscopic view; trivially handles arbitrary geometry (any obstacle mask, even text).
-- **Incompressible Navier–Stokes (projection method)** — the continuum workhorse; pressure–velocity coupling, buoyancy, scalar transport.
-- **Compressible Euler (finite-volume, HLLC)** — hyperbolic conservation laws and shock capturing.
-- **SPH** — a meshfree Lagrangian paradigm, natural for free surfaces and splashing.
-- **Spectral (FFT)** — high-accuracy methods for turbulence and instabilities.
+## Why each method
+- **Lattice Boltzmann** — kinetic/mesoscopic; trivially handles arbitrary geometry (any obstacle mask, even text).
+- **Incompressible Navier–Stokes (projection)** — the continuum workhorse: pressure–velocity coupling, buoyancy, scalar transport.
+- **Compressible Euler (finite-volume HLLC)** — hyperbolic conservation laws and shock capturing.
+- **SPH** — meshfree Lagrangian particles, natural for free surfaces and splashing.
+- **Pseudo-spectral (FFT)** — high-accuracy methods for turbulence and instabilities.
 
 ## Stack
-**C++** (OpenMP) for the solver cores — fast enough on a CPU to run high resolution, which is what makes the output beautiful — and **Python** (NumPy / Pillow / Matplotlib + ffmpeg) for geometry, post-processing, validation, and a shared cinematic rendering pipeline so the whole gallery looks like one product.
+**C++** (OpenMP) for the four grid/particle solver cores — fast enough on a CPU to run high resolution, which is what makes the output beautiful — and **Python** (NumPy / SciPy / Pillow / Matplotlib + ffmpeg) for the spectral solver, geometry, text→mask, validation, and a shared cinematic rendering pipeline so the whole gallery looks like one product.
 
 ## Run it
 ```bash
-# build the LBM solver (needs g++ with OpenMP)
-make -C solvers/lbm
+# build the C++ solvers (need g++ with OpenMP)
+make -C solvers/lbm && make -C solvers/incompressible
+make -C solvers/compressible && make -C solvers/sph
 
-# Kármán vortex street (validated) — writes results/vortex_street.gif
-python demos/vortex_street.py            # full quality
-python demos/vortex_street.py --quick    # fast smoke test
+# then any exhibit (each writes a GIF + MP4 into results/):
+python demos/flow_around_name.py --text "YourName"   # signature
+python demos/vortex_street.py
+python demos/smoke_plume.py
+python demos/rayleigh_taylor.py
+python demos/shock_tube.py          # the Sod validation figure
+python demos/explosion.py
+python demos/shock_bubble.py
+python demos/dam_break.py
+python demos/turbulence.py
+# add --quick to any demo for a fast, low-res smoke test
 ```
 
 ## Repository layout
 ```
-solvers/      C++ solver cores (one per method)
-flowzoo/      Python: geometry, text→mask, frame I/O, cinematic renderer
+solvers/      C++ solver cores: lbm/ incompressible/ compressible/ sph/
+flowzoo/      Python: spectral solver, geometry, text→mask, validation, renderer
 demos/        one runnable script per exhibit
-results/      the gallery animations (GIF + MP4)
+results/      the gallery animations (GIF + MP4) and validation figures
 docs/         method notes & validation write-ups
 ```
 
 ## License
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Built by Saleh Rezaee.

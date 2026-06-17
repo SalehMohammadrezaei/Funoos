@@ -57,12 +57,12 @@ def main():
                    check=True)
 
     meta, frames = io.read_all_frames(work)
-    skip = max(1, len(frames) // 140)
+    skip = max(1, len(frames) // 90)
     use = frames[len(frames) // 5 :: skip]
     vort = [render.vorticity(ux, uy) for ux, uy in use]
     vmax = np.percentile(np.abs(np.concatenate([v.ravel() for v in vort[-20:]])), 99.0)
     imgs = [render.field_to_rgb(v, render.FLOWZOO_CURL, -vmax, vmax,
-                                mask=mask, upscale=2) for v in vort]
+                                mask=mask, upscale=1) for v in vort]
     safe = "".join(c if c.isalnum() else "_" for c in args.text).lower()
     out_gif = ROOT / "results" / f"flow_around_{safe}.gif"
     render.save_gif(imgs, out_gif, fps=24)

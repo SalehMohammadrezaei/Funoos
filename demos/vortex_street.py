@@ -74,12 +74,12 @@ def main():
 
     # --- render ---
     meta, frames = io.read_all_frames(work)
-    skip = max(1, len(frames) // 130)          # ~130 frames into the GIF
+    skip = max(1, len(frames) // 90)          # ~130 frames into the GIF
     use = frames[len(frames) // 5 :: skip]     # drop first 20% (transient)
     vort = [render.vorticity(ux, uy) for ux, uy in use]
     vmax = np.percentile(np.abs(np.concatenate([v.ravel() for v in vort[-20:]])), 99.5)
     imgs = [render.field_to_rgb(v, render.FLOWZOO_CURL, -vmax, vmax,
-                                mask=mask, upscale=2) for v in vort]
+                                mask=mask, upscale=1) for v in vort]
     out_gif = ROOT / "results" / "vortex_street.gif"
     render.save_gif(imgs, out_gif, fps=24)
     render.save_mp4(imgs, ROOT / "results" / "vortex_street.mp4", fps=24)
