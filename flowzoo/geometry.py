@@ -20,6 +20,30 @@ def cylinder(nx, ny, cx, cy, radius):
     return ((xx - cx) ** 2 + (yy - cy) ** 2 <= radius * radius).astype(np.uint8)
 
 
+def square(nx, ny, cx, cy, half):
+    """Axis-aligned square bluff body."""
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    return ((np.abs(xx - cx) <= half) & (np.abs(yy - cy) <= half)).astype(np.uint8)
+
+
+def diamond(nx, ny, cx, cy, half):
+    """Square rotated 45° (a sharp-nosed bluff body)."""
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    return ((np.abs(xx - cx) + np.abs(yy - cy)) <= half).astype(np.uint8)
+
+
+def airfoil(nx, ny, cx, cy, chord, thickness=0.12, aoa_deg=12.0):
+    """NACA-symmetric airfoil at angle of attack (lifting body with a clean wake)."""
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    a = np.deg2rad(aoa_deg); ca, sa = np.cos(a), np.sin(a)
+    X = (xx - cx) * ca - (yy - cy) * sa + 0.35 * chord     # leading edge near front
+    Y = (xx - cx) * sa + (yy - cy) * ca
+    t = np.clip(X / chord, 0, 1)
+    yt = 5 * thickness * chord * (0.2969 * np.sqrt(t) - 0.126 * t - 0.3516 * t ** 2
+                                  + 0.2843 * t ** 3 - 0.1015 * t ** 4)
+    return ((X >= 0) & (X <= chord) & (np.abs(Y) <= yt)).astype(np.uint8)
+
+
 def text(nx, ny, string, font_frac=0.55, x_frac=0.5, max_w_frac=0.9,
          font_path=None):
     """Render `string` as a solid obstacle in the domain.

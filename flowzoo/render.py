@@ -107,15 +107,27 @@ def add_colorbar(rgb, cmap, vmin, vmax, label=""):
     return np.asarray(img)
 
 
-def overlay_particles(rgb, xs, ys, sizes, color=(255, 210, 120)):
-    """Draw glowing debris dots onto an RGB frame (image pixel coords)."""
+def _spark_color(h):
+    """Heat h in [0,1] → deep-red → orange → white-hot."""
+    h = max(0.0, min(1.0, h))
+    return (255, int(70 + 185 * h), int(20 + 210 * max(0.0, h - 0.5) * 2))
+
+
+def overlay_particles(rgb, xs, ys, sizes, heat=None):
+    """Draw glowing ember/spark debris (glow halo + bright core, hot palette)."""
     from PIL import ImageDraw
     img = Image.fromarray(rgb).convert("RGB")
     d = ImageDraw.Draw(img, "RGBA")
-    for x, y, s in zip(xs, ys, sizes):
-        d.ellipse([x - 2 * s, y - 2 * s, x + 2 * s, y + 2 * s],
-                  fill=(color[0], color[1], color[2], 60))          # halo
-        d.ellipse([x - s, y - s, x + s, y + s], fill=color)         # core
+    if heat is None:
+        heat = [1.0] * len(xs)
+    for x, y, s, h in zip(xs, ys, sizes, heat):
+        col = _spark_color(h)
+        d.ellipse([x - 2.6 * s, y - 2.6 * s, x + 2.6 * s, y + 2.6 * s],
+                  fill=(*col, 45))                                   # soft outer glow
+        d.ellipse([x - 1.4 * s, y - 1.4 * s, x + 1.4 * s, y + 1.4 * s],
+                  fill=(*col, 120))                                  # inner glow
+        core = tuple(min(255, c + 55) for c in col)
+        d.ellipse([x - 0.7 * s, y - 0.7 * s, x + 0.7 * s, y + 0.7 * s], fill=core)  # hot core
     return np.asarray(img)
 
 

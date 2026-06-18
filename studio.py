@@ -140,7 +140,7 @@ class App:
         hero = ctk.CTkFrame(col, fg_color=CARD, corner_radius=20, border_width=1, border_color=LINE)
         hero.pack(pady=(0, 16))
         self.intro_demo = tk.Label(hero, bg=INKCV, bd=0); self.intro_demo.pack(padx=10, pady=10)
-        self.iframes = load_gif(ROOT / engine.META["Vortex street (LBM)"]["demo"], maxw=660); self.iidx = 0
+        self.iframes = load_gif(ROOT / engine.META["Wind Tunnel"]["demo"], maxw=660); self.iidx = 0
         if not self.iframes:
             self.intro_demo.config(text="  FlowZoo  ", fg=MUTED, font=(F, 24), width=40, height=4)
         kicker(col, "interactive cfd gallery", MUTED).pack(pady=(4, 2))

@@ -8,29 +8,28 @@ engine.META.)
 """
 
 DETAIL = {
-"Vortex street (LBM)": {
+"Wind Tunnel": {
 "physics": (
-"A blunt (bluff) body in a steady stream cannot keep the flow attached: the "
-"boundary layers on its two sides separate and form a pair of shear layers in "
-"the wake. Below a critical speed these two layers sit there symmetrically, but "
-"above a critical Reynolds number (Re ≈ 47 for a circular cylinder) that "
-"symmetric wake becomes absolutely unstable. One shear layer rolls up into a "
-"vortex, which grows until it is strong enough to draw the opposite shear layer "
-"across the wake; that cuts off the first vortex, which sheds downstream, and "
-"the process repeats on the other side. The result is a staggered, periodic "
-"train of counter-rotating vortices — the von Kármán vortex street.\n\n"
-"Each shed vortex carries away momentum and imposes a sideways pressure force on "
-"the body that alternates in direction at the shedding frequency. That is why "
-"chimneys, bridge decks, heat-exchanger tubes, antennas and offshore risers can "
-"undergo destructive 'vortex-induced vibration' if the shedding frequency "
-"approaches a structural natural frequency, and why a wire 'sings' in the wind. "
-"The same instability draws the beautiful swirling cloud streets you see in "
-"satellite photos downwind of islands.\n\n"
-"The single dimensionless group that organises all of this is the Reynolds "
-"number, Re = U·D/ν — the ratio of inertial to viscous forces. Raise it (faster "
-"flow, bigger body, or thinner fluid) and the wake goes from steady, to "
-"periodic shedding, to fully turbulent. The shedding frequency itself collapses "
-"onto a near-constant Strouhal number St = f·D/U ≈ 0.2 over a wide range."),
+"Put any object in a steady stream and the flow has to go around it. Past a "
+"critical Reynolds number the boundary layers on the object's sides separate, "
+"form a pair of shear layers, and those layers become unstable: one rolls up "
+"into a vortex, grows until it pulls the opposite layer across the wake, sheds "
+"downstream, and the process repeats on the other side. The result is a "
+"staggered, periodic train of counter-rotating vortices — the von Kármán vortex "
+"street.\n\n"
+"Each shed vortex throws momentum sideways and pushes back on the body with a "
+"force that alternates at the shedding frequency. That is why chimneys, bridge "
+"decks, heat-exchanger tubes, antennas and offshore risers can suffer "
+"destructive 'vortex-induced vibration', why a wire sings in the wind, and why "
+"those swirling cloud streets trail downwind of islands. Swap the cylinder for a "
+"square, a sharp diamond, an angled airfoil (which also generates lift), or your "
+"own name, and you change where the flow separates — and so the whole wake.\n\n"
+"What ties it together is the Reynolds number, Re = U·D/ν, the ratio of inertial "
+"to viscous forces. Raise it and the wake goes steady → periodic shedding → "
+"turbulent; the shedding frequency collapses onto a near-constant Strouhal "
+"number St = f·D/U ≈ 0.2. Because lattice-Boltzmann treats the obstacle as just "
+"a set of 'solid' cells, ANY shape drops in with no mesh generation — the reason "
+"LBM is a workhorse for flow through geometrically complex media."),
 "terms": (
 "• fq — the population of fluid 'walkers' moving along lattice direction q\n"
 "• cq — the discrete velocity of direction q (one of 9 in D2Q9)\n"
@@ -38,28 +37,10 @@ DETAIL = {
 "• τ — the relaxation time; how fast populations relax toward equilibrium. It "
 "sets the viscosity through ν = (τ − ½)/3\n"
 "• left side — streaming: each population hops to the neighbouring cell\n"
-"• right side — collision: populations relax toward equilibrium"),
+"• right side — collision: populations relax toward equilibrium\n"
+"• the obstacle is just the cells flagged solid — a shape, or the pixels of your text"),
 },
-"Flow around your name (LBM)": {
-"physics": (
-"This is the very same physics as the vortex street — separation, shear layers "
-"and vortex shedding — but applied to a complicated obstacle: text. Every sharp "
-"corner of every letter is a separation point, so the wake is a superposition of "
-"many interacting shedding events, and the flow also threads through the narrow "
-"gaps between and inside the glyphs.\n\n"
-"It is included to make a serious point playfully. In most CFD methods, putting "
-"an arbitrary shape into the domain means generating a body-fitted mesh — often "
-"the hardest, most human-intensive part of a simulation. The lattice-Boltzmann "
-"method represents geometry as nothing more than a set of cells flagged 'solid', "
-"so any shape — text, a fractal, a scanned rock, a porous filter — drops in with "
-"no meshing at all. That is exactly why LBM is a method of choice for flow "
-"through geometrically complex media."),
-"terms": (
-"• fq, cq, fq^eq, τ — identical to the vortex-street exhibit (same D2Q9 solver)\n"
-"• the only change is which cells are flagged solid: here, the pixels of your text\n"
-"• bounce-back on those cells enforces a no-slip wall on every glyph edge"),
-},
-"Smoke plume (Navier–Stokes)": {
+"Rising Smoke": {
 "physics": (
 "Heat a parcel of fluid and it expands, becomes less dense than its "
 "surroundings, and is pushed upward by buoyancy — Archimedes' principle in a "
@@ -86,7 +67,7 @@ DETAIL = {
 "• f_b — the buoyancy body force, proportional to temperature/dye\n"
 "• ∇·u = 0 — incompressibility: the velocity field has no sources or sinks"),
 },
-"Rayleigh–Taylor (Navier–Stokes)": {
+"Mushroom Clouds": {
 "physics": (
 "Put a dense fluid on top of a lighter one in gravity and the configuration "
 "stores potential energy it 'wants' to release by overturning. It is unstable to "
@@ -108,7 +89,7 @@ DETAIL = {
 "down harder, which is the source of the instability\n"
 "• ρ here is an advected density field carried with the flow"),
 },
-"Explosion (Compressible)": {
+"Detonation": {
 "physics": (
 "When energy is released suddenly into a gas, the gas cannot get out of the way "
 "fast enough: it piles up into a shock wave — an almost discontinuous jump in "
@@ -135,7 +116,7 @@ DETAIL = {
 "• γ = 1.4 — the ratio of specific heats for air, closing the system via the "
 "ideal-gas energy relation"),
 },
-"Shock–bubble (Compressible)": {
+"Shockwave Strike": {
 "physics": (
 "A shock wave moving through air meets a bubble of a different (here lighter) "
 "gas. Two things happen. First, the shock travels faster in the light gas, so it "
@@ -158,7 +139,7 @@ DETAIL = {
 "low-density gas struck by an incoming post-shock state\n"
 "• baroclinic vorticity generation, ∝ ∇ρ×∇p, is what rolls the bubble up"),
 },
-"Dam break (SPH)": {
+"The Big Splash": {
 "physics": (
 "Hold back a column of water with a wall, remove the wall instantly, and gravity "
 "converts the column's potential energy into a fast horizontal surge. The front "
@@ -187,7 +168,7 @@ DETAIL = {
 "• Πij — Monaghan artificial viscosity, added for stability at shocks/impacts\n"
 "• g — gravity, the driving body force"),
 },
-"Kelvin–Helmholtz (Spectral)": {
+"Cloud Billows": {
 "physics": (
 "Whenever two fluid layers slide past each other at different velocities, the "
 "shear layer between them is unstable: a small wavy perturbation on the "

@@ -138,12 +138,15 @@ class Result:
             sch = render.schlieren(rho)
             img = render.field_to_rgb(sch, cm, 0.0, sv, upscale=1, gamma=0.7)
             if deb and h.get("mode") == "blast":
-                tau = fi / max(1, len(self.raw) - 1); Rs = Rmax * tau * 1.25
-                passed = Rs > dist; disp = np.where(passed, (Rs - dist) * push * 0.9, 0.0)
+                tau = fi / max(1, len(self.raw) - 1)
+                arrival = dist / (Rmax * 1.25)            # when the shock front reaches a particle
+                since = tau - arrival
+                disp = np.where(since > 0, since * Rmax * 1.25 * push * 0.7, 0.0)
                 px = bx + np.cos(ang) * disp; py = by + np.sin(ang) * disp; iy = ny - 1 - py
+                heat = np.clip(np.where(since > 0, np.exp(-2.2 * since), 0.12), 0.08, 1.0)
+                size = 1.0 + 1.8 * heat
                 keep = (px > 1) & (px < nx - 1) & (iy > 1) & (iy < ny - 1)
-                img = render.overlay_particles(img, px[keep], iy[keep],
-                                               np.where(passed[keep], 1.9, 1.0))
+                img = render.overlay_particles(img, px[keep], iy[keep], size[keep], heat[keep])
             out.append(render.add_colorbar(img, cm, 0, sv, "|∇ρ|"))
         return out
 
@@ -199,40 +202,36 @@ _H = {
 
 
 # ---------- runners (SOLVE → raw fields) ----------
-def _solve_vortex(p, pr, tmp):
-    s = _res(p); nx, ny = int(820 * s), int(260 * s)
-    D = int(p["diameter"] * s); Re = float(p["reynolds"]); U = float(p["speed"])
-    tau = 0.5 + 3 * (U * D / Re); steps = int(42000 * _durv(p))
-    _ensure(_bin("lbm", "lbm2d"))
-    mask = geometry.cylinder(nx, ny, nx // 4, ny // 2 + 2, D / 2)
+def _solve_windtunnel(p, pr, tmp):
+    s = _res(p); nx, ny = int(900 * s), int(300 * s)
+    Re = float(p["reynolds"]); U = float(p["speed"]); obs = p["obstacle"]
+    cx, cy = nx // 4, ny // 2 + 2
+    D = max(8.0, ny * float(p["size"]))                     # characteristic length
+    if obs == "Your text":
+        mask = geometry.text(nx, ny, p["text"], font_frac=0.34, x_frac=0.28, max_w_frac=0.5)
+        D = ny * 0.34; probe = int(nx * 0.6)
+    elif obs == "Square":
+        mask = geometry.square(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
+    elif obs == "Diamond":
+        mask = geometry.diamond(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
+    elif obs == "Airfoil":
+        mask = geometry.airfoil(nx, ny, cx, cy, chord=D * 2.6, aoa_deg=float(p["angle"]))
+        probe = cx + int(3 * D)
+    else:                                                   # Cylinder
+        mask = geometry.cylinder(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
+    tau = 0.5 + 3 * (U * D / Re)
     geometry.save_mask(mask, Path(tmp) / "m.bin")
-    pr(f"LBM cylinder {nx}×{ny}, Re={Re:.0f}, {steps} steps…")
+    _ensure(_bin("lbm", "lbm2d"))
+    steps = int(44000 * _durv(p))
+    pr(f"LBM wind tunnel · {obs} · {nx}×{ny}, Re={Re:.0f}, {steps} steps…")
     subprocess.run([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
                     "--mask", str(Path(tmp) / "m.bin"), "--U", str(U), "--tau", f"{tau:.5f}",
                     "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
-                    "--out", tmp, "--probe_x", str(nx // 4 + 3 * D), "--probe_y", str(ny // 2)],
-                   check=True)
+                    "--out", tmp, "--probe_x", str(min(probe, nx - 2)), "--probe_y", str(ny // 2)],
+                   check=True, env=_ENV)
     n = _nframes(tmp); use = range(n // 5, n, max(1, (n - n // 5) // 90))
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
-    return Result("lbm", raw, f"vortex street  Re={Re:.0f}  {nx}×{ny}", mask=mask)
-
-
-def _solve_text(p, pr, tmp):
-    s = _res(p); nx, ny = int(900 * s), int(330 * s)
-    Re = float(p["reynolds"]); U = float(p["speed"]); tau = 0.5 + 3 * (U * (ny * 0.5) / Re)
-    steps = int(46000 * _durv(p))
-    _ensure(_bin("lbm", "lbm2d"))
-    mask = geometry.text(nx, ny, p["text"], font_frac=float(p["font"]), x_frac=0.28, max_w_frac=0.5)
-    geometry.save_mask(mask, Path(tmp) / "m.bin")
-    pr(f"LBM text '{p['text']}' {nx}×{ny}, {steps} steps…")
-    subprocess.run([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
-                    "--mask", str(Path(tmp) / "m.bin"), "--U", str(U), "--tau", f"{tau:.5f}",
-                    "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
-                    "--out", tmp, "--probe_x", str(int(nx * 0.6)), "--probe_y", str(ny // 2)],
-                   check=True)
-    n = _nframes(tmp); use = range(n // 5, n, max(1, (n - n // 5) // 90))
-    raw = [_read_vel(tmp, i, nx, ny) for i in use]
-    return Result("lbm", raw, f"flow around '{p['text']}'  {nx}×{ny}", mask=mask)
+    return Result("lbm", raw, f"wind tunnel · {obs} · Re={Re:.0f} · {nx}×{ny}", mask=mask)
 
 
 def _solve_ns(mode, p, pr, tmp):
@@ -309,23 +308,23 @@ def _solve_spectral(p, pr, tmp):
 
 
 EXHIBITS = {
-    "Vortex street (LBM)": {
-        "params": [_f("reynolds", "Reynolds number", 160, 60, 1000, "Physics", _H["Re"]),
+    "Wind Tunnel": {
+        "params": [{"name": "obstacle", "label": "Obstacle", "type": "choice", "group": "Geometry",
+                    "choices": ["Cylinder", "Square", "Diamond", "Airfoil", "Your text"],
+                    "default": "Cylinder",
+                    "help": "What to drop into the stream — a shape, or your own text."},
+                   {"name": "text", "label": "Your text", "type": "str", "default": "FlowZoo",
+                    "group": "Geometry", "help": "Used when Obstacle = 'Your text'. Short words read best."},
+                   _f("size", "Obstacle size (frac.)", 0.13, 0.05, 0.30, "Geometry",
+                      "Obstacle size as a fraction of the channel height. Bigger → larger, "
+                      "slower-shedding wake."),
+                   _f("angle", "Airfoil angle (°)", 12, 0, 25, "Geometry",
+                      "Angle of attack for the Airfoil obstacle (degrees) — ignored otherwise."),
+                   _f("reynolds", "Reynolds number", 160, 60, 1200, "Physics", _H["Re"]),
                    _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"]),
-                   _f("diameter", "Cylinder diameter (cells)", 34, 12, 70, "Geometry",
-                      "Cylinder size. Larger obstacle → larger, slower-shedding wake."),
                    P_RES(), P_DUR()],
-        "solve": lambda p, pr, t: _solve_vortex(p, pr, t)},
-    "Flow around your name (LBM)": {
-        "params": [{"name": "text", "label": "Text", "type": "str", "default": "FlowZoo",
-                    "group": "Geometry", "help": "The word(s) the flow sheds vortices off."},
-                   _f("font", "Letter size (frac.)", 0.34, 0.15, 0.6, "Geometry",
-                      "Letter height as a fraction of the domain height."),
-                   _f("reynolds", "Reynolds number", 600, 150, 1500, "Physics", _H["Re"]),
-                   _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"]),
-                   P_RES(), P_DUR()],
-        "solve": lambda p, pr, t: _solve_text(p, pr, t)},
-    "Smoke plume (Navier–Stokes)": {
+        "solve": lambda p, pr, t: _solve_windtunnel(p, pr, t)},
+    "Rising Smoke": {
         "params": [_f("buoyancy", "Buoyancy", 2.5e-3, 5e-4, 6e-3, "Physics", _H["buoy"]),
                    _f("confinement", "Vorticity confinement", 8, 0, 20, "Physics", _H["conf"]),
                    _f("viscosity", "Viscosity", 8e-5, 0, 5e-4, "Physics", _H["visc"]),
@@ -333,14 +332,14 @@ EXHIBITS = {
                       "Width of the hot source at the floor."),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("smoke", p, pr, t)},
-    "Rayleigh–Taylor (Navier–Stokes)": {
+    "Mushroom Clouds": {
         "params": [_f("gravity", "Gravity", 1.2e-3, 4e-4, 3e-3, "Physics", _H["grav"]),
                    _f("viscosity", "Viscosity", 1.5e-4, 3e-5, 5e-4, "Physics", _H["visc"]),
                    _f("perturbation", "Interface ripple (×)", 1.0, 0.2, 3.0, "Physics",
                       "Amplitude of the initial interface ripple that seeds the fingers."),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("rt", p, pr, t)},
-    "Explosion (Compressible)": {
+    "Detonation": {
         "params": [_f("pressure", "Blast pressure", 10.0, 2.0, 40.0, "Physics",
                       "Pressure inside the charge. Higher → a stronger, faster shock."),
                    _f("charge", "Charge size (frac.)", 0.06, 0.02, 0.18, "Geometry",
@@ -350,12 +349,12 @@ EXHIBITS = {
                       "blast (visual only)."),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("blast", p, pr, t)},
-    "Shock–bubble (Compressible)": {
+    "Shockwave Strike": {
         "params": [_f("bubble", "Bubble size (frac.)", 0.18, 0.08, 0.32, "Geometry",
                       "Light-gas bubble radius as a fraction of the domain height."),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("bubble", p, pr, t)},
-    "Dam break (SPH)": {
+    "The Big Splash": {
         "params": [_f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry", "Initial column width."),
                    _f("height", "Dam height (m)", 2.0, 0.6, 3.0, "Geometry", "Initial column height."),
                    _f("particles", "Particles (≈)", 3000, 600, 12000, "Geometry",
@@ -364,7 +363,7 @@ EXHIBITS = {
                       "Gravitational acceleration pulling the column down."),
                    P_DUR()],
         "solve": lambda p, pr, t: _solve_dam(p, pr, t)},
-    "Kelvin–Helmholtz (Spectral)": {
+    "Cloud Billows": {
         "params": [_f("viscosity", "Viscosity", 8e-5, 1e-5, 4e-4, "Physics", _H["visc"]),
                    _f("perturbation", "Shear perturbation", 0.05, 0.005, 0.2, "Physics",
                       "Strength of the initial shear-layer kick that seeds the billows."),
@@ -376,45 +375,27 @@ _LBM_EQ = r"$f_q(\mathbf{x}+\mathbf{c}_q,\,t{+}1)=f_q(\mathbf{x},t)-\dfrac{1}{\t
 _EULER_EQ = r"$\partial_t\mathbf{U}+\nabla\!\cdot\!\mathbf{F}(\mathbf{U})=0,\quad \mathbf{U}=[\rho,\ \rho u,\ \rho v,\ E]$"
 
 META = {
-    "Vortex street (LBM)": {"method": "Lattice Boltzmann · D2Q9",
-        "blurb": "When a steady stream flows past a blunt body above a critical Reynolds "
-                 "number (about 47 for a cylinder), the wake becomes unstable and sheds "
-                 "vortices alternately from each side — the famous von Kármán vortex street. "
-                 "You see it in the swirling cloud trails downwind of islands, in the "
-                 "'singing' of wind over wires, and in the oscillating side-forces that can "
-                 "shake chimneys, bridge decks and offshore risers. Here a uniform inflow "
-                 "passes a fixed cylinder; a brief startup gust breaks the symmetry and the "
-                 "periodic shedding then sustains itself indefinitely.",
+    "Wind Tunnel": {"method": "Flow past an obstacle · Lattice-Boltzmann (D2Q9)",
+        "blurb": "Drop something into a steady stream and watch the wake. Past a critical "
+                 "Reynolds number the flow can no longer stay attached: it separates, sheds "
+                 "vortices alternately from each side, and trails the famous von Kármán "
+                 "vortex street — the same wake that sings in wires and shakes chimneys, "
+                 "bridge decks and offshore risers. Choose a cylinder, a square, a diamond, "
+                 "an angled airfoil, or even your own name, and see how the shape rewrites "
+                 "the wake.",
         "eq": _LBM_EQ,
         "numerics": "Solved with a D2Q9 lattice-Boltzmann method: nine discrete velocities "
                     "per cell, a single-relaxation-time (BGK) collision toward the local "
                     "equilibrium, and a streaming step that shifts populations to neighbours. "
-                    "The cylinder is imposed by half-way bounce-back (populations reflect off "
-                    "solid cells, giving a no-slip wall); the domain has a velocity inlet, an "
-                    "open outflow, and periodic top/bottom edges. The relaxation time τ sets "
-                    "the kinematic viscosity through ν = (τ − ½)/3, hence the Reynolds number.",
-        "validation": "The dimensionless shedding frequency, the Strouhal number St = fD/U, "
-                       "comes out ≈ 0.20 at Re ≈ 160 — matching the long-established "
-                       "experimental value of about 0.2 across Re ≈ 100–300.",
-        "demo": "results/vortex_street.gif"},
-    "Flow around your name (LBM)": {"method": "Lattice Boltzmann · D2Q9",
-        "blurb": "Exactly the same kinetic solver as the vortex street, but the obstacle is "
-                 "any text you type. Because lattice-Boltzmann represents geometry simply as "
-                 "a set of 'solid' cells, it handles arbitrarily complicated shapes for free "
-                 "— no mesh generation required. The flow squeezes through the gaps in the "
-                 "letters, separates at every sharp corner, and trails an intricate wake of "
-                 "vortices shed from the glyphs. It is a playful demonstration of a serious "
-                 "strength: LBM is a method of choice for flow through complex porous and "
-                 "patterned geometries.",
-        "eq": _LBM_EQ,
-        "numerics": "The text is rasterised to a binary mask and every glyph cell becomes a "
-                    "bounce-back solid, identical in treatment to the cylinder. Same D2Q9 "
-                    "BGK scheme, velocity inlet, open outflow and periodic transverse edges; "
-                    "viscosity again from ν = (τ − ½)/3.",
-        "validation": "Inherits the validated D2Q9 solver (Strouhal St ≈ 0.2 on the cylinder "
-                       "benchmark); the only change is the obstacle mask.",
+                    "The obstacle — any shape or text — is simply a set of cells flagged solid "
+                    "and handled by half-way bounce-back (a no-slip wall), so no mesh is ever "
+                    "generated. Velocity inlet, open outflow, periodic top/bottom; the "
+                    "relaxation time τ sets the viscosity via ν = (τ − ½)/3, hence the Reynolds number.",
+        "validation": "The dimensionless shedding frequency — the Strouhal number St = fD/U — "
+                       "comes out ≈ 0.20 for a cylinder at Re ≈ 160, matching the long-"
+                       "established experimental value of about 0.2 across Re ≈ 100–300.",
         "demo": "results/flow_around_flowzoo.gif"},
-    "Smoke plume (Navier–Stokes)": {"method": "Incompressible Navier–Stokes · projection",
+    "Rising Smoke": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "A continuous source of hot, dyed fluid is injected at the floor. Because it "
                  "is lighter than its surroundings, buoyancy drives it upward; as it rises it "
                  "shears against the still air, rolls up into vortices, and breaks into the "
@@ -431,7 +412,7 @@ META = {
                        "tolerance each step; buoyant transport stays stable and the plume "
                        "develops the expected shear roll-up.",
         "demo": "results/smoke_plume.gif"},
-    "Rayleigh–Taylor (Navier–Stokes)": {"method": "Incompressible Navier–Stokes · projection",
+    "Mushroom Clouds": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "Place a heavy fluid on top of a lighter one in a gravitational field and "
                  "the arrangement is unstable: the tiniest ripple on the interface grows, the "
                  "heavy fluid sinks in falling spikes while the light fluid rises in bubbles, "
@@ -446,7 +427,7 @@ META = {
         "validation": "Reproduces the characteristic spike-and-bubble mushroom roll-up; the "
                        "finger growth scales with gravity and is damped by viscosity as theory predicts.",
         "demo": "results/rayleigh_taylor.gif"},
-    "Explosion (Compressible)": {"method": "Compressible Euler · finite-volume HLLC",
+    "Detonation": {"method": "Compressible Euler · finite-volume HLLC",
         "blurb": "A small region of very high pressure is released into ambient gas. It "
                  "bursts outward as a near-circular shock wave — a thin front across which "
                  "density, pressure and velocity jump almost discontinuously — trailed by an "
@@ -464,7 +445,7 @@ META = {
                        "solution to a mean density error of ≈ 0.002 — capturing the "
                        "rarefaction, contact and shock crisply.",
         "demo": "results/explosion.gif"},
-    "Shock–bubble (Compressible)": {"method": "Compressible Euler · finite-volume HLLC",
+    "Shockwave Strike": {"method": "Compressible Euler · finite-volume HLLC",
         "blurb": "A planar shock wave travels through air and strikes a bubble of lighter "
                  "gas. Because the shock speeds up in the light gas, it bends and focuses, "
                  "and the misalignment of pressure and density gradients deposits vorticity "
@@ -478,7 +459,7 @@ META = {
         "validation": "Uses the same HLLC solver validated against the exact Sod shock tube "
                        "(mean density error ≈ 0.002).",
         "demo": "results/shock_bubble.gif"},
-    "Dam break (SPH)": {"method": "Smoothed-Particle Hydrodynamics",
+    "The Big Splash": {"method": "Smoothed-Particle Hydrodynamics",
         "blurb": "A column of water is held behind a wall that is suddenly removed; the "
                  "water collapses under gravity and surges across the floor, runs up the far "
                  "wall and overturns in a breaking splash. The dam break is the classic "
@@ -495,7 +476,7 @@ META = {
                        "of the frictionless Ritter dry-bed limit 2√(gH) — the column must "
                        "first collapse vertically, so the real front lags that ideal bound.",
         "demo": "results/dam_break.gif"},
-    "Kelvin–Helmholtz (Spectral)": {"method": "Pseudo-spectral · FFT",
+    "Cloud Billows": {"method": "Pseudo-spectral · FFT",
         "blurb": "Two fluid streams sliding past each other at different speeds form an "
                  "unstable shear layer: ripples on the interface grow and roll up into a row "
                  "of spiral 'billows' that pair and merge, cascading toward two-dimensional "
