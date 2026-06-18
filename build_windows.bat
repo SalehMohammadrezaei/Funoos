@@ -25,7 +25,8 @@ echo === [3/3] Bundling the app with PyInstaller ===
 set FF=
 if exist bin\ffmpeg.exe set FF=--add-binary "bin\ffmpeg.exe;."
 pyinstaller --noconfirm --onedir --windowed --name FlowZooStudio ^
-  --add-data "solvers;solvers" %FF% studio.py || goto :err
+  --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" ^
+  %FF% studio.py || goto :err
 
 echo.
 echo === SUCCESS ===

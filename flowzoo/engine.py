@@ -369,59 +369,144 @@ EXHIBITS = {
         "solve": lambda p, pr, t: _solve_spectral(p, pr, t)},
 }
 
+_LBM_EQ = r"$f_q(\mathbf{x}+\mathbf{c}_q,\,t{+}1)=f_q(\mathbf{x},t)-\dfrac{1}{\tau}\,(f_q-f_q^{\rm eq})$"
+_EULER_EQ = r"$\partial_t\mathbf{U}+\nabla\!\cdot\!\mathbf{F}(\mathbf{U})=0,\quad \mathbf{U}=[\rho,\ \rho u,\ \rho v,\ E]$"
+
 META = {
     "Vortex street (LBM)": {"method": "Lattice Boltzmann · D2Q9",
-        "blurb": "Flow past a cylinder sheds a periodic train of alternating vortices — the "
-                 "wake behind bridge piers and downwind of islands.",
-        "eq": r"$f_q(\mathbf{x}+\mathbf{c}_q,\,t{+}1)=f_q-\dfrac{1}{\tau}\,(f_q-f_q^{\rm eq})$",
-        "numerics": "D2Q9 lattice, BGK collision, half-way bounce-back on the obstacle, "
-                    "periodic transverse boundaries; viscosity ν=(τ−½)/3.",
-        "validation": "Strouhal number St ≈ 0.20 at Re ≈ 160 (matches the textbook value).",
+        "blurb": "When a steady stream flows past a blunt body above a critical Reynolds "
+                 "number (about 47 for a cylinder), the wake becomes unstable and sheds "
+                 "vortices alternately from each side — the famous von Kármán vortex street. "
+                 "You see it in the swirling cloud trails downwind of islands, in the "
+                 "'singing' of wind over wires, and in the oscillating side-forces that can "
+                 "shake chimneys, bridge decks and offshore risers. Here a uniform inflow "
+                 "passes a fixed cylinder; a brief startup gust breaks the symmetry and the "
+                 "periodic shedding then sustains itself indefinitely.",
+        "eq": _LBM_EQ,
+        "numerics": "Solved with a D2Q9 lattice-Boltzmann method: nine discrete velocities "
+                    "per cell, a single-relaxation-time (BGK) collision toward the local "
+                    "equilibrium, and a streaming step that shifts populations to neighbours. "
+                    "The cylinder is imposed by half-way bounce-back (populations reflect off "
+                    "solid cells, giving a no-slip wall); the domain has a velocity inlet, an "
+                    "open outflow, and periodic top/bottom edges. The relaxation time τ sets "
+                    "the kinematic viscosity through ν = (τ − ½)/3, hence the Reynolds number.",
+        "validation": "The dimensionless shedding frequency, the Strouhal number St = fD/U, "
+                       "comes out ≈ 0.20 at Re ≈ 160 — matching the long-established "
+                       "experimental value of about 0.2 across Re ≈ 100–300.",
         "demo": "results/vortex_street.gif"},
     "Flow around your name (LBM)": {"method": "Lattice Boltzmann · D2Q9",
-        "blurb": "The same kinetic solver, but the obstacle is text you type — vortices peel "
-                 "off the letters. LBM handles arbitrary geometry for free.",
-        "eq": r"$f_q(\mathbf{x}+\mathbf{c}_q,\,t{+}1)=f_q-\dfrac{1}{\tau}\,(f_q-f_q^{\rm eq})$",
-        "numerics": "Text is rasterized to a solid mask; bounce-back applies on every glyph cell.",
-        "validation": "Inherits the validated D2Q9 solver (St ≈ 0.2 on a cylinder).",
+        "blurb": "Exactly the same kinetic solver as the vortex street, but the obstacle is "
+                 "any text you type. Because lattice-Boltzmann represents geometry simply as "
+                 "a set of 'solid' cells, it handles arbitrarily complicated shapes for free "
+                 "— no mesh generation required. The flow squeezes through the gaps in the "
+                 "letters, separates at every sharp corner, and trails an intricate wake of "
+                 "vortices shed from the glyphs. It is a playful demonstration of a serious "
+                 "strength: LBM is a method of choice for flow through complex porous and "
+                 "patterned geometries.",
+        "eq": _LBM_EQ,
+        "numerics": "The text is rasterised to a binary mask and every glyph cell becomes a "
+                    "bounce-back solid, identical in treatment to the cylinder. Same D2Q9 "
+                    "BGK scheme, velocity inlet, open outflow and periodic transverse edges; "
+                    "viscosity again from ν = (τ − ½)/3.",
+        "validation": "Inherits the validated D2Q9 solver (Strouhal St ≈ 0.2 on the cylinder "
+                       "benchmark); the only change is the obstacle mask.",
         "demo": "results/flow_around_flowzoo.gif"},
     "Smoke plume (Navier–Stokes)": {"method": "Incompressible Navier–Stokes · projection",
-        "blurb": "A hot, dyed source rises into a swirling buoyant plume.",
-        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\cdot\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}+\mathbf{f},\ \ \nabla\cdot\mathbf{u}=0$",
-        "numerics": "Semi-Lagrangian advection, red-black SOR pressure projection, Boussinesq "
-                    "buoyancy, vorticity confinement.",
-        "validation": "Divergence-free to the projection tolerance; stable buoyant transport.",
+        "blurb": "A continuous source of hot, dyed fluid is injected at the floor. Because it "
+                 "is lighter than its surroundings, buoyancy drives it upward; as it rises it "
+                 "shears against the still air, rolls up into vortices, and breaks into the "
+                 "turbulent, billowing column we recognise as smoke. This is the canonical "
+                 "buoyancy-driven incompressible flow, and the same machinery underlies "
+                 "visual-effects smoke, plume dispersion and indoor-air modelling.",
+        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\!\cdot\!\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}+\mathbf{f}_b,\quad \nabla\!\cdot\!\mathbf{u}=0$",
+        "numerics": "A projection ('stable fluids') method: unconditionally-stable "
+                    "semi-Lagrangian advection, a red-black Gauss–Seidel SOR solve of the "
+                    "pressure-Poisson equation to enforce ∇·u = 0, a Boussinesq buoyancy "
+                    "force proportional to the transported temperature/dye, and vorticity "
+                    "confinement that re-injects the fine swirls numerical diffusion erodes.",
+        "validation": "The velocity field is kept divergence-free to the projection "
+                       "tolerance each step; buoyant transport stays stable and the plume "
+                       "develops the expected shear roll-up.",
         "demo": "results/smoke_plume.gif"},
     "Rayleigh–Taylor (Navier–Stokes)": {"method": "Incompressible Navier–Stokes · projection",
-        "blurb": "Heavy fluid over light under gravity rolls into mushroom-cap plumes.",
-        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\cdot\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}-g\,\rho\,\hat{\mathbf{y}}$",
-        "numerics": "Same projection solver; a density scalar drives the buoyancy term.",
-        "validation": "Characteristic mushroom roll-up; growth set by gravity & viscosity.",
+        "blurb": "Place a heavy fluid on top of a lighter one in a gravitational field and "
+                 "the arrangement is unstable: the tiniest ripple on the interface grows, the "
+                 "heavy fluid sinks in falling spikes while the light fluid rises in bubbles, "
+                 "and each finger curls into the classic mushroom cap. The Rayleigh–Taylor "
+                 "instability governs phenomena from supernova remnants and inertial-"
+                 "confinement fusion to salt domes and atmospheric mixing.",
+        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\!\cdot\!\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}-g\,\rho\,\hat{\mathbf{y}},\quad \nabla\!\cdot\!\mathbf{u}=0$",
+        "numerics": "The same incompressible projection solver, with an advected density "
+                    "field whose weight drives the gravitational body force. The interface is "
+                    "seeded with a small multi-mode ripple; growth rate is controlled by the "
+                    "gravity and viscosity you set.",
+        "validation": "Reproduces the characteristic spike-and-bubble mushroom roll-up; the "
+                       "finger growth scales with gravity and is damped by viscosity as theory predicts.",
         "demo": "results/rayleigh_taylor.gif"},
     "Explosion (Compressible)": {"method": "Compressible Euler · finite-volume HLLC",
-        "blurb": "A high-pressure charge bursts into ambient gas, launching an expanding shock.",
-        "eq": r"$\partial_t\mathbf{U}+\nabla\!\cdot\!\mathbf{F}(\mathbf{U})=0,\ \ \mathbf{U}=[\rho,\rho u,\rho v,E]$",
-        "numerics": "MUSCL reconstruction + minmod limiter, HLLC Riemann solver, SSP-RK2, γ=1.4.",
-        "validation": "Same solver matches the exact Sod shock tube to ~0.002 mean error.",
+        "blurb": "A small region of very high pressure is released into ambient gas. It "
+                 "bursts outward as a near-circular shock wave — a thin front across which "
+                 "density, pressure and velocity jump almost discontinuously — trailed by an "
+                 "expansion that leaves a low-density cavity behind. This is the textbook "
+                 "blast-wave problem at the heart of explosion safety, astrophysical "
+                 "shockwaves and supersonic aerodynamics; here glowing debris is scattered "
+                 "through the domain and swept up as the front passes.",
+        "eq": _EULER_EQ,
+        "numerics": "A finite-volume solver for the compressible Euler equations: "
+                    "piecewise-linear MUSCL reconstruction with a minmod slope limiter, an "
+                    "HLLC approximate Riemann solver at each cell face, and a two-stage "
+                    "strong-stability-preserving Runge–Kutta time step under a CFL condition "
+                    "(γ = 1.4). Schlieren imaging shows |∇ρ|, lighting up the shock fronts.",
+        "validation": "The identical solver reproduces the exact Sod shock-tube Riemann "
+                       "solution to a mean density error of ≈ 0.002 — capturing the "
+                       "rarefaction, contact and shock crisply.",
         "demo": "results/explosion.gif"},
     "Shock–bubble (Compressible)": {"method": "Compressible Euler · finite-volume HLLC",
-        "blurb": "A planar shock rolls a light-gas bubble into a vortex pair (Richtmyer–Meshkov).",
-        "eq": r"$\partial_t\mathbf{U}+\nabla\!\cdot\!\mathbf{F}(\mathbf{U})=0,\ \ \mathbf{U}=[\rho,\rho u,\rho v,E]$",
-        "numerics": "MUSCL+HLLC; a low-density circular bubble in a post-shock inflow.",
-        "validation": "Same HLLC solver validated on the exact Sod solution.",
+        "blurb": "A planar shock wave travels through air and strikes a bubble of lighter "
+                 "gas. Because the shock speeds up in the light gas, it bends and focuses, "
+                 "and the misalignment of pressure and density gradients deposits vorticity "
+                 "on the interface (the baroclinic mechanism) — rolling the bubble up into a "
+                 "vortex pair. This shock-bubble / Richtmyer–Meshkov interaction is a key "
+                 "model problem for supersonic mixing and inertial-confinement fusion.",
+        "eq": _EULER_EQ,
+        "numerics": "Same compressible finite-volume scheme (MUSCL + minmod, HLLC Riemann "
+                    "solver, SSP-RK2, γ = 1.4). The setup is a low-density circular bubble in "
+                    "still air, struck by an inflowing post-shock state from the left.",
+        "validation": "Uses the same HLLC solver validated against the exact Sod shock tube "
+                       "(mean density error ≈ 0.002).",
         "demo": "results/shock_bubble.gif"},
     "Dam break (SPH)": {"method": "Smoothed-Particle Hydrodynamics",
-        "blurb": "A water column collapses and surges across a tank — meshfree, particle-based.",
-        "eq": r"$\dfrac{D\mathbf{v}_i}{Dt}=-\sum_j m_j\!\left(\dfrac{p_i}{\rho_i^2}+\dfrac{p_j}{\rho_j^2}\right)\nabla W_{ij}+\mathbf{g}$",
-        "numerics": "Weakly-compressible SPH, cubic-spline kernel, Tait EOS (p≥0), Monaghan "
-                    "artificial viscosity, grid neighbor search.",
-        "validation": "Surge-front speed in the physical range of the Ritter dry-bed limit.",
+        "blurb": "A column of water is held behind a wall that is suddenly removed; the "
+                 "water collapses under gravity and surges across the floor, runs up the far "
+                 "wall and overturns in a breaking splash. The dam break is the classic "
+                 "violent free-surface flow and a standard benchmark for marine, coastal and "
+                 "flood simulation. It is solved here with a fully meshfree, particle method "
+                 "— the fluid is a cloud of moving particles, with no grid at all.",
+        "eq": r"$\dfrac{D\mathbf{v}_i}{Dt}=-\sum_j m_j\!\left(\dfrac{p_i}{\rho_i^2}+\dfrac{p_j}{\rho_j^2}+\Pi_{ij}\right)\nabla W_{ij}+\mathbf{g}$",
+        "numerics": "Weakly-compressible SPH: each particle carries mass and velocity; "
+                    "density and forces are smoothed sums over neighbours using a cubic-"
+                    "spline kernel. Pressure follows a stiff Tait equation of state (clamped "
+                    "≥ 0 to avoid the free-surface tensile instability), with Monaghan "
+                    "artificial viscosity and a uniform background grid for fast neighbour search.",
+        "validation": "The leading surge-front advances at a speed within the physical range "
+                       "of the frictionless Ritter dry-bed limit 2√(gH) — the column must "
+                       "first collapse vertically, so the real front lags that ideal bound.",
         "demo": "results/dam_break.gif"},
     "Kelvin–Helmholtz (Spectral)": {"method": "Pseudo-spectral · FFT",
-        "blurb": "A shear layer rolls up into billows cascading toward 2D turbulence.",
-        "eq": r"$\partial_t\omega+(\mathbf{u}\cdot\nabla)\omega=\nu\nabla^2\omega,\ \ \nabla^2\psi=-\omega$",
-        "numerics": "Vorticity–streamfunction form, 2/3-rule dealiasing, RK4 time stepping.",
-        "validation": "Inviscid energy conserved to ≈ 1.5×10⁻⁷ — the spectral-accuracy signature.",
+        "blurb": "Two fluid streams sliding past each other at different speeds form an "
+                 "unstable shear layer: ripples on the interface grow and roll up into a row "
+                 "of spiral 'billows' that pair and merge, cascading toward two-dimensional "
+                 "turbulence. The Kelvin–Helmholtz instability paints the billow clouds in "
+                 "the sky, the bands of Jupiter, and the mixing layers in oceans and "
+                 "engines. It is solved here with a high-accuracy spectral method.",
+        "eq": r"$\partial_t\omega+(\mathbf{u}\!\cdot\!\nabla)\omega=\nu\nabla^2\omega,\qquad \nabla^2\psi=-\omega$",
+        "numerics": "A pseudo-spectral vorticity–streamfunction formulation on a periodic "
+                    "box: every spatial derivative is taken in Fourier space via the FFT, the "
+                    "nonlinear advection term is formed in physical space with 2/3-rule "
+                    "dealiasing, and time advances with classical fourth-order Runge–Kutta "
+                    "(stable for the advection operator's imaginary eigenvalues).",
+        "validation": "With viscosity switched off the scheme conserves kinetic energy to "
+                       "≈ 1.5×10⁻⁷ over hundreds of steps — the hallmark of spectral accuracy.",
         "demo": "results/turbulence.gif"},
 }
 

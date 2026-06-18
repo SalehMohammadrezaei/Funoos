@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
 sys.path.insert(0, str(ROOT))
 from flowzoo import engine, render
 
@@ -218,12 +218,17 @@ class App:
         self.g_num.config(text=m.get("numerics", ""))
         self.g_val.config(text="✓  " + m.get("validation", ""))
         eqp = ROOT / "docs" / "eq" / (slug(name) + ".png")
-        if eqp.exists():
-            im = Image.open(eqp); im = im.resize((min(560, im.width), int(im.height * min(560, im.width) / im.width)))
-            self._eqimg = ImageTk.PhotoImage(im); self.g_eq.config(image=self._eqimg)
-        else:
-            self.g_eq.config(image="", text="")
+        try:
+            im = Image.open(eqp)
+            w = min(580, im.width); im = im.resize((w, int(im.height * w / im.width)))
+            self._eqimg = ImageTk.PhotoImage(im)
+            self.g_eq.config(image=self._eqimg, text="")
+        except Exception:
+            self.g_eq.config(image="", text="(equation image not found)", fg=MUTED, font=(FONT, 11))
         self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=560); self.gidx = 0
+        if not self.gframes:
+            self.g_demo.config(image="", text="  (demo clip not found — open it in Studio and "
+                               "press Run)  ", fg=MUTED, font=(FONT, 11))
         if hasattr(self, "exhibit"):
             self.exhibit.set(name)
 
@@ -341,13 +346,17 @@ class App:
         self.prog.pack(fill="x", pady=(2, 4)); self.prog.start(12)
         name = self.sel
 
+        self.viewcache = {}
+
         def work():
             try:
                 res = engine.solve_exhibit(name, params, progress=lambda s: self.q.put(("status", s)))
                 self.q.put(("solved", res))
-                self.q.put(("status", "rendering visualization…"))
-                frames = res.render(res.views[0], engine.DEFCMAP[res.kind])
-                self.q.put(("done", (frames, res.info)))
+                cm = engine.DEFCMAP[res.kind]; cache = {}
+                for v in res.views:                       # pre-render EVERY view → instant switching
+                    self.q.put(("status", f"rendering {v}…"))
+                    cache[v] = res.render(v, cm)
+                self.q.put(("cached", (cache, res.views[0], res.info)))
             except Exception as ex:  # pragma: no cover
                 self.q.put(("error", str(ex)))
         threading.Thread(target=work, daemon=True).start()
@@ -367,7 +376,7 @@ class App:
         self.cmap.set(engine.DEFCMAP[res.kind])
         cmb = ttk.Combobox(self.viewbar, textvariable=self.cmap, state="readonly",
                            values=list(render.COLORMAPS), width=16, font=(FONT, 9))
-        cmb.pack(side="left"); cmb.bind("<<ComboboxSelected>>", lambda *_: self._rerender())
+        cmb.pack(side="left"); cmb.bind("<<ComboboxSelected>>", lambda *_: self._recolor())
         self.playbtn = tk.Button(self.viewbar, text="⏸ Pause", bg=CARD2, fg=FG, relief="flat", bd=0,
                                  padx=12, pady=5, font=(FONT, 9, "bold"), activebackground="#33405a",
                                  command=self._toggle_play)
@@ -380,22 +389,28 @@ class App:
             b.config(bg=ACCENT if on else CARD, fg="white" if on else FG)
 
     def _change_view(self, v):
-        self.view.set(v); self._hl_view(); self._rerender()
+        self.view.set(v); self._hl_view()
+        if v in self.viewcache:                  # instant — already rendered
+            self.frames = self.viewcache[v]; self.pidx = 0; self.playing = True
 
     def _toggle_play(self):
         self.playing = not self.playing
         self.playbtn.config(text="⏸ Pause" if self.playing else "▶ Play")
 
-    def _rerender(self):
+    def _recolor(self):
+        """Re-render all views with the newly chosen palette (cached again)."""
         if not self.result or self.busy:
             return
         self.busy = True; self.run_btn.config(state="disabled")
         self.prog.pack(fill="x", pady=(2, 4)); self.prog.start(12)
-        v, c = self.view.get(), self.cmap.get()
+        res, c = self.result, self.cmap.get()
 
         def work():
             try:
-                self.q.put(("rendered", self.result.render(v, c)))
+                cache = {}
+                for v in res.views:
+                    self.q.put(("status", f"recoloring {v}…")); cache[v] = res.render(v, c)
+                self.q.put(("cached", (cache, self.view.get(), res.info)))
             except Exception as ex:  # pragma: no cover
                 self.q.put(("error", str(ex)))
         threading.Thread(target=work, daemon=True).start()
@@ -408,15 +423,14 @@ class App:
                     self.status.config(text="⏳ " + payload, fg=MUTED)
                 elif kind == "solved":
                     self.result = payload; self._set_views(payload)
-                elif kind in ("done", "rendered"):
-                    if kind == "done":
-                        self.frames, info = payload
-                        self.status.config(text=f"✓ {info}\n{len(self.frames)} frames — playing.", fg=GOOD)
-                    else:
-                        self.frames = payload
+                elif kind == "cached":
+                    cache, view, info = payload
+                    self.viewcache = cache; self.view.set(view); self._hl_view()
+                    self.frames = cache[view]
                     self.pidx, self.playing, self.busy = 0, True, False
-                    if hasattr(self, "playbtn"):
-                        self.playbtn.config(text="⏸ Pause")
+                    self.playbtn.config(text="⏸ Pause")
+                    self.status.config(text=f"✓ {info}\n{len(cache)} views ready — switch instantly.",
+                                       fg=GOOD)
                     self.run_btn.config(state="normal", text="▶  Run simulation")
                     self.prog.stop(); self.prog.pack_forget()
                 elif kind == "error":
