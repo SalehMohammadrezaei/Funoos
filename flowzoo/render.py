@@ -81,24 +81,29 @@ def _font(sz):
 
 
 def add_colorbar(rgb, cmap, vmin, vmax, label=""):
-    """Overlay a labelled colorbar (with tick values) on an RGB frame."""
+    """Add a labelled colorbar in a panel to the RIGHT of the field (not over it)."""
     from PIL import ImageDraw
     cmap = matplotlib.colormaps[cmap] if isinstance(cmap, str) else cmap
-    img = Image.fromarray(rgb).convert("RGB"); W, H = img.width, img.height
-    d = ImageDraw.Draw(img, "RGBA")
-    fs = max(10, H // 42); fnt = _font(fs)
-    bw = max(12, W // 60); bh = int(H * 0.5); x0 = W - bw - int(W * 0.11); y0 = int(H * 0.09)
-    d.rectangle([x0 - 9, y0 - fs - 8, W - 5, y0 + bh + 10], fill=(8, 9, 16, 165))
+    H, W = rgb.shape[:2]
+    fs = max(11, H // 40); fnt = _font(fs)
+    panel = max(104, int(W * 0.16))
+    bgc = np.array(Image.new("RGB", (1, 1), "#0c0f1a"))[0, 0]
+    canvas = np.empty((H, W + panel, 3), dtype=np.uint8)
+    canvas[:, :W] = rgb; canvas[:, W:] = bgc
+    img = Image.fromarray(canvas); d = ImageDraw.Draw(img)
+    d.line([W, 0, W, H], fill=(40, 50, 80))                       # divider
+    bw = max(14, panel // 6); bh = int(H * 0.6)
+    x0 = W + 14; y0 = int(H * 0.18)
     for k in range(bh):
-        c = cmap(1 - k / bh); d.line([x0, y0 + k, x0 + bw, y0 + k],
-                                     fill=tuple(int(255 * v) for v in c[:3]))
-    d.rectangle([x0, y0, x0 + bw, y0 + bh], outline=(210, 218, 230, 220))
+        c = cmap(1 - k / bh)
+        d.line([x0, y0 + k, x0 + bw, y0 + k], fill=tuple(int(255 * v) for v in c[:3]))
+    d.rectangle([x0, y0, x0 + bw, y0 + bh], outline=(210, 218, 230))
     for f in (0.0, 0.25, 0.5, 0.75, 1.0):
         val = vmin + (vmax - vmin) * f; yy = y0 + int((1 - f) * bh)
-        d.line([x0 + bw, yy, x0 + bw + 4, yy], fill=(210, 218, 230, 220))
-        d.text((x0 + bw + 7, yy - fs // 2), f"{val:.2g}", fill=(228, 233, 243, 235), font=fnt)
+        d.line([x0 + bw, yy, x0 + bw + 4, yy], fill=(210, 218, 230))
+        d.text((x0 + bw + 7, yy - fs // 2), f"{val:.2g}", fill=(228, 233, 243), font=fnt)
     if label:
-        d.text((x0 - 6, y0 - fs - 6), label, fill=(228, 233, 243, 240), font=fnt)
+        d.text((x0 - 2, y0 - fs - 7), label, fill=(228, 233, 243), font=fnt)
     return np.asarray(img)
 
 
