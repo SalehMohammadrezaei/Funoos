@@ -30,20 +30,20 @@ except Exception as e:  # pragma: no cover
 
 # ─────────────────────────  design system  ─────────────────────────
 # layered surfaces (deepest → raised) + hairline; accents echo the sims (cyan+amber)
-BG     = "#0a0d15"   # app background
-SURF   = "#111726"   # bars / sidebars
-CARD   = "#161d2e"   # cards
-CARD2  = "#1f2840"   # raised / hover / active
-LINE   = "#283250"   # hairline border
-FG     = "#eef2fb"   # primary text
-MUTED  = "#838fa9"   # secondary text
-DIM    = "#586079"   # captions
-CYAN   = "#49cfe6"   # primary accent (interactive)
-CYAN_D = "#37a8c2"   # accent hover
-GOLD   = "#ffb454"   # secondary accent (validation, method)
-GOOD   = "#46d39a"; WARN = "#ff7a6b"
-ONACC  = "#06121b"   # text on a bright accent fill
-INKCV  = "#06080e"   # preview / canvas background
+BG     = "#121A33"   # app background  (deep navy, not black)
+SURF   = "#1A2440"   # bars / sidebars
+CARD   = "#212D4F"   # cards
+CARD2  = "#2C3B65"   # raised / hover / active
+LINE   = "#3A4A7A"   # hairline border
+FG     = "#f2f5fc"   # primary text
+MUTED  = "#9aa6c4"   # secondary text
+DIM    = "#6b76a0"   # captions
+CYAN   = "#54d6ee"   # primary accent (interactive)
+CYAN_D = "#3fb6cf"   # accent hover
+GOLD   = "#ffc266"   # secondary accent (validation, method)
+GOOD   = "#5ce3aa"; WARN = "#ff8a78"
+ONACC  = "#08182a"   # text on a bright accent fill
+INKCV  = "#0a0f1e"   # preview / canvas background
 F = "Segoe UI"
 # type scale
 T_DISPLAY = (F, 46, "bold"); T_H1 = (F, 27, "bold"); T_H2 = (F, 15, "bold")
@@ -112,10 +112,12 @@ class App:
         self.gframes, self.gidx, self._eqimg = [], 0, None
         self.result = None; self.view = tk.StringVar(); self.cmap = tk.StringVar()
         self.viewbtns = {}; self.widgets = {}; self.cur = ""; self.viewcache = {}
+        self.iframes, self.iidx = [], 0
         self.pages = {}
         self._intro(); self._gallery(); self._studio()
         self.show("intro")
-        root.after(80, self._poll); root.after(45, self._tick_studio); root.after(60, self._tick_gallery)
+        root.after(80, self._poll); root.after(45, self._tick_studio)
+        root.after(60, self._tick_gallery); root.after(50, self._tick_intro)
 
     def show(self, name):
         for p in self.pages.values():
@@ -131,8 +133,14 @@ class App:
     def _intro(self):
         pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["intro"] = pg
         col = ctk.CTkFrame(pg, fg_color=BG); col.place(relx=0.5, rely=0.5, anchor="center")
-        ctk.CTkLabel(col, text="🦓", font=(F, 60)).pack()
-        kicker(col, "interactive cfd gallery", MUTED).pack(pady=(6, 2))
+        # animated hero clip
+        hero = ctk.CTkFrame(col, fg_color=CARD, corner_radius=20, border_width=1, border_color=LINE)
+        hero.pack(pady=(0, 16))
+        self.intro_demo = tk.Label(hero, bg=INKCV, bd=0); self.intro_demo.pack(padx=10, pady=10)
+        self.iframes = load_gif(ROOT / engine.META["Vortex street (LBM)"]["demo"], maxw=660); self.iidx = 0
+        if not self.iframes:
+            self.intro_demo.config(text="  FlowZoo  ", fg=MUTED, font=(F, 24), width=40, height=4)
+        kicker(col, "interactive cfd gallery", MUTED).pack(pady=(4, 2))
         t = ctk.CTkFrame(col, fg_color=BG); t.pack()
         ctk.CTkLabel(t, text="FlowZoo", font=T_DISPLAY, text_color=FG).pack(side="left")
         ctk.CTkLabel(t, text=" Studio", font=T_DISPLAY, text_color=CYAN).pack(side="left")
@@ -186,15 +194,21 @@ class App:
         rule(det).pack(anchor="w", pady=(0, 6))
 
         split = ctk.CTkFrame(det, fg_color=BG); split.pack(fill="both", expand=True)
-        media = ctk.CTkFrame(split, fg_color=BG, width=520); media.pack(side="right", fill="y", padx=(20, 0))
+        media = ctk.CTkFrame(split, fg_color=BG, width=580); media.pack(side="right", fill="y", padx=(20, 0))
         media.pack_propagate(False)
-        demo_card = ctk.CTkFrame(media, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
-        demo_card.pack(fill="x")
-        self.g_demo = tk.Label(demo_card, bg=INKCV, bd=0); self.g_demo.pack(padx=10, pady=10)
-        ctk.CTkButton(media, text="Customize & run   →", font=(F, 14, "bold"), height=50, corner_radius=14,
+        mc = ctk.CTkFrame(media, fg_color=BG); mc.pack(expand=True)         # vertically centred
+        demo_card = ctk.CTkFrame(mc, fg_color=CARD, corner_radius=18, border_width=1, border_color=LINE)
+        demo_card.pack()
+        self.g_demo = tk.Label(demo_card, bg=INKCV, bd=0); self.g_demo.pack(padx=12, pady=12)
+        ctk.CTkButton(mc, text="Customize & run   →", font=(F, 15, "bold"), height=54, corner_radius=16,
                       fg_color=CYAN, hover_color=CYAN_D, text_color=ONACC,
-                      command=lambda: self.show("studio")).pack(fill="x", pady=(14, 0))
-        self.read = ctk.CTkScrollableFrame(split, fg_color=SURF, corner_radius=16)
+                      command=lambda: self.show("studio")).pack(fill="x", pady=(16, 0))
+        stat = ctk.CTkFrame(mc, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
+        stat.pack(fill="x", pady=(14, 0))
+        kicker(stat, "validated", GOOD).pack(fill="x", padx=16, pady=(12, 2))
+        self.g_stat = ctk.CTkLabel(stat, text="", font=T_SMALL, text_color="#c8d2e6", justify="left",
+                                   anchor="w", wraplength=510); self.g_stat.pack(fill="x", padx=16, pady=(0, 12))
+        self.read = ctk.CTkScrollableFrame(split, fg_color=SURF, corner_radius=18)
         self.read.pack(side="left", fill="both", expand=True)
 
     def _section(self, header, body):
@@ -230,7 +244,8 @@ class App:
         ctk.CTkLabel(self.read, text="✓  " + m.get("validation", ""), font=T_BODY, text_color="#c8d2e6",
                      justify="left", anchor="w", wraplength=600).pack(fill="x", padx=16, pady=(0, 8))
 
-        self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=500); self.gidx = 0
+        self.g_stat.configure(text="✓  " + m.get("validation", ""))
+        self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=540); self.gidx = 0
         if not self.gframes:
             self.g_demo.config(image="", text="\n  demo clip not found —\n  open in Studio and Run\n",
                                fg=MUTED, font=(F, 11))
@@ -239,6 +254,11 @@ class App:
         if self.cur == "gallery" and self.gframes:
             self.g_demo.config(image=self.gframes[self.gidx % len(self.gframes)]); self.gidx += 1
         self.root.after(45, self._tick_gallery)
+
+    def _tick_intro(self):
+        if self.cur == "intro" and self.iframes:
+            self.intro_demo.config(image=self.iframes[self.iidx % len(self.iframes)]); self.iidx += 1
+        self.root.after(42, self._tick_intro)
 
     # ─────────────────────────  studio  ─────────────────────────
     def _studio(self):
