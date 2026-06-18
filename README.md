@@ -85,9 +85,12 @@ python demos/turbulence.py
 ```
 
 ## 🎛️ FlowZoo Studio (interactive app)
-One window containing every solver — pick an exhibit, adjust its parameters
-(type your own text, set Reynolds number, resolution, duration), hit **Run**,
-watch the animation play live, then export a GIF or MP4:
+One window containing every solver. Pick an exhibit, tune its parameters —
+each with a **"?" explaining what it does and how it affects the flow**
+(Reynolds number, viscosity, buoyancy, gravity, vorticity confinement, …) —
+choose a **color palette** (10 options), **resolution**, and **duration**, hit
+**Run** (an animated progress bar shows it simulating), watch it **play live**,
+then export a **GIF or MP4**. The explosion even throws out glowing debris.
 ```bash
 pip install pillow
 python studio.py

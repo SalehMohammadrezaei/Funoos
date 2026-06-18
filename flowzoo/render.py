@@ -54,6 +54,32 @@ FLOWZOO_RT = LinearSegmentedColormap.from_list("flowzoo_rt", [
 INK = "#0a0b12"   # canonical background
 SOLID = "#aab4c4"  # solid-phase color (obstacles: cylinder, letters)
 
+# Curated palette set the GUI lets users pick from (FlowZoo customs + classics).
+COLORMAPS = {
+    "Curl (cyan–amber)": FLOWZOO_CURL,
+    "Ember (fire)": FLOWZOO_EMBER,
+    "Ocean (water)": FLOWZOO_WATER,
+    "Hot / Cold": FLOWZOO_RT,
+    "Inferno": "inferno",
+    "Magma": "magma",
+    "Plasma": "plasma",
+    "Viridis": "viridis",
+    "Twilight": "twilight_shifted",
+    "Turbo": "turbo",
+}
+
+
+def overlay_particles(rgb, xs, ys, sizes, color=(255, 210, 120)):
+    """Draw glowing debris dots onto an RGB frame (image pixel coords)."""
+    from PIL import ImageDraw
+    img = Image.fromarray(rgb).convert("RGB")
+    d = ImageDraw.Draw(img, "RGBA")
+    for x, y, s in zip(xs, ys, sizes):
+        d.ellipse([x - 2 * s, y - 2 * s, x + 2 * s, y + 2 * s],
+                  fill=(color[0], color[1], color[2], 60))          # halo
+        d.ellipse([x - s, y - s, x + s, y + s], fill=color)         # core
+    return np.asarray(img)
+
 
 def vorticity(ux, uy):
     """omega_z = d(uy)/dx - d(ux)/dy on a unit-spaced grid."""
