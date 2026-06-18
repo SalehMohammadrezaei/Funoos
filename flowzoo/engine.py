@@ -59,9 +59,10 @@ RES = {"Low (fast)": 0.6, "Medium": 1.0, "High": 1.35, "Ultra (slow)": 1.8}
 VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
          "spectral": ["Vorticity", "Speed", "Streamlines"],
          "density": ["Schlieren", "Density"],
-         "scalar": ["Field"], "particles": ["Particles"]}
+         "ns": ["Dye", "Speed", "Vorticity", "Streamlines"],
+         "particles": ["Particles"]}
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
-           "density": "Ember (fire)", "scalar": "Ember (fire)", "particles": "Ocean (water)"}
+           "density": "Ember (fire)", "ns": "Ember (fire)", "particles": "Ocean (water)"}
 
 
 def _res(p):
@@ -87,34 +88,36 @@ class Result:
         cm = render.COLORMAPS.get(colormap, render.COLORMAPS[DEFCMAP[self.kind]]) \
             if colormap else render.COLORMAPS[DEFCMAP[self.kind]]
         if self.kind in ("lbm", "spectral"):
-            return self._render_vel(view, cm)
+            return self._render_vel(self.raw, view, cm, self.mask)
         if self.kind == "density":
             return self._render_density(view, cm)
-        if self.kind == "scalar":
-            v0, v1 = self.hints["vlim"]
-            return [render.add_colorbar(
-                render.field_to_rgb(s, cm, v0, v1, upscale=1, gamma=self.hints["gamma"]),
-                cm, v0, v1, self.hints.get("label", "")) for s in self.raw]
+        if self.kind == "ns":
+            if view == "Dye":
+                v0, v1 = self.hints["vlim"]
+                return [render.add_colorbar(
+                    render.field_to_rgb(s, cm, v0, v1, upscale=1, gamma=self.hints["gamma"]),
+                    cm, v0, v1, self.hints.get("label", "")) for s in self.raw]
+            return self._render_vel(self.hints["vel"], view, cm, None)
         if self.kind == "particles":
             return self._render_particles(cm)
 
-    def _render_vel(self, view, cm):
+    def _render_vel(self, vel, view, cm, mask):
         if view == "Streamlines":
-            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in self.raw]
+            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
             vmax = np.percentile(sp[-1], 99.5) + 1e-12
             return [render.add_colorbar(
-                render.streamlines_rgb(ux, uy, cmap=cm, mask=self.mask, vmax=vmax),
-                cm, 0, vmax, "|u|") for ux, uy in self.raw]
+                render.streamlines_rgb(ux, uy, cmap=cm, mask=mask, vmax=vmax),
+                cm, 0, vmax, "|u|") for ux, uy in vel]
         if view == "Speed":
-            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in self.raw]
+            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
             vmax = np.percentile(sp[-1], 99.5) + 1e-12
             return [render.add_colorbar(
-                render.field_to_rgb(s, cm, 0, vmax, mask=self.mask, mask_color=render.SOLID,
+                render.field_to_rgb(s, cm, 0, vmax, mask=mask, mask_color=render.SOLID,
                                     upscale=1), cm, 0, vmax, "|u|") for s in sp]
-        vt = [render.vorticity(ux, uy) for ux, uy in self.raw]
-        vmax = np.percentile(np.abs(vt[-1]), 99.0)
+        vt = [render.vorticity(ux, uy) for ux, uy in vel]
+        vmax = np.percentile(np.abs(vt[-1]), 99.0) + 1e-12
         return [render.add_colorbar(
-            render.field_to_rgb(w, cm, -vmax, vmax, mask=self.mask, mask_color=render.SOLID,
+            render.field_to_rgb(w, cm, -vmax, vmax, mask=mask, mask_color=render.SOLID,
                                 upscale=1), cm, -vmax, vmax, "vorticity ω") for w in vt]
 
     def _render_density(self, view, cm):
@@ -251,10 +254,14 @@ def _solve_ns(mode, p, pr, tmp):
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "density ρ"}
     pr(f"Navier–Stokes ({mode}) {nx}×{ny}, {steps} steps…")
     subprocess.run(args, check=True, env=_ENV)
-    n = _nframes(tmp); skip = max(1, n // 100)
-    raw = [_read_scalar(tmp, i, nx, ny) for i in range(0, n, skip)]
-    r = Result("scalar", raw, f"{mode}  {nx}×{ny}", hints=hints)
-    return r
+    n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
+    raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
+
+    def _rv(i):                                              # read the vel_*.bin field
+        b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
+        return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
+    hints["vel"] = [_rv(i) for i in idx]                     # for Speed/Vorticity/Streamlines
+    return Result("ns", raw, f"{mode}  {nx}×{ny}", hints=hints)
 
 
 def _solve_euler(mode, p, pr, tmp):

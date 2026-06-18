@@ -172,6 +172,10 @@ int main(int argc,char**argv){
             for(int k=0;k<N;k++) buf[k]=(float)s[k];
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
             std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
+            std::vector<float> vb(2*N);                 // velocity field (for Speed/streamlines)
+            for(int k=0;k<N;k++){ vb[k]=(float)u[k]; vb[N+k]=(float)v[k]; }
+            char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
+            std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
             nf++;
             if(step%(a.save_every*20)==0) printf("step %d/%d (%d frames)\n",step,a.steps,nf);
         }
