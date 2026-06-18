@@ -20,7 +20,7 @@ import numpy as np
 
 ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
 sys.path.insert(0, str(ROOT))
-from flowzoo import engine, render
+from flowzoo import engine, render, content
 
 try:
     import tkinter as tk
@@ -167,7 +167,7 @@ class App:
                  font=(FONT, 15, "bold")).pack(side="left", padx=8)
 
         body = tk.Frame(pg, bg=BG); body.pack(fill="both", expand=True)
-        left = tk.Frame(body, bg=BG, width=290); left.pack(side="left", fill="y", padx=(14, 6), pady=14)
+        left = tk.Frame(body, bg=BG, width=268); left.pack(side="left", fill="y", padx=(14, 6), pady=14)
         left.pack_propagate(False)
         self.exh_btns = {}
         for name in engine.EXHIBITS:
@@ -177,58 +177,77 @@ class App:
             btn.pack(fill="x", pady=3); hover(btn, CARD, CARD2)
             self.exh_btns[name] = btn
 
-        st = ttk.Style()
-        st.configure("TNotebook", background=BG, borderwidth=0)
-        st.configure("TNotebook.Tab", background=CARD, foreground=MUTED, padding=(14, 6),
-                     font=(FONT, 9, "bold"))
-        st.map("TNotebook.Tab", background=[("selected", CARD2)], foreground=[("selected", FG)])
-
         det = tk.Frame(body, bg=BG); det.pack(side="right", fill="both", expand=True, padx=(6, 14), pady=14)
-        self.g_method = tk.Label(det, text="", bg=BG, fg=ACCENT, font=(FONT, 10, "bold"))
+        hd = tk.Frame(det, bg=BG); hd.pack(fill="x")
+        self.g_method = tk.Label(hd, text="", bg=BG, fg=ACCENT, font=(FONT, 10, "bold"))
         self.g_method.pack(anchor="w")
-        self.g_title = tk.Label(det, text="", bg=BG, fg=FG, font=(FONT, 22, "bold"))
-        self.g_title.pack(anchor="w", pady=(0, 8))
+        self.g_title = tk.Label(hd, text="", bg=BG, fg=FG, font=(FONT, 24, "bold"))
+        self.g_title.pack(anchor="w", pady=(0, 10))
 
-        nb = ttk.Notebook(det); nb.pack(fill="x")
-
-        def _tab(title):
-            fr = tk.Frame(nb, bg=CARD, padx=14, pady=12); nb.add(fr, text=title); return fr
-        self.g_blurb = tk.Label(_tab("Overview"), text="", bg=CARD, fg=FG, font=(FONT, 11),
-                                justify="left", wraplength=600); self.g_blurb.pack(anchor="w")
-        eqtab = _tab("Equation"); self.g_eq = tk.Label(eqtab, bg=CARD); self.g_eq.pack(anchor="w")
-        self.g_num = tk.Label(_tab("Numerics"), text="", bg=CARD, fg=FG, font=(FONT, 11),
-                              justify="left", wraplength=600); self.g_num.pack(anchor="w")
-        self.g_val = tk.Label(_tab("Validation"), text="", bg=CARD, fg=FG, font=(FONT, 11),
-                              justify="left", wraplength=600); self.g_val.pack(anchor="w")
-
-        self.g_demo = tk.Label(det, bg="#05070b"); self.g_demo.pack(anchor="w", pady=(12, 0))
-        opn = tk.Button(det, text="Customize & run  →", bg=ACCENT, fg="white", relief="flat",
-                        bd=0, padx=22, pady=10, font=(FONT, 12, "bold"), activebackground=ACCENT_D,
+        split = tk.Frame(det, bg=BG); split.pack(fill="both", expand=True)
+        # right column: demo + run button
+        media = tk.Frame(split, bg=BG, width=440); media.pack(side="right", fill="y", padx=(16, 0))
+        media.pack_propagate(False)
+        self.g_demo = tk.Label(media, bg="#05070b"); self.g_demo.pack(anchor="n", pady=(2, 10))
+        opn = tk.Button(media, text="Customize & run  →", bg=ACCENT, fg="white", relief="flat",
+                        bd=0, padx=22, pady=11, font=(FONT, 12, "bold"), activebackground=ACCENT_D,
                         command=lambda: self.show("studio"))
-        opn.pack(anchor="w", pady=14); hover(opn, ACCENT, ACCENT_D)
+        opn.pack(anchor="n", fill="x"); hover(opn, ACCENT, ACCENT_D)
+        # left column: scrollable long-form reading
+        rd = tk.Frame(split, bg=BG); rd.pack(side="left", fill="both", expand=True)
+        self.g_cv = tk.Canvas(rd, bg=BG, highlightthickness=0)
+        rsb = ttk.Scrollbar(rd, orient="vertical", command=self.g_cv.yview)
+        self.read_inner = tk.Frame(self.g_cv, bg=BG)
+        self.read_inner.bind("<Configure>", lambda e: self.g_cv.configure(scrollregion=self.g_cv.bbox("all")))
+        self._read_win = self.g_cv.create_window((0, 0), window=self.read_inner, anchor="nw")
+        self.g_cv.bind("<Configure>", lambda e: self.g_cv.itemconfig(self._read_win, width=e.width))
+        self.g_cv.configure(yscrollcommand=rsb.set)
+        self.g_cv.pack(side="left", fill="both", expand=True); rsb.pack(side="right", fill="y")
+        self.g_cv.bind("<MouseWheel>", lambda e: self.g_cv.yview_scroll(int(-e.delta / 120), "units"))
+        self.g_cv.bind("<Button-4>", lambda e: self.g_cv.yview_scroll(-1, "units"))
+        self.g_cv.bind("<Button-5>", lambda e: self.g_cv.yview_scroll(1, "units"))
+
+    def _section(self, header, bodytext):
+        tk.Label(self.read_inner, text=header, bg=BG, fg=ACCENT,
+                 font=(FONT, 11, "bold")).pack(anchor="w", pady=(14, 1))
+        tk.Frame(self.read_inner, bg=CARD2, height=1).pack(fill="x", pady=(0, 6))
+        tk.Label(self.read_inner, text=bodytext, bg=BG, fg="#cdd5e6", font=(FONT, 11),
+                 justify="left", wraplength=500).pack(anchor="w")
 
     def _select(self, name):
         self.sel = name
         for n, b in self.exh_btns.items():
             b.config(bg=CARD2 if n == name else CARD, fg=ACCENT if n == name else FG)
-        m = engine.META.get(name, {})
+        m = engine.META.get(name, {}); d = content.DETAIL.get(name, {})
         self.g_method.config(text=m.get("method", ""))
         self.g_title.config(text=name.split(" (")[0])
-        self.g_blurb.config(text=m.get("blurb", ""))
-        self.g_num.config(text=m.get("numerics", ""))
-        self.g_val.config(text="✓  " + m.get("validation", ""))
+        for w in self.read_inner.winfo_children():
+            w.destroy()
+        self.g_cv.yview_moveto(0)
+        self._section("What you're seeing", d.get("physics", m.get("blurb", "")))
+        # governing equation (image) + term-by-term
+        tk.Label(self.read_inner, text="Governing equation", bg=BG, fg=ACCENT,
+                 font=(FONT, 11, "bold")).pack(anchor="w", pady=(16, 1))
+        tk.Frame(self.read_inner, bg=CARD2, height=1).pack(fill="x", pady=(0, 6))
         eqp = ROOT / "docs" / "eq" / (slug(name) + ".png")
         try:
-            im = Image.open(eqp)
-            w = min(580, im.width); im = im.resize((w, int(im.height * w / im.width)))
+            im = Image.open(eqp); w = min(470, im.width)
+            im = im.resize((w, int(im.height * w / im.width)))
             self._eqimg = ImageTk.PhotoImage(im)
-            self.g_eq.config(image=self._eqimg, text="")
+            tk.Label(self.read_inner, image=self._eqimg, bg=BG).pack(anchor="w")
         except Exception:
-            self.g_eq.config(image="", text="(equation image not found)", fg=MUTED, font=(FONT, 11))
-        self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=560); self.gidx = 0
+            tk.Label(self.read_inner, text="(equation image not found)", bg=BG, fg=MUTED,
+                     font=(FONT, 10)).pack(anchor="w")
+        if d.get("terms"):
+            tk.Label(self.read_inner, text=d["terms"], bg=BG, fg="#cdd5e6", font=(FONT, 10),
+                     justify="left", wraplength=500).pack(anchor="w", pady=(6, 0))
+        self._section("How it's solved", m.get("numerics", ""))
+        self._section("Validation", "✓  " + m.get("validation", ""))
+
+        self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=420); self.gidx = 0
         if not self.gframes:
-            self.g_demo.config(image="", text="  (demo clip not found — open it in Studio and "
-                               "press Run)  ", fg=MUTED, font=(FONT, 11))
+            self.g_demo.config(image="", text="\n  demo clip not found —\n  open in Studio and press Run\n",
+                               fg=MUTED, font=(FONT, 11))
         if hasattr(self, "exhibit"):
             self.exhibit.set(name)
 
