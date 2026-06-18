@@ -141,12 +141,15 @@ DETAIL = {
 },
 "The Big Splash": {
 "physics": (
-"Hold back a column of water with a wall, remove the wall instantly, and gravity "
-"converts the column's potential energy into a fast horizontal surge. The front "
-"races along the floor, climbs the opposite wall, and overturns into a breaking "
-"jet. The free surface — the moving air–water boundary — folds over on itself, "
-"which is exactly the kind of large deformation and topology change that is "
-"painful for grid-based methods.\n\n"
+"This exhibit runs five free-surface scenes from one solver — pick from the "
+"'Scene' control: a dam break, a block dropped into a pool, a sloshing tank, "
+"pouring water into a glass, and a wavemaker driving an ocean of waves.\n\n"
+"Take the dam break: hold back a column of water with a wall, remove the wall "
+"instantly, and gravity converts the column's potential energy into a fast "
+"horizontal surge. The front races along the floor, climbs the opposite wall, "
+"and overturns into a breaking jet. The free surface — the moving air–water "
+"boundary — folds over on itself, exactly the kind of large deformation and "
+"topology change that is painful for grid-based methods.\n\n"
 "Smoothed-Particle Hydrodynamics takes a completely different, mesh-free view: "
 "the fluid is represented by a cloud of particles that carry mass and velocity "
 "and move with the flow (a Lagrangian description). Any continuous field — "

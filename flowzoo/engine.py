@@ -273,20 +273,31 @@ def _solve_euler(mode, p, pr, tmp):
     return Result("density", raw, f"{mode}  {nx}×{ny}", hints=hints)
 
 
+_SPLASH_SCENE = {"Dam break": "dam", "Drop & splash": "drop", "Sloshing tank": "slosh",
+                 "Pour into a glass": "pour", "Wavy ocean": "waves"}
+_SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2),
+                "pour": (2.2, 3.4), "waves": (6.0, 2.4)}
+
+
 def _solve_dam(p, pr, tmp):
-    a, H, Lx, Ly = float(p["width"]), float(p["height"]), 5.0, 3.2
-    npart = max(400.0, float(p["particles"]))
-    dp = float(np.clip(np.sqrt(a * H / npart), 0.014, 0.08))
+    sc = _SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam")
+    Lx, Ly = _SPLASH_TANK[sc]
+    a, H = float(p["width"]), float(p["height"])
+    npart = max(500.0, float(p["particles"]))
+    dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08))
+    g = float(p["gravity"])
     _ensure(_bin("sph", "sph2d"))
-    pr(f"SPH dam break (~{int(a * H / dp / dp)} particles)…")
-    subprocess.run([str(_bin("sph", "sph2d")), "--a", str(a), "--H", str(H), "--Lx", str(Lx),
-                    "--Ly", str(Ly), "--dp", str(dp), "--g", str(p["gravity"]),
-                    "--tend", str(1.6 * _durv(p)), "--save_every", "60", "--out", tmp], check=True, env=_ENV)
+    pr(f"SPH · {p.get('scene', 'Dam break')} · dp={dp:.3f}…")
+    subprocess.run([str(_bin("sph", "sph2d")), "--scene", sc, "--a", str(a), "--H", str(H),
+                    "--Lx", str(Lx), "--Ly", str(Ly), "--dp", str(dp), "--g", str(g),
+                    "--tend", str(2.0 * _durv(p)), "--save_every", "60", "--out", tmp],
+                   check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100)
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3)
            for i in range(0, n, skip)]
-    return Result("particles", raw, f"dam break  {len(raw[0])} particles",
-                  hints={"Lx": Lx, "Ly": Ly, "vmax": 1.2 * np.sqrt(2 * float(p["gravity"]) * H)})
+    return Result("particles", raw, f"{p.get('scene', 'Dam break')}  ({len(raw[-1])} particles)",
+                  hints={"Lx": Lx, "Ly": Ly,
+                         "vmax": 1.2 * np.sqrt(2 * g * max(H, Ly * 0.5))})
 
 
 def _solve_spectral(p, pr, tmp):
@@ -355,8 +366,13 @@ EXHIBITS = {
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("bubble", p, pr, t)},
     "The Big Splash": {
-        "params": [_f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry", "Initial column width."),
-                   _f("height", "Dam height (m)", 2.0, 0.6, 3.0, "Geometry", "Initial column height."),
+        "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
+                    "choices": ["Dam break", "Drop & splash", "Sloshing tank",
+                                "Pour into a glass", "Wavy ocean"], "default": "Dam break",
+                    "help": "Which free-surface scenario to run. Dam break uses the width/height "
+                    "below; the others set up their own tank."},
+                   _f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry", "Column width (Dam break)."),
+                   _f("height", "Dam height (m)", 2.0, 0.6, 3.0, "Geometry", "Column height (Dam break)."),
                    _f("particles", "Particles (≈)", 3000, 600, 12000, "Geometry",
                       "Approximate number of SPH particles. More → finer splash, slower."),
                    _f("gravity", "Gravity (m/s²)", 9.81, 1.0, 25.0, "Physics",
@@ -459,13 +475,14 @@ META = {
         "validation": "Uses the same HLLC solver validated against the exact Sod shock tube "
                        "(mean density error ≈ 0.002).",
         "demo": "results/shock_bubble.gif"},
-    "The Big Splash": {"method": "Smoothed-Particle Hydrodynamics",
-        "blurb": "A column of water is held behind a wall that is suddenly removed; the "
-                 "water collapses under gravity and surges across the floor, runs up the far "
-                 "wall and overturns in a breaking splash. The dam break is the classic "
-                 "violent free-surface flow and a standard benchmark for marine, coastal and "
-                 "flood simulation. It is solved here with a fully meshfree, particle method "
-                 "— the fluid is a cloud of moving particles, with no grid at all.",
+    "The Big Splash": {"method": "Free-surface water · Smoothed-Particle Hydrodynamics",
+        "blurb": "Water you can actually splash — five scenes from one meshfree solver. "
+                 "Break a dam and watch the surge overturn against the far wall; drop a block "
+                 "into a pool for a crown splash; slosh a tank back and forth until it "
+                 "breaks; pour a stream into a tall glass; or drive a wavemaker across an "
+                 "ocean of travelling waves. There is no grid at all — the fluid is a cloud "
+                 "of moving particles, which is why it handles violent free surfaces and "
+                 "breaking, folding water so naturally.",
         "eq": r"$\dfrac{D\mathbf{v}_i}{Dt}=-\sum_j m_j\!\left(\dfrac{p_i}{\rho_i^2}+\dfrac{p_j}{\rho_j^2}+\Pi_{ij}\right)\nabla W_{ij}+\mathbf{g}$",
         "numerics": "Weakly-compressible SPH: each particle carries mass and velocity; "
                     "density and forces are smoothed sums over neighbours using a cubic-"
