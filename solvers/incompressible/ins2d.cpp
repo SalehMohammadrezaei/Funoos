@@ -26,7 +26,7 @@
 
 struct Args {
     int nx=240, ny=360, steps=4000, save_every=20, iters=60;
-    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0;
+    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0;
     std::string mode="smoke", out="frames";
 };
 static Args parse(int c, char** v){
@@ -37,6 +37,7 @@ static Args parse(int c, char** v){
         else if(k=="--iters")a.iters=atoi(x.c_str()); else if(k=="--dt")a.dt=atof(x.c_str());
         else if(k=="--visc")a.visc=atof(x.c_str()); else if(k=="--buoy")a.buoy=atof(x.c_str());
         else if(k=="--grav")a.grav=atof(x.c_str()); else if(k=="--conf")a.conf=atof(x.c_str());
+        else if(k=="--srcw")a.srcw=atof(x.c_str()); else if(k=="--pert")a.pert=atof(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a;
 }
@@ -108,15 +109,15 @@ int main(int argc,char**argv){
     // --- initial condition ---
     if(!smoke){ // Rayleigh-Taylor: heavy (s=1) on top, light (s=0) below, wavy interface
         for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){
-            double yi=0.5*ny + 0.04*ny*sin(2*M_PI*i/(double)nx*3)
-                              + 0.015*ny*sin(2*M_PI*i/(double)nx*7);
+            double yi=0.5*ny + 0.04*ny*a.pert*sin(2*M_PI*i/(double)nx*3)
+                              + 0.015*ny*a.pert*sin(2*M_PI*i/(double)nx*7);
             s[IX(i,j)] = 0.5*(1.0+tanh((j-yi)/2.0));
         }
     }
 
     std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
     int nf=0;
-    int sx=nx/2, sw=std::max(6,nx/12), sh=std::max(4,ny/40);
+    int sx=nx/2, sw=std::max(6,(int)(nx/12*a.srcw)), sh=std::max(4,ny/40);
 
     for(int step=0; step<=a.steps; step++){
         // forces: buoyancy + (smoke) continuous source + vorticity confinement

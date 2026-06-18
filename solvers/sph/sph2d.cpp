@@ -27,6 +27,7 @@ static Args parse(int c,char**v){ Args a;
         if(k=="--a")a.a=atof(x.c_str()); else if(k=="--H")a.H=atof(x.c_str());
         else if(k=="--Lx")a.Lx=atof(x.c_str()); else if(k=="--Ly")a.Ly=atof(x.c_str());
         else if(k=="--dp")a.dp=atof(x.c_str()); else if(k=="--tend")a.tend=atof(x.c_str());
+        else if(k=="--g")a.g=atof(x.c_str());
         else if(k=="--save_every")a.save_every=atoi(x.c_str()); else if(k=="--out")a.out=x; }
     return a; }
 
