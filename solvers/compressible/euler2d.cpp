@@ -26,15 +26,16 @@
 
 static const double G = 1.4;
 
-struct Args{ int nx=400,ny=200,steps=2000,save_every=20; double cfl=0.4,tend=0.2;
-             double p0=10.0,brad=0.06,bubr=0.18; std::string mode="sod",out="frames"; };
+struct Args{ int nx=400,ny=200,steps=2000,save_every=20,nbub=1; double cfl=0.4,tend=0.2;
+             double p0=10.0,brad=0.06,bubr=0.18,bubrho=0.18; std::string mode="sod",out="frames"; };
 static Args parse(int c,char**v){ Args a;
     for(int i=1;i<c-1;i+=2){ std::string k=v[i],x=v[i+1];
         if(k=="--nx")a.nx=atoi(x.c_str()); else if(k=="--ny")a.ny=atoi(x.c_str());
         else if(k=="--steps")a.steps=atoi(x.c_str()); else if(k=="--save_every")a.save_every=atoi(x.c_str());
         else if(k=="--cfl")a.cfl=atof(x.c_str()); else if(k=="--tend")a.tend=atof(x.c_str());
         else if(k=="--p0")a.p0=atof(x.c_str()); else if(k=="--radius")a.brad=atof(x.c_str());
-        else if(k=="--bubr")a.bubr=atof(x.c_str());
+        else if(k=="--bubr")a.bubr=atof(x.c_str()); else if(k=="--bubrho")a.bubrho=atof(x.c_str());
+        else if(k=="--nbub")a.nbub=atoi(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a; }
 
@@ -86,12 +87,14 @@ int main(int argc,char**argv){
         else if(a.mode=="blast"){ double dx=i-nx/2.0,dy=j-ny/2.0;
             if(dx*dx+dy*dy < (nx*a.brad)*(nx*a.brad)) setprim(s,1.0,0,0,a.p0);
             else setprim(s,0.5,0,0,0.1); }
-        else { // bubble: ambient air, a low-density bubble, a shock at left
-            double cx=nx*0.45, cy=ny*0.5, rad=ny*a.bubr;
-            double dx=i-cx,dy=j-cy; bool inb=(dx*dx+dy*dy<rad*rad);
-            if(i< nx*0.12){ // post-shock (Mach ~1.5 air)
-                setprim(s,1.34,0.40,0,1.5);
-            } else if(inb) setprim(s,0.18,0,0,1.0);   // light bubble
+        else { // bubble(s): ambient air struck by a planar shock at the left
+            double cx=nx*0.45, rad=ny*a.bubr; bool inb;
+            if(a.nbub>=2){ double r2b=(rad*0.72)*(rad*0.72), dx=i-cx;
+                double d1=dx*dx+(j-ny*0.32)*(j-ny*0.32), d2=dx*dx+(j-ny*0.68)*(j-ny*0.68);
+                inb=(d1<r2b)||(d2<r2b);
+            } else { double dx=i-cx,dy=j-ny*0.5; inb=(dx*dx+dy*dy<rad*rad); }
+            if(i< nx*0.12) setprim(s,1.34,0.40,0,1.5);      // post-shock inflow (Mach ~1.5)
+            else if(inb) setprim(s,a.bubrho,0,0,1.0);        // bubble gas (light or heavy)
             else setprim(s,1.0,0,0,1.0); }
     }
 

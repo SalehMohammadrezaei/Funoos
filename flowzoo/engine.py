@@ -265,7 +265,10 @@ def _solve_euler(mode, p, pr, tmp):
         hints = {"mode": "blast", "debris": int(p.get("debris", 0)), "nx": nx, "ny": ny}
     else:
         nx, ny = int(620 * s), int(320 * s); tend = 230 * _durv(p)
-        extra = ["--bubr", str(p["bubble"])]; hints = {"mode": "bubble", "nx": nx, "ny": ny}
+        rho_b, nb = {"Light bubble": (0.18, 1), "Heavy bubble": (3.0, 1),
+                     "Two bubbles": (0.18, 2)}.get(p.get("variant", "Light bubble"), (0.18, 1))
+        extra = ["--bubr", str(p["bubble"]), "--bubrho", str(rho_b), "--nbub", str(nb)]
+        hints = {"mode": "bubble", "nx": nx, "ny": ny}
     _ensure(_bin("compressible", "euler2d"))
     pr(f"compressible Euler ({mode}) {nx}×{ny}…")
     subprocess.run([str(_bin("compressible", "euler2d")), "--mode", mode, "--nx", str(nx),
@@ -366,8 +369,13 @@ EXHIBITS = {
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("blast", p, pr, t)},
     "Shockwave Strike": {
-        "params": [_f("bubble", "Bubble size (frac.)", 0.18, 0.08, 0.32, "Geometry",
-                      "Light-gas bubble radius as a fraction of the domain height."),
+        "params": [{"name": "variant", "label": "Target", "type": "choice", "group": "Geometry",
+                    "choices": ["Light bubble", "Heavy bubble", "Two bubbles"],
+                    "default": "Light bubble",
+                    "help": "What the shock hits: a light gas bubble (rolls up fast), a heavy "
+                    "bubble (the shock focuses through it), or two bubbles that interact."},
+                   _f("bubble", "Bubble size (frac.)", 0.18, 0.08, 0.32, "Geometry",
+                      "Bubble radius as a fraction of the domain height."),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("bubble", p, pr, t)},
     "The Big Splash": {
