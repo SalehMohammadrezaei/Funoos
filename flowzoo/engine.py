@@ -99,6 +99,37 @@ _H = {
 }
 
 
+def _lbm_render(tmp, nx, ny, mask, p):
+    """Render LBM velocity frames in the chosen view mode."""
+    n = _nframes(tmp); view = p.get("view", "Vorticity")
+    step = max(1, (n - n // 5) // (55 if view == "Streamlines" else 90))
+    use = list(range(n // 5, n, step))
+    if view == "Streamlines":
+        cm = _cmap(p, render.FLOWZOO_EMBER)
+        return [render.streamlines_rgb(*_read_vel(tmp, i, nx, ny), cmap=cm, mask=mask)
+                for i in use]
+    if view == "Speed":
+        cm = _cmap(p, render.FLOWZOO_EMBER)
+        sp = [render.speed(*_read_vel(tmp, i, nx, ny)) for i in use]
+        vmax = np.percentile(sp[-1], 99.5) + 1e-12
+        return [render.field_to_rgb(s, cm, 0, vmax, mask=mask, mask_color=render.SOLID,
+                                    upscale=1) for s in sp]
+    cm = _cmap(p, render.FLOWZOO_CURL)
+    vort = [render.vorticity(*_read_vel(tmp, i, nx, ny)) for i in use]
+    vmax = np.percentile(np.abs(vort[-1]), 99.0)
+    return [render.field_to_rgb(w, cm, -vmax, vmax, mask=mask, mask_color=render.SOLID,
+                                upscale=1) for w in vort]
+
+
+_P_VIEW = {"name": "view", "label": "Visualization", "type": "choice",
+           "choices": ["Vorticity", "Speed", "Streamlines"], "default": "Vorticity",
+           "group": "Render", "help": "What to draw: vorticity (spin), speed magnitude, "
+           "or flow streamlines."}
+_P_VIEW_C = {"name": "view", "label": "Visualization", "type": "choice",
+             "choices": ["Schlieren", "Density"], "default": "Schlieren", "group": "Render",
+             "help": "Schlieren lights up shock fronts (|∇ρ|); Density shows raw density."}
+
+
 # ---------- runners ----------
 def _run_vortex(p, pr, tmp):
     s = _res(p); nx, ny = int(820 * s), int(260 * s)
@@ -113,12 +144,8 @@ def _run_vortex(p, pr, tmp):
                     "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
                     "--out", tmp, "--probe_x", str(nx // 4 + 3 * D), "--probe_y", str(ny // 2)],
                    check=True)
-    n = _nframes(tmp); cm = _cmap(p, render.FLOWZOO_CURL)
-    use = range(n // 5, n, max(1, (n - n // 5) // 90))
-    vort = [render.vorticity(*_read_vel(tmp, i, nx, ny)) for i in use]
-    vmax = np.percentile(np.abs(vort[-1]), 99.5)
-    return ([render.field_to_rgb(v, cm, -vmax, vmax, mask=mask, mask_color=render.SOLID,
-                                 upscale=1) for v in vort], f"vortex street  Re={Re:.0f}  {nx}×{ny}")
+    return (_lbm_render(tmp, nx, ny, mask, p),
+            f"vortex street  Re={Re:.0f}  {nx}×{ny}  ({p.get('view', 'Vorticity')})")
 
 
 def _run_lbm_text(p, pr, tmp):
@@ -134,12 +161,8 @@ def _run_lbm_text(p, pr, tmp):
                     "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
                     "--out", tmp, "--probe_x", str(int(nx * 0.6)), "--probe_y", str(ny // 2)],
                    check=True)
-    n = _nframes(tmp); cm = _cmap(p, render.FLOWZOO_CURL)
-    use = range(n // 5, n, max(1, (n - n // 5) // 90))
-    vort = [render.vorticity(*_read_vel(tmp, i, nx, ny)) for i in use]
-    vmax = np.percentile(np.abs(vort[-1]), 99.0)
-    return ([render.field_to_rgb(v, cm, -vmax, vmax, mask=mask, mask_color=render.SOLID,
-                                 upscale=1) for v in vort], f"flow around '{p['text']}'  {nx}×{ny}")
+    return (_lbm_render(tmp, nx, ny, mask, p),
+            f"flow around '{p['text']}'  {nx}×{ny}  ({p.get('view', 'Vorticity')})")
 
 
 def _run_ns(mode, p, pr, tmp):
@@ -186,10 +209,16 @@ def _run_euler(mode, p, pr, tmp):
         dist = np.hypot(bx - cx, by - cy) + 1e-6
         ang = np.arctan2(by - cy, bx - cx)
         push = rng.uniform(0.5, 1.0, deb); Rmax = 0.75 * np.hypot(nx, ny) / 2
+    density_view = p.get("view", "Schlieren") == "Density"
     for fi, i in enumerate(idx):
-        sch = render.schlieren(_read_scalar(tmp, i, nx, ny))
-        img = render.field_to_rgb(sch, cm, 0.0, np.percentile(sch, 99.5) + 1e-6,
-                                  upscale=1, gamma=0.7)
+        rho = _read_scalar(tmp, i, nx, ny)
+        if density_view:
+            img = render.field_to_rgb(rho, cm, np.percentile(rho, 1),
+                                      np.percentile(rho, 99.5) + 1e-6, upscale=1)
+        else:
+            sch = render.schlieren(rho)
+            img = render.field_to_rgb(sch, cm, 0.0, np.percentile(sch, 99.5) + 1e-6,
+                                      upscale=1, gamma=0.7)
         if deb and mode == "blast":
             tau = fi / max(1, len(idx) - 1)
             Rs = Rmax * tau * 1.25
@@ -238,17 +267,27 @@ def _run_spectral(p, pr, tmp):
     s = _res(p); n = int(256 * s); steps = int(2800 * _durv(p)); nu = float(p["viscosity"])
     sim = Spectral2D(n=n, nu=nu)
     wh = double_shear_layer(n, amp=float(p["perturbation"])); dt = 0.4 * (2 * np.pi / n)
-    cm = _cmap(p, render.FLOWZOO_CURL)
-    pr(f"spectral {n}×{n}, ν={nu:.1e}, {steps} steps…")
+    view = p.get("view", "Vorticity"); cm = _cmap(p, render.FLOWZOO_CURL)
+    pr(f"spectral {n}×{n}, ν={nu:.1e}, {steps} steps ({view})…")
+    every = max(1, steps // (55 if view == "Streamlines" else 100))
     frames = []; vlim = None
     for st in range(steps + 1):
-        if st % max(1, steps // 100) == 0:
-            w = sim.vorticity(wh)
-            if vlim is None:
-                vlim = np.percentile(np.abs(w), 99.0)
-            frames.append(render.field_to_rgb(w, cm, -vlim, vlim, upscale=1))
+        if st % every == 0:
+            if view == "Streamlines":
+                u, v = sim.velocity(wh)
+                frames.append(render.streamlines_rgb(u, v, cmap=_cmap(p, render.FLOWZOO_EMBER)))
+            elif view == "Speed":
+                u, v = sim.velocity(wh); sp = np.sqrt(u * u + v * v)
+                if vlim is None:
+                    vlim = np.percentile(sp, 99.5) + 1e-12
+                frames.append(render.field_to_rgb(sp, _cmap(p, render.FLOWZOO_EMBER), 0, vlim, upscale=1))
+            else:
+                w = sim.vorticity(wh)
+                if vlim is None:
+                    vlim = np.percentile(np.abs(w), 99.0)
+                frames.append(render.field_to_rgb(w, cm, -vlim, vlim, upscale=1))
         wh = sim.step(wh, dt)
-    return frames, f"Kelvin–Helmholtz  {n}×{n}  ν={nu:.1e}"
+    return frames, f"Kelvin–Helmholtz  {n}×{n}  ({view})"
 
 
 EXHIBITS = {
@@ -257,7 +296,7 @@ EXHIBITS = {
                    _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"]),
                    _f("diameter", "Cylinder diameter (cells)", 34, 12, 70, "Geometry",
                       "Cylinder size. Larger obstacle → larger, slower-shedding wake."),
-                   P_RES(), P_DUR(), P_CMAP("Curl (cyan–amber)")],
+                   _P_VIEW, P_RES(), P_DUR(), P_CMAP("Curl (cyan–amber)")],
         "run": lambda p, pr, t: _run_vortex(p, pr, t)},
     "Flow around your name (LBM)": {
         "params": [{"name": "text", "label": "Text", "type": "str", "default": "FlowZoo",
@@ -267,7 +306,7 @@ EXHIBITS = {
                       "Letter height as a fraction of the domain height."),
                    _f("reynolds", "Reynolds number", 600, 150, 1500, "Physics", _H["Re"]),
                    _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"]),
-                   P_RES(), P_DUR(), P_CMAP("Curl (cyan–amber)")],
+                   _P_VIEW, P_RES(), P_DUR(), P_CMAP("Curl (cyan–amber)")],
         "run": lambda p, pr, t: _run_lbm_text(p, pr, t)},
     "Smoke plume (Navier–Stokes)": {
         "params": [_f("buoyancy", "Buoyancy", 2.5e-3, 5e-4, 6e-3, "Physics", _H["buoy"]),
@@ -292,12 +331,12 @@ EXHIBITS = {
                    _f("debris", "Debris particles", 200, 0, 800, "Render",
                       "Glowing debris scattered across the domain and swept outward by the "
                       "blast (visual only)."),
-                   P_RES(), P_DUR(), P_CMAP("Ember (fire)")],
+                   _P_VIEW_C, P_RES(), P_DUR(), P_CMAP("Ember (fire)")],
         "run": lambda p, pr, t: _run_euler("blast", p, pr, t)},
     "Shock–bubble (Compressible)": {
         "params": [_f("bubble", "Bubble size (frac.)", 0.18, 0.08, 0.32, "Geometry",
                       "Light-gas bubble radius as a fraction of the domain height."),
-                   P_RES(), P_DUR(), P_CMAP("Ember (fire)")],
+                   _P_VIEW_C, P_RES(), P_DUR(), P_CMAP("Ember (fire)")],
         "run": lambda p, pr, t: _run_euler("bubble", p, pr, t)},
     "Dam break (SPH)": {
         "params": [_f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry",
@@ -314,8 +353,62 @@ EXHIBITS = {
         "params": [_f("viscosity", "Viscosity", 8e-5, 1e-5, 4e-4, "Physics", _H["visc"]),
                    _f("perturbation", "Shear perturbation", 0.05, 0.005, 0.2, "Physics",
                       "Strength of the initial shear-layer kick that seeds the billows."),
-                   P_RES(), P_DUR(), P_CMAP("Curl (cyan–amber)")],
+                   _P_VIEW, P_RES(), P_DUR(), P_CMAP("Curl (cyan–amber)")],
         "run": lambda p, pr, t: _run_spectral(p, pr, t)},
+}
+
+
+# short description, governing equation (matplotlib mathtext), and demo clip
+META = {
+    "Vortex street (LBM)": {
+        "method": "Lattice Boltzmann · D2Q9",
+        "blurb": "Flow past a cylinder sheds a periodic train of alternating vortices — "
+                 "the wake you see behind bridge piers and downwind of islands. Validated "
+                 "against the Strouhal number (St ≈ 0.2).",
+        "eq": r"$f_q(\mathbf{x}+\mathbf{c}_q,\,t{+}1)=f_q-\dfrac{1}{\tau}\,(f_q-f_q^{\rm eq})$",
+        "demo": "results/vortex_street.gif"},
+    "Flow around your name (LBM)": {
+        "method": "Lattice Boltzmann · D2Q9",
+        "blurb": "The same solver, but the obstacle is text you type — watch vortices peel "
+                 "off the letters. Lattice Boltzmann handles arbitrary geometry for free.",
+        "eq": r"$f_q(\mathbf{x}+\mathbf{c}_q,\,t{+}1)=f_q-\dfrac{1}{\tau}\,(f_q-f_q^{\rm eq})$",
+        "demo": "results/flow_around_flowzoo.gif"},
+    "Smoke plume (Navier–Stokes)": {
+        "method": "Incompressible Navier–Stokes · projection",
+        "blurb": "A hot, dyed source rises into a swirling buoyant plume — the incompressible "
+                 "Navier–Stokes equations with Boussinesq buoyancy and vorticity confinement.",
+        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\cdot\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}+\mathbf{f},\quad \nabla\cdot\mathbf{u}=0$",
+        "demo": "results/smoke_plume.gif"},
+    "Rayleigh–Taylor (Navier–Stokes)": {
+        "method": "Incompressible Navier–Stokes · projection",
+        "blurb": "Heavy fluid resting on light fluid under gravity is unstable: the interface "
+                 "rolls up into the classic mushroom-cap plumes.",
+        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\cdot\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}-g\,\rho\,\hat{\mathbf{y}}$",
+        "demo": "results/rayleigh_taylor.gif"},
+    "Explosion (Compressible)": {
+        "method": "Compressible Euler · finite-volume HLLC",
+        "blurb": "A high-pressure charge bursts into ambient gas, launching an expanding "
+                 "shock wave (shown in schlieren) that flings debris across the domain.",
+        "eq": r"$\partial_t\mathbf{U}+\nabla\!\cdot\!\mathbf{F}(\mathbf{U})=0,\quad \mathbf{U}=[\rho,\rho u,\rho v,E]$",
+        "demo": "results/explosion.gif"},
+    "Shock–bubble (Compressible)": {
+        "method": "Compressible Euler · finite-volume HLLC",
+        "blurb": "A planar shock sweeps over a light-gas bubble; the density mismatch rolls "
+                 "it into a vortex pair (a Richtmyer–Meshkov-type instability).",
+        "eq": r"$\partial_t\mathbf{U}+\nabla\!\cdot\!\mathbf{F}(\mathbf{U})=0,\quad \mathbf{U}=[\rho,\rho u,\rho v,E]$",
+        "demo": "results/shock_bubble.gif"},
+    "Dam break (SPH)": {
+        "method": "Smoothed-Particle Hydrodynamics",
+        "blurb": "A column of water collapses and surges across a tank — a meshfree, "
+                 "particle-based free-surface flow. Validated against the dam-break front speed.",
+        "eq": r"$\dfrac{D\mathbf{v}_i}{Dt}=-\sum_j m_j\!\left(\dfrac{p_i}{\rho_i^2}+\dfrac{p_j}{\rho_j^2}\right)\nabla W_{ij}+\mathbf{g}$",
+        "demo": "results/dam_break.gif"},
+    "Kelvin–Helmholtz (Spectral)": {
+        "method": "Pseudo-spectral · FFT",
+        "blurb": "A shear layer between two streams rolls up into Kelvin–Helmholtz billows "
+                 "that cascade toward 2D turbulence — solved with FFTs to spectral accuracy.",
+        "eq": r"$\partial_t\omega+(\mathbf{u}\cdot\nabla)\omega=\nu\nabla^2\omega,\quad \nabla^2\psi=-\omega$",
+        "demo": "results/turbulence.gif"},
 }
 
 

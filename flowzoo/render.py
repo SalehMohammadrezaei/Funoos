@@ -159,3 +159,35 @@ def symmetric_limit(field, pct=99.5):
     """A robust symmetric color limit for diverging fields (vorticity)."""
     v = np.percentile(np.abs(field), pct)
     return -v, v
+
+
+def streamlines_rgb(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID,
+                    density=1.1, bg=INK, dpi=100):
+    """Render flow streamlines colored by speed to an RGB frame."""
+    import matplotlib.pyplot as plt
+    ny, nx = ux.shape
+    spd = np.sqrt(ux * ux + uy * uy)
+    u, v = ux.copy(), uy.copy()
+    if mask is not None:
+        m = mask.astype(bool); u[m] = 0; v[m] = 0
+    cmap = matplotlib.colormaps[cmap] if isinstance(cmap, str) else cmap
+    fig = plt.figure(figsize=(nx / dpi, ny / dpi), dpi=dpi)
+    ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(bg); fig.patch.set_facecolor(bg)
+    Y, X = np.mgrid[0:ny, 0:nx]
+    vmax = np.percentile(spd, 99.5) + 1e-12
+    lw = 0.6 + 1.1 * np.clip(spd / vmax, 0, 1)
+    try:
+        ax.streamplot(X, Y, u, v, color=spd, cmap=cmap, density=density,
+                      linewidth=lw, arrowsize=0.7, norm=plt.Normalize(0, vmax))
+    except Exception:
+        ax.streamplot(X, Y, u, v, color="#7fd0ff", density=density, linewidth=1.0)
+    if mask is not None:
+        from PIL import Image as _I
+        mc = np.array(_I.new("RGB", (1, 1), mask_color))[0, 0] / 255.0
+        ov = np.zeros((ny, nx, 4)); ov[m] = [*mc, 1.0]
+        ax.imshow(ov, origin="lower", extent=[0, nx, 0, ny], zorder=5)
+    ax.set_xlim(0, nx - 1); ax.set_ylim(0, ny - 1); ax.axis("off")
+    fig.canvas.draw(); w, h = fig.canvas.get_width_height()
+    rgb = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(h, w, 4)[..., :3].copy()
+    plt.close(fig)
+    return rgb
