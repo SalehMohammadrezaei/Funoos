@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 #include <algorithm>
 
 static const double G = 1.4;
@@ -195,7 +196,7 @@ int main(int argc,char**argv){
         for(int s=0;s<N;s++){ St q=getprim(r,mx,my,E,s);
             double a2=sqrt(G*q.p/q.r); m=std::max(m,std::max(fabs(q.u),fabs(q.v))+a2);} return m; };
 
-    std::string mk="mkdir -p "+a.out; if(system(mk.c_str())){}
+    std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
     std::vector<double> dR(N),dMX(N),dMY(N),dE(N);
     double t=0; int nf=0;
     for(int step=0; step<a.steps && t<a.tend; step++){

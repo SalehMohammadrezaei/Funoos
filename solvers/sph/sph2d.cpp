@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 #include <algorithm>
 
 struct Args{ double a=1.0,H=2.0,Lx=5.0,Ly=3.2,dp=0.025,g=9.81,tend=1.6;
@@ -57,7 +58,7 @@ int main(int argc,char**argv){
     auto cellId=[&](double px,double py){ int ci=std::min(gnx-1,std::max(0,(int)(px/supp)+1));
         int cj=std::min(gny-1,std::max(0,(int)(py/supp)+1)); return cj*gnx+ci; };
 
-    std::string mk="mkdir -p "+A.out; if(system(mk.c_str())){}
+    std::error_code _ec; std::filesystem::create_directories(A.out, _ec);
     std::ofstream front(A.out+"/front.csv"); front<<"t,xfront\n";
     int nf=0;
 

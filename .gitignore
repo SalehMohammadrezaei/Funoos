@@ -27,3 +27,10 @@ solvers/incompressible/ins2d
 solvers/compressible/euler2d
 solvers/sph/sph2d
 results/_mask_check.png
+
+# PyInstaller / Windows build artifacts
+build/
+dist/
+*.spec
+solvers/**/*.exe
+bin/

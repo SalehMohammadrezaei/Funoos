@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 #include <algorithm>
 
 // D2Q9 lattice
@@ -100,8 +101,7 @@ int main(int argc, char** argv) {
     int    n_pert = std::max(1500, a.steps/15);
     double pert_amp = 0.06*a.U, pert_period = 2000.0;
 
-    std::string mkout = "mkdir -p " + a.out;
-    if (system(mkout.c_str()) != 0) { fprintf(stderr,"mkdir failed\n"); return 1; }
+    std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
 
     std::ofstream probe(a.out + "/probe.csv");
     probe << "step,uy\n";

@@ -6,7 +6,9 @@ high-quality GIF + MP4 export.
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -14,6 +16,19 @@ import numpy as np
 import matplotlib
 from matplotlib.colors import LinearSegmentedColormap
 from PIL import Image
+
+
+def _ffmpeg():
+    """Locate ffmpeg: env override, bundled (PyInstaller), then PATH."""
+    if os.environ.get("FLOWZOO_FFMPEG"):
+        return os.environ["FLOWZOO_FFMPEG"]
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        exe = "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"
+        cand = Path(base) / exe
+        if cand.exists():
+            return str(cand)
+    return "ffmpeg"
 
 # --- FlowZoo signature colormaps ---------------------------------------------
 # Diverging "curl" map for vorticity: cyan -> teal -> ink -> rust -> amber,
@@ -90,7 +105,7 @@ def save_mp4(frames, path, fps=30):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as d:
         inp = _write_pngs(frames, d)
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-framerate", str(fps),
+        subprocess.run([_ffmpeg(), "-y", "-v", "error", "-framerate", str(fps),
                         "-i", inp, "-vf", _EVEN, "-pix_fmt", "yuv420p",
                         "-c:v", "libx264", "-crf", "18", path], check=True)
     return path
@@ -104,10 +119,10 @@ def save_gif(frames, path, fps=30):
         inp = _write_pngs(frames, d)
         pal = str(Path(d) / "pal.png")
         vf = f"fps={fps},{_EVEN}:flags=lanczos"
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-framerate", str(fps),
+        subprocess.run([_ffmpeg(), "-y", "-v", "error", "-framerate", str(fps),
                         "-i", inp, "-vf", vf + ",palettegen=stats_mode=diff",
                         pal], check=True)
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-framerate", str(fps),
+        subprocess.run([_ffmpeg(), "-y", "-v", "error", "-framerate", str(fps),
                         "-i", inp, "-i", pal, "-lavfi",
                         vf + "[x];[x][1:v]paletteuse=dither=sierra2_4a",
                         "-loop", "0", path], check=True)

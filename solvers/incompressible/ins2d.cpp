@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 
 struct Args {
     int nx=240, ny=360, steps=4000, save_every=20, iters=60;
@@ -110,7 +111,7 @@ int main(int argc,char**argv){
         }
     }
 
-    std::string mk="mkdir -p "+a.out; if(system(mk.c_str())){}
+    std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
     int nf=0;
     int sx=nx/2, sw=std::max(6,nx/12), sh=std::max(4,ny/40);
 

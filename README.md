@@ -92,12 +92,9 @@ watch the animation play live, then export a GIF or MP4:
 pip install pillow
 python studio.py
 ```
-Package it as a standalone double-click executable (optional):
-```bash
-pip install pyinstaller
-pyinstaller --onefile --add-data "solvers:solvers" studio.py
-# (compile the C++ solvers for the target OS first: make -C solvers/*)
-```
+**Windows users:** either run it under WSL (the window opens via WSLg), or build
+a native `.exe` + installer with the included `build_windows.bat` and
+`installer.iss`. Full step-by-step: **[docs/windows_build.md](docs/windows_build.md)**.
 
 ## Performance
 The four grid/particle solvers are **parallelized with OpenMP**; the spectral

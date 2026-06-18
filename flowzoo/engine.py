@@ -9,6 +9,7 @@ Frames are HxWx3 uint8 arrays; the GUI plays them and can export GIF/MP4.
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,13 +17,24 @@ import numpy as np
 
 from . import render, geometry
 
-ROOT = Path(__file__).resolve().parents[1]
-SOLVERS = ROOT / "solvers"
+# When bundled by PyInstaller, data lives under sys._MEIPASS; otherwise repo root.
+_BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+SOLVERS = _BASE / "solvers"
+EXE = ".exe" if sys.platform.startswith("win") else ""        # Windows binaries
+
+
+def _bin(name_dir, name):
+    return SOLVERS / name_dir / (name + EXE)
 
 
 def _ensure(binpath):
-    if not Path(binpath).exists():
-        subprocess.run(["make", "-C", str(Path(binpath).parent)], check=True)
+    if Path(binpath).exists():
+        return
+    if sys.platform.startswith("win") or getattr(sys, "frozen", False):
+        raise FileNotFoundError(
+            f"solver not found: {binpath}. On Windows, build the solvers first "
+            f"(see docs/windows_build.md).")
+    subprocess.run(["make", "-C", str(Path(binpath).parent)], check=True)
 
 
 def _read_vel(d, i, nx, ny):
@@ -44,11 +56,11 @@ def _run_lbm_text(p, progress, tmp):
     nx, ny = int(640 * p["scale"]), int(230 * p["scale"])
     Re = float(p["reynolds"]); U = 0.08; tau = 0.5 + 3 * (U * (ny * 0.5) / Re)
     steps = {"short": 22000, "medium": 40000, "long": 60000}[p["duration"]]
-    _ensure(SOLVERS / "lbm" / "lbm2d")
+    _ensure(_bin("lbm", "lbm2d"))
     mask = geometry.text(nx, ny, p["text"], font_frac=0.34, x_frac=0.28, max_w_frac=0.5)
     geometry.save_mask(mask, Path(tmp) / "m.bin")
     progress(f"solving LBM {nx}x{ny}, {steps} steps...")
-    subprocess.run([str(SOLVERS / "lbm" / "lbm2d"), "--nx", str(nx), "--ny", str(ny),
+    subprocess.run([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
                     "--mask", str(Path(tmp) / "m.bin"), "--U", str(U), "--tau", f"{tau:.5f}",
                     "--steps", str(steps), "--save_every", str(steps // 120),
                     "--out", tmp, "--probe_x", str(int(nx * 0.6)), "--probe_y", str(ny // 2)],
@@ -65,8 +77,8 @@ def _run_lbm_text(p, progress, tmp):
 def _run_ns(mode, p, progress, tmp):
     nx, ny = int(280 * p["scale"]), int(440 * p["scale"])
     steps = {"short": 2600, "medium": 4200, "long": 6000}[p["duration"]]
-    _ensure(SOLVERS / "incompressible" / "ins2d")
-    args = [str(SOLVERS / "incompressible" / "ins2d"), "--mode", mode,
+    _ensure(_bin("incompressible", "ins2d"))
+    args = [str(_bin("incompressible", "ins2d")), "--mode", mode,
             "--nx", str(nx), "--ny", str(ny), "--steps", str(steps),
             "--save_every", str(steps // 110), "--out", tmp]
     if mode == "smoke":
@@ -88,9 +100,9 @@ def _run_euler(mode, p, progress, tmp):
         nx = ny = int(420 * p["scale"]); tend = 70
     else:
         nx, ny = int(640 * p["scale"]), int(320 * p["scale"]); tend = 230
-    _ensure(SOLVERS / "compressible" / "euler2d")
+    _ensure(_bin("compressible", "euler2d"))
     progress(f"solving Euler ({mode}) {nx}x{ny}...")
-    subprocess.run([str(SOLVERS / "compressible" / "euler2d"), "--mode", mode,
+    subprocess.run([str(_bin("compressible", "euler2d")), "--mode", mode,
                     "--nx", str(nx), "--ny", str(ny), "--tend", str(tend), "--cfl", "0.4",
                     "--steps", "200000", "--save_every", "12", "--out", tmp], check=True)
     n = _frames_count(tmp); skip = max(1, n // 100)
