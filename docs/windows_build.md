@@ -47,7 +47,9 @@ bundles everything with PyInstaller. Result:
 ```
 dist\FlowZooStudio\FlowZooStudio.exe
 ```
-Double-click it to run.
+Double-click it to run. To **share** the app, copy the *whole*
+`dist\FlowZooStudio\` folder — the `.exe` needs its sibling `_internal\` folder
+(this is a one-folder PyInstaller build, not a single loose file).
 
 ### Make an installer (optional)
 Open `installer.iss` in Inno Setup and click **Compile**. You get

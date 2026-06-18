@@ -12,10 +12,10 @@ REM ============================================================================
 setlocal
 
 echo === [1/3] Building C++ solvers (statically linked, OpenMP) ===
-g++ -O3 -fopenmp -static -std=c++17 -o solvers\lbm\lbm2d.exe solvers\lbm\lbm2d.cpp || goto :err
-g++ -O3 -fopenmp -static -std=c++17 -o solvers\incompressible\ins2d.exe solvers\incompressible\ins2d.cpp || goto :err
-g++ -O3 -fopenmp -static -std=c++17 -o solvers\compressible\euler2d.exe solvers\compressible\euler2d.cpp || goto :err
-g++ -O3 -fopenmp -static -std=c++17 -o solvers\sph\sph2d.exe solvers\sph\sph2d.cpp || goto :err
+g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\lbm\lbm2d.exe solvers\lbm\lbm2d.cpp || goto :err
+g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\incompressible\ins2d.exe solvers\incompressible\ins2d.cpp || goto :err
+g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\compressible\euler2d.exe solvers\compressible\euler2d.cpp || goto :err
+g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\sph\sph2d.exe solvers\sph\sph2d.cpp || goto :err
 
 echo === [2/3] Installing Python dependencies ===
 python -m pip install --upgrade pip || goto :err
