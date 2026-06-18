@@ -155,13 +155,16 @@ class Result:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         Lx, Ly, vmax = self.hints["Lx"], self.hints["Ly"], self.hints["vmax"]
+        hull = self.hints.get("hull")
         out = []
-        for d in self.raw:
+        for fi, d in enumerate(self.raw):
             fig = plt.figure(figsize=(6.4, 6.4 * Ly / Lx), dpi=110)
             ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(render.INK)
             fig.patch.set_facecolor(render.INK)
             ax.scatter(d[:, 0], d[:, 1], c=np.clip(d[:, 2] / vmax, 0, 1), cmap=cm, s=6,
                        edgecolors="none")
+            if hull is not None:
+                hp = hull[fi]; ax.scatter(hp[:, 0], hp[:, 1], c="#c79a5b", s=9, edgecolors="none")
             ax.set_xlim(0, Lx); ax.set_ylim(0, Ly); ax.axis("off")
             fig.canvas.draw(); w, hh = fig.canvas.get_width_height()
             rgb = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(hh, w, 4)[..., :3].copy()
@@ -274,9 +277,9 @@ def _solve_euler(mode, p, pr, tmp):
 
 
 _SPLASH_SCENE = {"Dam break": "dam", "Drop & splash": "drop", "Sloshing tank": "slosh",
-                 "Pour into a glass": "pour", "Wavy ocean": "waves"}
+                 "Pour into a glass": "pour", "Wavy ocean": "waves", "Ship on waves": "ship"}
 _SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2),
-                "pour": (2.2, 3.4), "waves": (6.0, 2.4)}
+                "pour": (2.2, 3.4), "waves": (6.0, 2.4), "ship": (6.0, 2.4)}
 
 
 def _solve_dam(p, pr, tmp):
@@ -292,12 +295,14 @@ def _solve_dam(p, pr, tmp):
                     "--Lx", str(Lx), "--Ly", str(Ly), "--dp", str(dp), "--g", str(g),
                     "--tend", str(2.0 * _durv(p)), "--save_every", "60", "--out", tmp],
                    check=True, env=_ENV)
-    n = _nframes(tmp); skip = max(1, n // 100)
-    raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3)
-           for i in range(0, n, skip)]
+    n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
+    raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3) for i in idx]
+    hints = {"Lx": Lx, "Ly": Ly, "vmax": 1.2 * np.sqrt(2 * g * max(H, Ly * 0.5))}
+    if sc == "ship":
+        hints["hull"] = [np.fromfile(Path(tmp) / f"hull_{i:05d}.bin", dtype=np.float32).reshape(-1, 2)
+                         for i in idx]
     return Result("particles", raw, f"{p.get('scene', 'Dam break')}  ({len(raw[-1])} particles)",
-                  hints={"Lx": Lx, "Ly": Ly,
-                         "vmax": 1.2 * np.sqrt(2 * g * max(H, Ly * 0.5))})
+                  hints=hints)
 
 
 def _solve_spectral(p, pr, tmp):
@@ -368,7 +373,8 @@ EXHIBITS = {
     "The Big Splash": {
         "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
                     "choices": ["Dam break", "Drop & splash", "Sloshing tank",
-                                "Pour into a glass", "Wavy ocean"], "default": "Dam break",
+                                "Pour into a glass", "Wavy ocean", "Ship on waves"],
+                    "default": "Dam break",
                     "help": "Which free-surface scenario to run. Dam break uses the width/height "
                     "below; the others set up their own tank."},
                    _f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry", "Column width (Dam break)."),
@@ -476,7 +482,7 @@ META = {
                        "(mean density error ≈ 0.002).",
         "demo": "results/shock_bubble.gif"},
     "The Big Splash": {"method": "Free-surface water · Smoothed-Particle Hydrodynamics",
-        "blurb": "Water you can actually splash — five scenes from one meshfree solver. "
+        "blurb": "Water you can actually splash — six scenes from one meshfree solver. "
                  "Break a dam and watch the surge overturn against the far wall; drop a block "
                  "into a pool for a crown splash; slosh a tank back and forth until it "
                  "breaks; pour a stream into a tall glass; or drive a wavemaker across an "

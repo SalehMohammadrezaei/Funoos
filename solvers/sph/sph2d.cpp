@@ -61,6 +61,20 @@ int main(int argc,char**argv){
     else if(sc=="waves"||sc=="ship"){ double Ho=0.40*A.Ly; add_block(0,A.Lx,0,Ho,Ho); }
     else if(sc=="pour"){ double Hp=0.06*A.Ly; add_block(0,A.Lx,0,Hp,Hp); }   // shallow puddle
     std::vector<double> drho, ax, ay;
+
+    // floating-ship rigid body (a tapered hull of boundary particles)
+    const bool ship=(sc=="ship");
+    std::vector<double> hlx,hly;                 // hull particle coords, body frame
+    double Cx=0,Cy=0,th=0, bvx=0,bvy=0,bom=0, Mship=1,Iship=1;
+    if(ship){
+        double Ho=0.40*A.Ly, Wt=0.95, Wb=0.50, Hh=0.50;
+        for(double py=-Hh/2; py<=Hh/2+1e-9; py+=dp){
+            double frac=(py+Hh/2)/Hh, halfw=0.5*(Wb+(Wt-Wb)*frac);
+            for(double px=-halfw; px<=halfw+1e-9; px+=dp){ hlx.push_back(px); hly.push_back(py); }
+        }
+        Cx=A.Lx*0.45; Cy=Ho+Hh*0.12;
+        double area=0.5*(Wt+Wb)*Hh; Mship=rho0*area*0.55; Iship=Mship*(Wt*Wt+Hh*Hh)/12.0;
+    }
     printf("SPH scene=%s: %d particles, c0=%.1f, dt=%.2e, steps=%d\n",
            sc.c_str(),(int)x.size(),c0,dt,steps);
 
@@ -124,6 +138,34 @@ int main(int argc,char**argv){
             drho[i]=dr; ax[i]=fx+gx; ay[i]=fy-g;
         }
 
+        // floating ship: penalty contact pushes fluid away from the hull; the
+        // equal-and-opposite reaction (+gravity) drives the rigid body's heave,
+        // surge and roll — buoyancy emerges from the fluid pressure on the hull.
+        if(ship){
+            double ca=cos(th), sa=sin(th), Fbx=0, Fby=0, Tb=0; int Nh=hlx.size();
+            for(int k=0;k<Nh;k++){
+                double hxk=Cx+ca*hlx[k]-sa*hly[k], hyk=Cy+sa*hlx[k]+ca*hly[k];
+                int ci=(int)(hxk/supp)+1, cj=(int)(hyk/supp)+1;
+                for(int dj=-1;dj<=1;dj++)for(int di=-1;di<=1;di++){
+                    int cc=(cj+dj)*gnx+(ci+di); if(cc<0||cc>=gnx*gny) continue;
+                    for(int j: cell[cc]){
+                        double dx=x[j]-hxk, dy=y[j]-hyk, r2=dx*dx+dy*dy;
+                        if(r2>=h2||r2<1e-10) continue;
+                        double d=sqrt(r2), push=kw*(1.0-d/h), dirx=dx/d, diry=dy/d;
+                        ax[j]+=push*dirx; ay[j]+=push*diry;          // push fluid out
+                        double fxr=-m*push*dirx, fyr=-m*push*diry;   // reaction on hull
+                        Fbx+=fxr; Fby+=fyr; Tb+=(hxk-Cx)*fyr-(hyk-Cy)*fxr;
+                    }
+                }
+            }
+            Fby-=Mship*g;                                            // weight
+            Fbx-=0.8*Mship*bvx; Fby-=0.8*Mship*bvy; Tb-=0.9*Iship*bom; // damping
+            bvx+=dt*Fbx/Mship; bvy+=dt*Fby/Mship; bom+=dt*Tb/Iship;
+            Cx+=dt*bvx; Cy+=dt*bvy; th+=dt*bom;
+            if(th>0.5){th=0.5;bom=0;} if(th<-0.5){th=-0.5;bom=0;}
+            if(Cx<1.0){Cx=1.0;bvx=0;} if(Cx>A.Lx-1.0){Cx=A.Lx-1.0;bvx=0;}
+        }
+
         // moving left wall (paddle) generates waves
         double wallL=(sc=="waves"||sc=="ship")? paddle*0.5*(1-cos(2*M_PI*t/Tw)) : 0.0;
         #pragma omp parallel for
@@ -148,6 +190,12 @@ int main(int argc,char**argv){
                 buf[3*i+2]=(float)sqrt(vx[i]*vx[i]+vy[i]*vy[i]); }
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",A.out.c_str(),nf);
             std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),buf.size()*sizeof(float));
+            if(ship){ double ca=cos(th),sa=sin(th); int Nh=hlx.size();
+                std::vector<float> hb(2*Nh);
+                for(int k=0;k<Nh;k++){ hb[2*k]=(float)(Cx+ca*hlx[k]-sa*hly[k]);
+                    hb[2*k+1]=(float)(Cy+sa*hlx[k]+ca*hly[k]); }
+                char hn[512]; snprintf(hn,sizeof(hn),"%s/hull_%05d.bin",A.out.c_str(),nf);
+                std::ofstream hof(hn,std::ios::binary); hof.write((char*)hb.data(),hb.size()*sizeof(float)); }
             double xf=0; for(int i=0;i<N2;i++) if(y[i]<0.1*A.H && x[i]>xf) xf=x[i];
             front<<t<<","<<xf<<"\n"; nf++;
             if(step%(A.save_every*20)==0) printf("step %d/%d (%d frames, %d particles)\n",step,steps,nf,N2);
