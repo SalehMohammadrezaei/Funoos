@@ -36,7 +36,8 @@ FLOWZOO_RT = LinearSegmentedColormap.from_list("flowzoo_rt", [
     (0.00, "#0e3d4d"), (0.35, "#2fb6c4"), (0.5, "#e9f6f4"),
     (0.65, "#f2a23c"), (1.00, "#7a1f12"),
 ])
-INK = "#0a0b12"  # canonical background / solid color
+INK = "#0a0b12"   # canonical background
+SOLID = "#aab4c4"  # solid-phase color (obstacles: cylinder, letters)
 
 
 def vorticity(ux, uy):

@@ -84,10 +84,38 @@ python demos/turbulence.py
 # add --quick to any demo for a fast, low-res smoke test
 ```
 
+## 🎛️ FlowZoo Studio (interactive app)
+One window containing every solver — pick an exhibit, adjust its parameters
+(type your own text, set Reynolds number, resolution, duration), hit **Run**,
+watch the animation play live, then export a GIF or MP4:
+```bash
+pip install pillow
+python studio.py
+```
+Package it as a standalone double-click executable (optional):
+```bash
+pip install pyinstaller
+pyinstaller --onefile --add-data "solvers:solvers" studio.py
+# (compile the C++ solvers for the target OS first: make -C solvers/*)
+```
+
+## Performance
+The four grid/particle solvers are **parallelized with OpenMP**; the spectral
+solver uses multithreaded FFTs. On the LBM core the throughput scales near-
+linearly across a handful of cores (≈56 → 211 MLUPS from 1 → 4 threads). Because
+the 2D grids are modest, **~4–16 threads is the sweet spot** — set it explicitly
+for best results:
+```bash
+OMP_NUM_THREADS=8 python demos/vortex_street.py
+```
+Each exhibit's solve runs in roughly **30 s – 2 min on a normal multi-core
+laptop** (no GPU required); GIF encoding is often the slower step.
+
 ## Repository layout
 ```
+studio.py     interactive Tkinter control panel (all exhibits, live preview)
 solvers/      C++ solver cores: lbm/ incompressible/ compressible/ sph/
-flowzoo/      Python: spectral solver, geometry, text→mask, validation, renderer
+flowzoo/      Python: spectral solver, engine, geometry, text→mask, validate, render
 demos/        one runnable script per exhibit
 results/      the gallery animations (GIF + MP4) and validation figures
 docs/         method notes & validation write-ups

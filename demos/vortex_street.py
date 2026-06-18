@@ -79,7 +79,7 @@ def main():
     vort = [render.vorticity(ux, uy) for ux, uy in use]
     vmax = np.percentile(np.abs(np.concatenate([v.ravel() for v in vort[-20:]])), 99.5)
     imgs = [render.field_to_rgb(v, render.FLOWZOO_CURL, -vmax, vmax,
-                                mask=mask, upscale=1) for v in vort]
+                                mask=mask, mask_color=render.SOLID, upscale=1) for v in vort]
     out_gif = ROOT / "results" / "vortex_street.gif"
     render.save_gif(imgs, out_gif, fps=24)
     render.save_mp4(imgs, ROOT / "results" / "vortex_street.mp4", fps=24)
