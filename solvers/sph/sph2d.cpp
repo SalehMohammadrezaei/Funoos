@@ -49,8 +49,7 @@ int main(int argc,char**argv){
         for(double px=x0+dp*0.5; px<x1; px+=dp)
             for(double py=y0+dp*0.5; py<y1; py+=dp){
                 x.push_back(px); y.push_back(py); vx.push_back(0); vy.push_back(vyi);
-                double rh=rho0*pow(1.0+rho0*g*std::max(0.0,surf-py)/B,1.0/gamma);
-                rho.push_back(rh); p.push_back(0); }
+                (void)surf; rho.push_back(rho0); p.push_back(0); }   // start at rest, p=0
     };
     // --- scene initial conditions ---
     if(sc=="dam"){ add_block(0,A.a,0,A.H,A.H); }
@@ -59,7 +58,7 @@ int main(int argc,char**argv){
         add_block(cx-bw/2,cx+bw/2,by,by+bh,by+bh); }
     else if(sc=="slosh"){ double Hs=0.42*A.Ly; add_block(0,A.Lx,0,Hs,Hs); }
     else if(sc=="waves"||sc=="ship"){ double Ho=0.40*A.Ly; add_block(0,A.Lx,0,Ho,Ho); }
-    else if(sc=="pour"){ double Hp=0.06*A.Ly; add_block(0,A.Lx,0,Hp,Hp); }   // shallow puddle
+    // pour starts from an empty glass and fills via continuous emission
     std::vector<double> drho, ax, ay;
 
     // floating-ship rigid body (a tapered hull of boundary particles)
@@ -93,13 +92,14 @@ int main(int argc,char**argv){
     int nf=0;
     const double kw=0.10*c0*c0/h;
     // pour spout + wave paddle parameters
-    const double sx=A.Lx*0.5, sw=std::max(3*dp, 0.10*A.Lx);
+    const double sx=A.Lx*0.5, sw=std::max(3.0*dp, 0.045*A.Lx);   // narrow pour stream
     const double Tw=0.9, paddle=0.45*A.Lx*0.0 + std::min(0.5, 0.12*A.Lx);  // wave amplitude
     const double Ts=1.1, sloshA=0.7*g;
     const int Ncap=22000;
 
     for(int step=0; step<=steps; step++){
         double t=step*dt;
+        double ramp=std::min(1.0, t/0.40), gt=g*ramp, kwt=kw*ramp;   // ease in: no t=0 pop
         // continuous emission for the pour scene
         if(sc=="pour" && (int)x.size()<Ncap && step%std::max(1,(int)(0.012/dt))==0){
             for(double px=sx-sw; px<sx+sw; px+=dp){
@@ -116,7 +116,7 @@ int main(int argc,char**argv){
         #pragma omp parallel for
         for(int i=0;i<N;i++){ double pr=B*(pow(rho[i]/rho0,gamma)-1.0); p[i]=pr>0?pr:0.0; }
 
-        double gx=(sc=="slosh")? sloshA*sin(2*M_PI*t/Ts) : 0.0;
+        double gx=(sc=="slosh")? sloshA*sin(2*M_PI*t/Ts)*ramp : 0.0;
 
         #pragma omp parallel for schedule(dynamic,64)
         for(int i=0;i<N;i++){
@@ -135,7 +135,7 @@ int main(int argc,char**argv){
                     fx += (pr - m*visc)*gxk; fy += (pr - m*visc)*gyk;
                 }
             }
-            drho[i]=dr; ax[i]=fx+gx; ay[i]=fy-g;
+            drho[i]=dr; ax[i]=fx+gx; ay[i]=fy-gt;
         }
 
         // floating ship: penalty contact pushes fluid away from the hull; the
@@ -151,14 +151,14 @@ int main(int argc,char**argv){
                     for(int j: cell[cc]){
                         double dx=x[j]-hxk, dy=y[j]-hyk, r2=dx*dx+dy*dy;
                         if(r2>=h2||r2<1e-10) continue;
-                        double d=sqrt(r2), push=kw*(1.0-d/h), dirx=dx/d, diry=dy/d;
+                        double d=sqrt(r2), push=kwt*(1.0-d/h), dirx=dx/d, diry=dy/d;
                         ax[j]+=push*dirx; ay[j]+=push*diry;          // push fluid out
                         double fxr=-m*push*dirx, fyr=-m*push*diry;   // reaction on hull
                         Fbx+=fxr; Fby+=fyr; Tb+=(hxk-Cx)*fyr-(hyk-Cy)*fxr;
                     }
                 }
             }
-            Fby-=Mship*g;                                            // weight
+            Fby-=Mship*gt;                                           // weight
             Fbx-=0.8*Mship*bvx; Fby-=0.8*Mship*bvy; Tb-=0.9*Iship*bom; // damping
             bvx+=dt*Fbx/Mship; bvy+=dt*Fby/Mship; bom+=dt*Tb/Iship;
             Cx+=dt*bvx; Cy+=dt*bvy; th+=dt*bom;
@@ -167,15 +167,16 @@ int main(int argc,char**argv){
         }
 
         // moving left wall (paddle) generates waves
-        double wallL=(sc=="waves"||sc=="ship")? paddle*0.5*(1-cos(2*M_PI*t/Tw)) : 0.0;
+        double tp=std::max(0.0, t-0.40);   // start the wavemaker only after settling
+        double wallL=(sc=="waves"||sc=="ship")? paddle*0.5*(1-cos(2*M_PI*tp/Tw)) : 0.0;
         #pragma omp parallel for
         for(int i=0;i<N;i++){
             rho[i]+=dt*drho[i]; if(rho[i]<rho0*0.5) rho[i]=rho0*0.5;
             double wx=0,wy=0;
-            if(x[i]<wallL+h) wx+= kw*(1.0-(x[i]-wallL)/h);
-            if(x[i]>A.Lx-h)  wx-= kw*(1.0-(A.Lx-x[i])/h);
-            if(y[i]<h)       wy+= kw*(1.0-y[i]/h);
-            if(y[i]>A.Ly-h)  wy-= kw*(1.0-(A.Ly-y[i])/h);
+            if(x[i]<wallL+h) wx+= kwt*(1.0-(x[i]-wallL)/h);
+            if(x[i]>A.Lx-h)  wx-= kwt*(1.0-(A.Lx-x[i])/h);
+            if(y[i]<h)       wy+= kwt*(1.0-y[i]/h);
+            if(y[i]>A.Ly-h)  wy-= kwt*(1.0-(A.Ly-y[i])/h);
             vx[i]+=dt*(ax[i]+wx); vy[i]+=dt*(ay[i]+wy);
             double spd=sqrt(vx[i]*vx[i]+vy[i]*vy[i]);
             if(spd>vmax){ vx[i]*=vmax/spd; vy[i]*=vmax/spd; }

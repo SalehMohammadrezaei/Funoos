@@ -117,12 +117,12 @@ int main(int argc,char**argv){
 
     std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
     int nf=0;
-    int sx=nx/2, sw=std::max(6,(int)(nx/12*a.srcw)), sh=std::max(4,ny/40);
+    int sx=nx/2, sw=std::max(6,(int)(nx/12*a.srcw)), sh=std::max(5,ny/26);
 
     for(int step=0; step<=a.steps; step++){
         // forces: buoyancy + (smoke) continuous source + vorticity confinement
         if(smoke){
-            for(int j=2;j<2+sh;j++)for(int i=sx-sw;i<=sx+sw;i++){
+            for(int j=1;j<1+sh;j++)for(int i=sx-sw;i<=sx+sw;i++){
                 double r=double(i-sx)/sw; double g=exp(-3*r*r);
                 s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g);
                 v[IX(i,j)] += 0.02*g;
