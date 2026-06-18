@@ -69,6 +69,39 @@ COLORMAPS = {
 }
 
 
+def _font(sz):
+    from PIL import ImageFont
+    for p in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf"):
+        try:
+            return ImageFont.truetype(p, sz)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def add_colorbar(rgb, cmap, vmin, vmax, label=""):
+    """Overlay a labelled colorbar (with tick values) on an RGB frame."""
+    from PIL import ImageDraw
+    cmap = matplotlib.colormaps[cmap] if isinstance(cmap, str) else cmap
+    img = Image.fromarray(rgb).convert("RGB"); W, H = img.width, img.height
+    d = ImageDraw.Draw(img, "RGBA")
+    fs = max(10, H // 42); fnt = _font(fs)
+    bw = max(12, W // 60); bh = int(H * 0.5); x0 = W - bw - int(W * 0.11); y0 = int(H * 0.09)
+    d.rectangle([x0 - 9, y0 - fs - 8, W - 5, y0 + bh + 10], fill=(8, 9, 16, 165))
+    for k in range(bh):
+        c = cmap(1 - k / bh); d.line([x0, y0 + k, x0 + bw, y0 + k],
+                                     fill=tuple(int(255 * v) for v in c[:3]))
+    d.rectangle([x0, y0, x0 + bw, y0 + bh], outline=(210, 218, 230, 220))
+    for f in (0.0, 0.25, 0.5, 0.75, 1.0):
+        val = vmin + (vmax - vmin) * f; yy = y0 + int((1 - f) * bh)
+        d.line([x0 + bw, yy, x0 + bw + 4, yy], fill=(210, 218, 230, 220))
+        d.text((x0 + bw + 7, yy - fs // 2), f"{val:.2g}", fill=(228, 233, 243, 235), font=fnt)
+    if label:
+        d.text((x0 - 6, y0 - fs - 6), label, fill=(228, 233, 243, 240), font=fnt)
+    return np.asarray(img)
+
+
 def overlay_particles(rgb, xs, ys, sizes, color=(255, 210, 120)):
     """Draw glowing debris dots onto an RGB frame (image pixel coords)."""
     from PIL import ImageDraw
@@ -162,7 +195,7 @@ def symmetric_limit(field, pct=99.5):
 
 
 def streamlines_rgb(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID,
-                    density=1.1, bg=INK, dpi=100):
+                    density=1.1, bg=INK, dpi=100, vmax=None):
     """Render flow streamlines colored by speed to an RGB frame."""
     import matplotlib.pyplot as plt
     ny, nx = ux.shape
@@ -174,7 +207,8 @@ def streamlines_rgb(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID,
     fig = plt.figure(figsize=(nx / dpi, ny / dpi), dpi=dpi)
     ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(bg); fig.patch.set_facecolor(bg)
     Y, X = np.mgrid[0:ny, 0:nx]
-    vmax = np.percentile(spd, 99.5) + 1e-12
+    if vmax is None:
+        vmax = np.percentile(spd, 99.5) + 1e-12
     lw = 0.6 + 1.1 * np.clip(spd / vmax, 0, 1)
     try:
         ax.streamplot(X, Y, u, v, color=spd, cmap=cmap, density=density,

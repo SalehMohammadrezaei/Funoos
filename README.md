@@ -91,10 +91,11 @@ A multi-page desktop app containing every solver:
   a plain-English description, and a looping **demo clip**.
 - **Studio** → tune *every* parameter — each with a **"?"** explaining what it
   does (Reynolds, viscosity, buoyancy, gravity, confinement, dam width/height,
-  particle count, blast pressure, …) — pick a **visualization**
-  (vorticity / speed / **streamlines** / density / schlieren), a **color
-  palette** (10), **resolution**, and a **free-form duration**, then **Run**
-  (animated progress), watch it **play live**, and export **GIF/MP4**.
+  particle count, blast pressure, …), set **resolution** and a **free-form
+  duration**, then **Run** once. Afterwards, **switch visualization live**
+  (vorticity / speed / **streamlines** / density / schlieren) and **recolor**
+  (10 palettes) **without re-running**, with **play/pause** and a **colorbar
+  legend** showing the value scale. Export **GIF/MP4**.
 ```bash
 pip install pillow
 python studio.py

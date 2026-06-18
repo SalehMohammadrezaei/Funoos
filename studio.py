@@ -88,6 +88,8 @@ class App:
         self.fps = tk.IntVar(value=26); self.widgets = {}
         self.sel = list(engine.EXHIBITS)[0]
         self.gframes, self.gidx, self._eqimg = [], 0, None
+        self.result = None; self.view = tk.StringVar(); self.cmap = tk.StringVar()
+        self.viewbtns = {}
 
         st = ttk.Style()
         try: st.theme_use("clam")
@@ -175,15 +177,31 @@ class App:
             btn.pack(fill="x", pady=3); hover(btn, CARD, CARD2)
             self.exh_btns[name] = btn
 
+        st = ttk.Style()
+        st.configure("TNotebook", background=BG, borderwidth=0)
+        st.configure("TNotebook.Tab", background=CARD, foreground=MUTED, padding=(14, 6),
+                     font=(FONT, 9, "bold"))
+        st.map("TNotebook.Tab", background=[("selected", CARD2)], foreground=[("selected", FG)])
+
         det = tk.Frame(body, bg=BG); det.pack(side="right", fill="both", expand=True, padx=(6, 14), pady=14)
         self.g_method = tk.Label(det, text="", bg=BG, fg=ACCENT, font=(FONT, 10, "bold"))
         self.g_method.pack(anchor="w")
-        self.g_title = tk.Label(det, text="", bg=BG, fg=FG, font=(FONT, 20, "bold"))
-        self.g_title.pack(anchor="w", pady=(0, 6))
-        self.g_blurb = tk.Label(det, text="", bg=BG, fg=MUTED, font=(FONT, 11), justify="left",
-                                wraplength=620); self.g_blurb.pack(anchor="w")
-        self.g_eq = tk.Label(det, bg=BG); self.g_eq.pack(anchor="w", pady=(12, 6))
-        self.g_demo = tk.Label(det, bg="#05070b"); self.g_demo.pack(anchor="w")
+        self.g_title = tk.Label(det, text="", bg=BG, fg=FG, font=(FONT, 22, "bold"))
+        self.g_title.pack(anchor="w", pady=(0, 8))
+
+        nb = ttk.Notebook(det); nb.pack(fill="x")
+
+        def _tab(title):
+            fr = tk.Frame(nb, bg=CARD, padx=14, pady=12); nb.add(fr, text=title); return fr
+        self.g_blurb = tk.Label(_tab("Overview"), text="", bg=CARD, fg=FG, font=(FONT, 11),
+                                justify="left", wraplength=600); self.g_blurb.pack(anchor="w")
+        eqtab = _tab("Equation"); self.g_eq = tk.Label(eqtab, bg=CARD); self.g_eq.pack(anchor="w")
+        self.g_num = tk.Label(_tab("Numerics"), text="", bg=CARD, fg=FG, font=(FONT, 11),
+                              justify="left", wraplength=600); self.g_num.pack(anchor="w")
+        self.g_val = tk.Label(_tab("Validation"), text="", bg=CARD, fg=FG, font=(FONT, 11),
+                              justify="left", wraplength=600); self.g_val.pack(anchor="w")
+
+        self.g_demo = tk.Label(det, bg="#05070b"); self.g_demo.pack(anchor="w", pady=(12, 0))
         opn = tk.Button(det, text="Customize & run  →", bg=ACCENT, fg="white", relief="flat",
                         bd=0, padx=22, pady=10, font=(FONT, 12, "bold"), activebackground=ACCENT_D,
                         command=lambda: self.show("studio"))
@@ -197,6 +215,8 @@ class App:
         self.g_method.config(text=m.get("method", ""))
         self.g_title.config(text=name.split(" (")[0])
         self.g_blurb.config(text=m.get("blurb", ""))
+        self.g_num.config(text=m.get("numerics", ""))
+        self.g_val.config(text="✓  " + m.get("validation", ""))
         eqp = ROOT / "docs" / "eq" / (slug(name) + ".png")
         if eqp.exists():
             im = Image.open(eqp); im = im.resize((min(560, im.width), int(im.height * min(560, im.width) / im.width)))
@@ -260,8 +280,11 @@ class App:
                                justify="left", font=(FONT, 9)); self.status.pack(anchor="w", pady=(10, 0))
 
         prev = tk.Frame(body, bg=BG); prev.pack(side="right", fill="both", expand=True)
-        self.canvas = tk.Label(prev, bg="#05070b", text="Set parameters  ›  Run ▶", fg=MUTED,
-                               font=(FONT, 14)); self.canvas.pack(expand=True, fill="both", padx=10, pady=10)
+        self.viewbar = tk.Frame(prev, bg=BG); self.viewbar.pack(fill="x", padx=10, pady=(10, 0))
+        self.canvas = tk.Label(prev, bg="#05070b",
+                               text="Set parameters  ›  Run ▶\n(then switch Vorticity / Speed / "
+                                    "Streamlines live)", fg=MUTED, font=(FONT, 14))
+        self.canvas.pack(expand=True, fill="both", padx=10, pady=10)
 
     def _build_params(self):
         for w in self.inner.winfo_children():
@@ -320,9 +343,59 @@ class App:
 
         def work():
             try:
-                fr, info = engine.run_exhibit(name, params,
-                                              progress=lambda s: self.q.put(("status", s)))
-                self.q.put(("done", (fr, info)))
+                res = engine.solve_exhibit(name, params, progress=lambda s: self.q.put(("status", s)))
+                self.q.put(("solved", res))
+                self.q.put(("status", "rendering visualization…"))
+                frames = res.render(res.views[0], engine.DEFCMAP[res.kind])
+                self.q.put(("done", (frames, res.info)))
+            except Exception as ex:  # pragma: no cover
+                self.q.put(("error", str(ex)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _set_views(self, res):
+        for w in self.viewbar.winfo_children():
+            w.destroy()
+        self.viewbtns = {}
+        tk.Label(self.viewbar, text="View", bg=BG, fg=MUTED, font=(FONT, 9)).pack(side="left", padx=(0, 4))
+        self.view.set(res.views[0])
+        for v in res.views:
+            b = tk.Button(self.viewbar, text=v, bg=CARD, fg=FG, relief="flat", bd=0, padx=11, pady=5,
+                          font=(FONT, 9, "bold"), activebackground=CARD2,
+                          command=lambda vv=v: self._change_view(vv))
+            b.pack(side="left", padx=2); self.viewbtns[v] = b
+        tk.Label(self.viewbar, text="   Palette", bg=BG, fg=MUTED, font=(FONT, 9)).pack(side="left", padx=(8, 4))
+        self.cmap.set(engine.DEFCMAP[res.kind])
+        cmb = ttk.Combobox(self.viewbar, textvariable=self.cmap, state="readonly",
+                           values=list(render.COLORMAPS), width=16, font=(FONT, 9))
+        cmb.pack(side="left"); cmb.bind("<<ComboboxSelected>>", lambda *_: self._rerender())
+        self.playbtn = tk.Button(self.viewbar, text="⏸ Pause", bg=CARD2, fg=FG, relief="flat", bd=0,
+                                 padx=12, pady=5, font=(FONT, 9, "bold"), activebackground="#33405a",
+                                 command=self._toggle_play)
+        self.playbtn.pack(side="right")
+        self._hl_view()
+
+    def _hl_view(self):
+        for v, b in self.viewbtns.items():
+            on = v == self.view.get()
+            b.config(bg=ACCENT if on else CARD, fg="white" if on else FG)
+
+    def _change_view(self, v):
+        self.view.set(v); self._hl_view(); self._rerender()
+
+    def _toggle_play(self):
+        self.playing = not self.playing
+        self.playbtn.config(text="⏸ Pause" if self.playing else "▶ Play")
+
+    def _rerender(self):
+        if not self.result or self.busy:
+            return
+        self.busy = True; self.run_btn.config(state="disabled")
+        self.prog.pack(fill="x", pady=(2, 4)); self.prog.start(12)
+        v, c = self.view.get(), self.cmap.get()
+
+        def work():
+            try:
+                self.q.put(("rendered", self.result.render(v, c)))
             except Exception as ex:  # pragma: no cover
                 self.q.put(("error", str(ex)))
         threading.Thread(target=work, daemon=True).start()
@@ -333,10 +406,17 @@ class App:
                 kind, payload = self.q.get_nowait()
                 if kind == "status":
                     self.status.config(text="⏳ " + payload, fg=MUTED)
-                elif kind == "done":
-                    self.frames, info = payload
+                elif kind == "solved":
+                    self.result = payload; self._set_views(payload)
+                elif kind in ("done", "rendered"):
+                    if kind == "done":
+                        self.frames, info = payload
+                        self.status.config(text=f"✓ {info}\n{len(self.frames)} frames — playing.", fg=GOOD)
+                    else:
+                        self.frames = payload
                     self.pidx, self.playing, self.busy = 0, True, False
-                    self.status.config(text=f"✓ {info}\n{len(self.frames)} frames — playing.", fg=GOOD)
+                    if hasattr(self, "playbtn"):
+                        self.playbtn.config(text="⏸ Pause")
                     self.run_btn.config(state="normal", text="▶  Run simulation")
                     self.prog.stop(); self.prog.pack_forget()
                 elif kind == "error":
