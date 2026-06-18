@@ -19,13 +19,13 @@ g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\sph\sph2d.exe
 
 echo === [2/3] Installing Python dependencies ===
 python -m pip install --upgrade pip || goto :err
-pip install numpy scipy matplotlib pillow pyinstaller || goto :err
+pip install numpy scipy matplotlib pillow customtkinter pyinstaller || goto :err
 
 echo === [3/3] Bundling the app with PyInstaller ===
 set FF=
 if exist bin\ffmpeg.exe set FF=--add-binary "bin\ffmpeg.exe;."
 pyinstaller --noconfirm --onedir --windowed --name FlowZooStudio ^
-  --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" ^
+  --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" --collect-all customtkinter ^
   %FF% studio.py || goto :err
 
 echo.

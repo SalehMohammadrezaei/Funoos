@@ -13,7 +13,7 @@ out of the box via **WSLg** — no packaging needed:
 # in your WSL Ubuntu terminal, inside the FlowZoo folder
 make -C solvers/lbm && make -C solvers/incompressible
 make -C solvers/compressible && make -C solvers/sph
-pip install numpy scipy matplotlib pillow
+pip install numpy scipy matplotlib pillow customtkinter
 sudo apt install ffmpeg          # for GIF/MP4 export
 python studio.py
 ```

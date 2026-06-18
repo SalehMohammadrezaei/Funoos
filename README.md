@@ -97,7 +97,7 @@ A multi-page desktop app containing every solver:
   (10 palettes) **without re-running**, with **play/pause** and a **colorbar
   legend** showing the value scale. Export **GIF/MP4**.
 ```bash
-pip install pillow
+pip install customtkinter pillow
 python studio.py
 ```
 **Windows users:** either run it under WSL (the window opens via WSLg), or build
@@ -118,7 +118,7 @@ laptop** (no GPU required); GIF encoding is often the slower step.
 
 ## Repository layout
 ```
-studio.py     interactive Tkinter control panel (all exhibits, live preview)
+studio.py     modern CustomTkinter app (intro · gallery · studio)
 solvers/      C++ solver cores: lbm/ incompressible/ compressible/ sph/
 flowzoo/      Python: spectral solver, engine, geometry, text→mask, validate, render
 demos/        one runnable script per exhibit

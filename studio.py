@@ -1,10 +1,11 @@
-"""FlowZoo Studio — an interactive, multi-page CFD gallery.
+"""FlowZoo Studio — a modern, multi-page CFD gallery (CustomTkinter UI).
 
   • Intro   — what FlowZoo is, and who made it.
-  • Gallery — browse exhibits; see the method, governing equation and a demo clip.
-  • Studio  — tune every parameter (each with a "?"), pick a visualization
-              (vorticity / speed / streamlines / …), Run, watch it animate, export.
+  • Gallery — browse exhibits; in-depth physics, the governing equation, a demo.
+  • Studio  — tune every parameter, Run once, then switch visualization
+              (vorticity / speed / streamlines / …) live, with play/pause + export.
 
+    pip install customtkinter pillow
     python studio.py
 
 Package as a standalone Windows app: see docs/windows_build.md.
@@ -16,30 +17,41 @@ import sys
 import threading
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
 sys.path.insert(0, str(ROOT))
 from flowzoo import engine, render, content
 
 try:
     import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
+    import customtkinter as ctk
     from PIL import Image, ImageTk, ImageSequence
+    from tkinter import filedialog, messagebox
 except Exception as e:  # pragma: no cover
-    tk = None
+    ctk = None
     _IMPORT_ERR = e
 
-# ---- curated deep-indigo theme ----
-BG = "#0f1426"; BG2 = "#0b1020"; PANEL = "#161d36"; CARD = "#1d2742"; CARD2 = "#27314f"
-FG = "#eef2fb"; MUTED = "#8893b2"; ACCENT = "#5b8cff"; ACCENT_D = "#3f6fe0"
-GOLD = "#ffc24d"; GOOD = "#54e0a6"; WARN = "#ff8472"
-FONT = "Segoe UI"
-GROUPS = ["Geometry", "Physics", "Render"]
+# ---- modern deep-indigo palette ----
+BG = "#0e1322"; PANEL = "#161d31"; CARD = "#1c2740"; CARD2 = "#28344f"
+FG = "#eef2fb"; MUTED = "#8a96b4"; ACCENT = "#5b8cff"; ACCENT_D = "#3f6fe0"
+GOLD = "#ffc24d"; GOOD = "#46d39a"; WARN = "#ff7a6b"; INKCV = "#05070b"
+F = "Segoe UI"
 
 
 def slug(s):
     return "".join(c if c.isalnum() else "_" for c in s).strip("_").lower()
+
+
+def load_gif(path, maxw=420):
+    try:
+        im = Image.open(path); out = []
+        for fr in ImageSequence.Iterator(im):
+            f = fr.convert("RGB")
+            if f.width > maxw:
+                f = f.resize((maxw, int(f.height * maxw / f.width)))
+            out.append(ImageTk.PhotoImage(f))
+        return out
+    except Exception:
+        return []
 
 
 class Tooltip:
@@ -51,61 +63,32 @@ class Tooltip:
         if self.tip or not self.text:
             return
         self.tip = tk.Toplevel(self.w); self.tip.wm_overrideredirect(True)
-        self.tip.wm_geometry(f"+{self.w.winfo_rootx()+22}+{self.w.winfo_rooty()+18}")
+        self.tip.wm_geometry(f"+{self.w.winfo_rootx()+22}+{self.w.winfo_rooty()+20}")
         tk.Label(self.tip, text=self.text, bg="#05070d", fg=FG, justify="left",
-                 wraplength=320, padx=11, pady=9, relief="solid", bd=1, font=(FONT, 9)).pack()
+                 wraplength=320, padx=11, pady=9, relief="solid", bd=1, font=(F, 9)).pack()
 
     def hide(self, _=None):
         if self.tip:
             self.tip.destroy(); self.tip = None
 
 
-def hover(btn, base, hi):
-    btn.bind("<Enter>", lambda e: btn.config(bg=hi))
-    btn.bind("<Leave>", lambda e: btn.config(bg=base))
-
-
-def load_gif(path, maxw=520):
-    try:
-        im = Image.open(path); frames = []
-        for fr in ImageSequence.Iterator(im):
-            f = fr.convert("RGB")
-            if f.width > maxw:
-                f = f.resize((maxw, int(f.height * maxw / f.width)))
-            frames.append(ImageTk.PhotoImage(f))
-        return frames
-    except Exception:
-        return []
-
-
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("FlowZoo Studio"); root.configure(bg=BG); root.geometry("1280x780")
-        root.minsize(1040, 660)
+        root.title("FlowZoo Studio"); root.geometry("1320x820"); root.minsize(1080, 680)
+        root.configure(fg_color=BG)
         self.q = queue.Queue()
         self.frames, self.pidx, self.playing, self.busy = [], 0, False, False
-        self.fps = tk.IntVar(value=26); self.widgets = {}
+        self.fps = tk.IntVar(value=26)
         self.sel = list(engine.EXHIBITS)[0]
         self.gframes, self.gidx, self._eqimg = [], 0, None
         self.result = None; self.view = tk.StringVar(); self.cmap = tk.StringVar()
-        self.viewbtns = {}
+        self.viewbtns = {}; self.widgets = {}; self.cur = ""; self.viewcache = {}
 
-        st = ttk.Style()
-        try: st.theme_use("clam")
-        except tk.TclError: pass
-        st.configure("TCombobox", fieldbackground=CARD, background=CARD, foreground=FG,
-                     arrowcolor=FG, bordercolor=CARD)
-        st.map("TCombobox", fieldbackground=[("readonly", CARD)])
-        st.configure("A.Horizontal.TProgressbar", background=ACCENT, troughcolor=CARD, borderwidth=0)
-
-        self.container = tk.Frame(root, bg=BG); self.container.pack(fill="both", expand=True)
         self.pages = {}
         self._intro(); self._gallery(); self._studio()
         self.show("intro")
-        self.root.after(80, self._poll)
-        self.root.after(45, self._tick_studio)
-        self.root.after(60, self._tick_gallery)
+        root.after(80, self._poll); root.after(45, self._tick_studio); root.after(60, self._tick_gallery)
 
     def show(self, name):
         for p in self.pages.values():
@@ -119,234 +102,186 @@ class App:
 
     # ---------------- intro ----------------
     def _intro(self):
-        pg = tk.Frame(self.container, bg=BG); self.pages["intro"] = pg
-        cv = tk.Canvas(pg, highlightthickness=0, bg=BG2); cv.pack(fill="both", expand=True)
-
-        def draw(_=None):
-            cv.delete("grad")
-            w = cv.winfo_width(); h = cv.winfo_height()
-            for i in range(0, h, 2):
-                t = i / max(1, h)
-                r = int(0x0b + t * (0x1c - 0x0b)); g = int(0x10 + t * (0x12 - 0x10))
-                b = int(0x20 + t * (0x3a - 0x20))
-                cv.create_line(0, i, w, i, fill=f"#{r:02x}{g:02x}{b:02x}", tags="grad")
-            cv.tag_lower("grad")
-            cv.coords("content", w // 2, h // 2)
-        cv.bind("<Configure>", draw)
-
-        box = tk.Frame(cv, bg=BG2)
-        cv.create_window(0, 0, window=box, tags="content")
-        tk.Label(box, text="🦓", bg=BG2, fg=FG, font=(FONT, 52)).pack()
-        t = tk.Frame(box, bg=BG2); t.pack(pady=(2, 0))
-        tk.Label(t, text="FlowZoo ", bg=BG2, fg=FG, font=(FONT, 40, "bold")).pack(side="left")
-        tk.Label(t, text="Studio", bg=BG2, fg=ACCENT, font=(FONT, 40, "bold")).pack(side="left")
-        tk.Label(box, text="a zoo of fluid simulations — five solvers, written from scratch",
-                 bg=BG2, fg=GOLD, font=(FONT, 13)).pack(pady=(6, 2))
-        tk.Label(box, text="Lattice-Boltzmann · Navier–Stokes · Compressible Euler · SPH · Spectral\n"
-                 "Watch vortices, smoke, shockwaves, splashes and turbulence — each validated\n"
-                 "against a textbook benchmark. Tune the physics and render your own.",
-                 bg=BG2, fg=MUTED, font=(FONT, 11), justify="center").pack(pady=(8, 18))
-        go = tk.Button(box, text="Explore the zoo  →", bg=ACCENT, fg="white", relief="flat",
-                       bd=0, padx=26, pady=11, font=(FONT, 13, "bold"),
-                       activebackground=ACCENT_D, command=lambda: self.show("gallery"))
-        go.pack(); hover(go, ACCENT, ACCENT_D)
-        tk.Label(box, text="created by", bg=BG2, fg=MUTED, font=(FONT, 9)).pack(pady=(26, 0))
-        tk.Label(box, text="Saleh Mohammadrezaei", bg=BG2, fg=FG,
-                 font=(FONT, 13, "bold")).pack()
-        tk.Label(box, text="salehmrezaee@gmail.com", bg=BG2, fg=ACCENT,
-                 font=(FONT, 11)).pack()
+        pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["intro"] = pg
+        card = ctk.CTkFrame(pg, fg_color=PANEL, corner_radius=24, width=720, height=560)
+        card.place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(card, text="🦓", font=(F, 64)).pack(pady=(46, 0))
+        ctk.CTkLabel(card, text="FlowZoo Studio", font=(F, 46, "bold"),
+                     text_color=FG).pack(pady=(2, 0))
+        ctk.CTkLabel(card, text="a zoo of fluid simulations — five solvers, written from scratch",
+                     font=(F, 15), text_color=GOLD).pack(pady=(8, 4))
+        ctk.CTkLabel(card, text="Lattice-Boltzmann · Navier–Stokes · Compressible Euler · SPH · "
+                     "Spectral\nWatch vortices, smoke, shockwaves, splashes and turbulence —\n"
+                     "each validated against a textbook benchmark.",
+                     font=(F, 12), text_color=MUTED, justify="center").pack(pady=(8, 22))
+        ctk.CTkButton(card, text="Explore the zoo  →", font=(F, 15, "bold"), width=240, height=46,
+                      corner_radius=23, fg_color=ACCENT, hover_color=ACCENT_D,
+                      command=lambda: self.show("gallery")).pack()
+        ctk.CTkLabel(card, text="created by", font=(F, 10), text_color=MUTED).pack(pady=(34, 0))
+        ctk.CTkLabel(card, text="Saleh Mohammadrezaei", font=(F, 15, "bold"), text_color=FG).pack()
+        ctk.CTkLabel(card, text="salehmrezaee@gmail.com", font=(F, 12), text_color=ACCENT).pack()
 
     # ---------------- gallery ----------------
     def _gallery(self):
-        pg = tk.Frame(self.container, bg=BG); self.pages["gallery"] = pg
-        bar = tk.Frame(pg, bg=PANEL, height=52); bar.pack(fill="x"); bar.pack_propagate(False)
-        b = tk.Button(bar, text="‹  Home", bg=PANEL, fg=MUTED, relief="flat", bd=0,
-                      font=(FONT, 11), activebackground=PANEL, command=lambda: self.show("intro"))
-        b.pack(side="left", padx=12)
-        tk.Label(bar, text="The exhibits", bg=PANEL, fg=FG,
-                 font=(FONT, 15, "bold")).pack(side="left", padx=8)
+        pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["gallery"] = pg
+        bar = ctk.CTkFrame(pg, fg_color=PANEL, corner_radius=0, height=58); bar.pack(fill="x")
+        ctk.CTkButton(bar, text="‹  Home", width=80, fg_color="transparent", hover_color=CARD,
+                      text_color=MUTED, font=(F, 12), command=lambda: self.show("intro")).pack(side="left", padx=10, pady=10)
+        ctk.CTkLabel(bar, text="The exhibits", font=(F, 16, "bold"), text_color=FG).pack(side="left", padx=4)
 
-        body = tk.Frame(pg, bg=BG); body.pack(fill="both", expand=True)
-        left = tk.Frame(body, bg=BG, width=268); left.pack(side="left", fill="y", padx=(14, 6), pady=14)
-        left.pack_propagate(False)
+        body = ctk.CTkFrame(pg, fg_color=BG, corner_radius=0); body.pack(fill="both", expand=True, padx=14, pady=14)
+        listfr = ctk.CTkFrame(body, fg_color=BG, width=270, corner_radius=0)
+        listfr.pack(side="left", fill="y"); listfr.pack_propagate(False)
         self.exh_btns = {}
         for name in engine.EXHIBITS:
-            btn = tk.Button(left, text=name, bg=CARD, fg=FG, relief="flat", bd=0, anchor="w",
-                            padx=14, pady=11, font=(FONT, 10, "bold"), activebackground=CARD2,
-                            command=lambda n=name: self._select(n))
-            btn.pack(fill="x", pady=3); hover(btn, CARD, CARD2)
-            self.exh_btns[name] = btn
+            b = ctk.CTkButton(listfr, text=name, anchor="w", height=46, corner_radius=12,
+                              fg_color=CARD, hover_color=CARD2, text_color=FG, font=(F, 12, "bold"),
+                              command=lambda n=name: self._select(n))
+            b.pack(fill="x", pady=4); self.exh_btns[name] = b
 
-        det = tk.Frame(body, bg=BG); det.pack(side="right", fill="both", expand=True, padx=(6, 14), pady=14)
-        hd = tk.Frame(det, bg=BG); hd.pack(fill="x")
-        self.g_method = tk.Label(hd, text="", bg=BG, fg=ACCENT, font=(FONT, 10, "bold"))
-        self.g_method.pack(anchor="w")
-        self.g_title = tk.Label(hd, text="", bg=BG, fg=FG, font=(FONT, 24, "bold"))
-        self.g_title.pack(anchor="w", pady=(0, 10))
+        det = ctk.CTkFrame(body, fg_color=BG, corner_radius=0); det.pack(side="left", fill="both", expand=True, padx=(14, 0))
+        self.g_method = ctk.CTkLabel(det, text="", font=(F, 11, "bold"), text_color=ACCENT, anchor="w")
+        self.g_method.pack(fill="x")
+        self.g_title = ctk.CTkLabel(det, text="", font=(F, 26, "bold"), text_color=FG, anchor="w")
+        self.g_title.pack(fill="x", pady=(0, 8))
 
-        split = tk.Frame(det, bg=BG); split.pack(fill="both", expand=True)
-        # right column: demo + run button
-        media = tk.Frame(split, bg=BG, width=440); media.pack(side="right", fill="y", padx=(16, 0))
-        media.pack_propagate(False)
-        self.g_demo = tk.Label(media, bg="#05070b"); self.g_demo.pack(anchor="n", pady=(2, 10))
-        opn = tk.Button(media, text="Customize & run  →", bg=ACCENT, fg="white", relief="flat",
-                        bd=0, padx=22, pady=11, font=(FONT, 12, "bold"), activebackground=ACCENT_D,
-                        command=lambda: self.show("studio"))
-        opn.pack(anchor="n", fill="x"); hover(opn, ACCENT, ACCENT_D)
-        # left column: scrollable long-form reading
-        rd = tk.Frame(split, bg=BG); rd.pack(side="left", fill="both", expand=True)
-        self.g_cv = tk.Canvas(rd, bg=BG, highlightthickness=0)
-        rsb = ttk.Scrollbar(rd, orient="vertical", command=self.g_cv.yview)
-        self.read_inner = tk.Frame(self.g_cv, bg=BG)
-        self.read_inner.bind("<Configure>", lambda e: self.g_cv.configure(scrollregion=self.g_cv.bbox("all")))
-        self._read_win = self.g_cv.create_window((0, 0), window=self.read_inner, anchor="nw")
-        self.g_cv.bind("<Configure>", lambda e: self.g_cv.itemconfig(self._read_win, width=e.width))
-        self.g_cv.configure(yscrollcommand=rsb.set)
-        self.g_cv.pack(side="left", fill="both", expand=True); rsb.pack(side="right", fill="y")
-        self.g_cv.bind("<MouseWheel>", lambda e: self.g_cv.yview_scroll(int(-e.delta / 120), "units"))
-        self.g_cv.bind("<Button-4>", lambda e: self.g_cv.yview_scroll(-1, "units"))
-        self.g_cv.bind("<Button-5>", lambda e: self.g_cv.yview_scroll(1, "units"))
+        split = ctk.CTkFrame(det, fg_color=BG, corner_radius=0); split.pack(fill="both", expand=True)
+        media = ctk.CTkFrame(split, fg_color=BG, width=440, corner_radius=0)
+        media.pack(side="right", fill="y", padx=(16, 0)); media.pack_propagate(False)
+        self.g_demo = tk.Label(media, bg=INKCV); self.g_demo.pack(pady=(4, 12))
+        ctk.CTkButton(media, text="Customize & run  →", font=(F, 14, "bold"), height=48,
+                      corner_radius=14, fg_color=ACCENT, hover_color=ACCENT_D,
+                      command=lambda: self.show("studio")).pack(fill="x")
+        self.read = ctk.CTkScrollableFrame(split, fg_color=PANEL, corner_radius=16)
+        self.read.pack(side="left", fill="both", expand=True)
 
-    def _section(self, header, bodytext):
-        tk.Label(self.read_inner, text=header, bg=BG, fg=ACCENT,
-                 font=(FONT, 11, "bold")).pack(anchor="w", pady=(14, 1))
-        tk.Frame(self.read_inner, bg=CARD2, height=1).pack(fill="x", pady=(0, 6))
-        tk.Label(self.read_inner, text=bodytext, bg=BG, fg="#cdd5e6", font=(FONT, 11),
-                 justify="left", wraplength=500).pack(anchor="w")
+    def _section(self, header, body):
+        ctk.CTkLabel(self.read, text=header, font=(F, 13, "bold"), text_color=ACCENT,
+                     anchor="w").pack(fill="x", pady=(14, 2), padx=4)
+        ctk.CTkFrame(self.read, fg_color=CARD2, height=1).pack(fill="x", pady=(0, 6), padx=4)
+        ctk.CTkLabel(self.read, text=body, font=(F, 12), text_color="#cdd5e6", justify="left",
+                     anchor="w", wraplength=560).pack(fill="x", padx=4)
 
     def _select(self, name):
         self.sel = name
         for n, b in self.exh_btns.items():
-            b.config(bg=CARD2 if n == name else CARD, fg=ACCENT if n == name else FG)
+            b.configure(fg_color=ACCENT if n == name else CARD,
+                        text_color="white" if n == name else FG)
         m = engine.META.get(name, {}); d = content.DETAIL.get(name, {})
-        self.g_method.config(text=m.get("method", ""))
-        self.g_title.config(text=name.split(" (")[0])
-        for w in self.read_inner.winfo_children():
+        self.g_method.configure(text=m.get("method", ""))
+        self.g_title.configure(text=name.split(" (")[0])
+        for w in self.read.winfo_children():
             w.destroy()
-        self.g_cv.yview_moveto(0)
         self._section("What you're seeing", d.get("physics", m.get("blurb", "")))
-        # governing equation (image) + term-by-term
-        tk.Label(self.read_inner, text="Governing equation", bg=BG, fg=ACCENT,
-                 font=(FONT, 11, "bold")).pack(anchor="w", pady=(16, 1))
-        tk.Frame(self.read_inner, bg=CARD2, height=1).pack(fill="x", pady=(0, 6))
-        eqp = ROOT / "docs" / "eq" / (slug(name) + ".png")
+        ctk.CTkLabel(self.read, text="Governing equation", font=(F, 13, "bold"), text_color=ACCENT,
+                     anchor="w").pack(fill="x", pady=(16, 2), padx=4)
+        ctk.CTkFrame(self.read, fg_color=CARD2, height=1).pack(fill="x", pady=(0, 8), padx=4)
         try:
-            im = Image.open(eqp); w = min(470, im.width)
-            im = im.resize((w, int(im.height * w / im.width)))
-            self._eqimg = ImageTk.PhotoImage(im)
-            tk.Label(self.read_inner, image=self._eqimg, bg=BG).pack(anchor="w")
+            im = Image.open(ROOT / "docs" / "eq" / (slug(name) + ".png"))
+            w = min(560, im.width); im = im.resize((w, int(im.height * w / im.width)))
+            self._eqimg = ctk.CTkImage(light_image=im, dark_image=im, size=(w, int(im.height * w / im.width)))
+            ctk.CTkLabel(self.read, image=self._eqimg, text="").pack(anchor="w", padx=4)
         except Exception:
-            tk.Label(self.read_inner, text="(equation image not found)", bg=BG, fg=MUTED,
-                     font=(FONT, 10)).pack(anchor="w")
+            ctk.CTkLabel(self.read, text="(equation image not found)", text_color=MUTED,
+                         font=(F, 10)).pack(anchor="w", padx=4)
         if d.get("terms"):
-            tk.Label(self.read_inner, text=d["terms"], bg=BG, fg="#cdd5e6", font=(FONT, 10),
-                     justify="left", wraplength=500).pack(anchor="w", pady=(6, 0))
+            ctk.CTkLabel(self.read, text=d["terms"], font=(F, 11), text_color="#cdd5e6",
+                         justify="left", anchor="w", wraplength=560).pack(fill="x", padx=4, pady=(6, 0))
         self._section("How it's solved", m.get("numerics", ""))
         self._section("Validation", "✓  " + m.get("validation", ""))
 
         self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=420); self.gidx = 0
         if not self.gframes:
-            self.g_demo.config(image="", text="\n  demo clip not found —\n  open in Studio and press Run\n",
-                               fg=MUTED, font=(FONT, 11))
-        if hasattr(self, "exhibit"):
-            self.exhibit.set(name)
+            self.g_demo.config(image="", text="\n demo clip not found —\n open in Studio and Run\n",
+                               fg=MUTED, font=(F, 11))
+        self.view_exhibit = name
 
     def _tick_gallery(self):
-        if getattr(self, "cur", "") == "gallery" and self.gframes:
-            self.g_demo.config(image=self.gframes[self.gidx % len(self.gframes)])
-            self.gidx += 1
+        if self.cur == "gallery" and self.gframes:
+            self.g_demo.config(image=self.gframes[self.gidx % len(self.gframes)]); self.gidx += 1
         self.root.after(45, self._tick_gallery)
 
     # ---------------- studio ----------------
     def _studio(self):
-        pg = tk.Frame(self.container, bg=BG); self.pages["studio"] = pg
-        bar = tk.Frame(pg, bg=PANEL, height=52); bar.pack(fill="x"); bar.pack_propagate(False)
-        b = tk.Button(bar, text="‹  Gallery", bg=PANEL, fg=MUTED, relief="flat", bd=0,
-                      font=(FONT, 11), activebackground=PANEL, command=lambda: self.show("gallery"))
-        b.pack(side="left", padx=12)
-        self.exhibit = tk.StringVar(value=self.sel)
-        cb = ttk.Combobox(bar, textvariable=self.exhibit, state="readonly",
-                          values=list(engine.EXHIBITS), font=(FONT, 11), width=34)
-        cb.pack(side="left", padx=8, pady=10)
-        cb.bind("<<ComboboxSelected>>", lambda *_: (setattr(self, "sel", self.exhibit.get()),
-                                                    self._build_params()))
+        pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["studio"] = pg
+        bar = ctk.CTkFrame(pg, fg_color=PANEL, corner_radius=0, height=58); bar.pack(fill="x")
+        ctk.CTkButton(bar, text="‹  Gallery", width=96, fg_color="transparent", hover_color=CARD,
+                      text_color=MUTED, font=(F, 12), command=lambda: self.show("gallery")).pack(side="left", padx=10, pady=10)
+        self.exhibit = ctk.CTkOptionMenu(bar, values=list(engine.EXHIBITS), width=300, font=(F, 12),
+                                         fg_color=CARD, button_color=CARD2, button_hover_color=ACCENT,
+                                         command=self._pick_exhibit)
+        self.exhibit.set(self.sel); self.exhibit.pack(side="left", padx=6)
 
-        body = tk.Frame(pg, bg=BG); body.pack(fill="both", expand=True)
-        side = tk.Frame(body, bg=PANEL, width=348); side.pack(side="left", fill="y")
-        side.pack_propagate(False)
+        body = ctk.CTkFrame(pg, fg_color=BG, corner_radius=0); body.pack(fill="both", expand=True, padx=14, pady=14)
+        side = ctk.CTkFrame(body, fg_color=PANEL, width=350, corner_radius=16)
+        side.pack(side="left", fill="y"); side.pack_propagate(False)
+        self.pscroll = ctk.CTkScrollableFrame(side, fg_color=PANEL, corner_radius=0)
+        self.pscroll.pack(fill="both", expand=True, padx=6, pady=(8, 4))
 
-        wrap = tk.Frame(side, bg=PANEL); wrap.pack(fill="both", expand=True, padx=(16, 6), pady=12)
-        self.cvp = tk.Canvas(wrap, bg=PANEL, highlightthickness=0)
-        sb = ttk.Scrollbar(wrap, orient="vertical", command=self.cvp.yview)
-        self.inner = tk.Frame(self.cvp, bg=PANEL)
-        self.inner.bind("<Configure>", lambda e: self.cvp.configure(scrollregion=self.cvp.bbox("all")))
-        self.cvp.create_window((0, 0), window=self.inner, anchor="nw", width=306)
-        self.cvp.configure(yscrollcommand=sb.set)
-        self.cvp.pack(side="left", fill="both", expand=True); sb.pack(side="right", fill="y")
-        self.cvp.bind_all("<MouseWheel>", lambda e: self.cvp.yview_scroll(int(-e.delta / 120), "units")
-                          if getattr(self, "cur", "") == "studio" else None)
+        bot = ctk.CTkFrame(side, fg_color=PANEL, corner_radius=0); bot.pack(fill="x", padx=14, pady=(0, 12))
+        ctk.CTkLabel(bot, text="Playback FPS", text_color=MUTED, font=(F, 10), anchor="w").pack(fill="x")
+        ctk.CTkSlider(bot, from_=8, to=40, variable=self.fps, progress_color=ACCENT).pack(fill="x", pady=(2, 8))
+        self.run_btn = ctk.CTkButton(bot, text="▶  Run simulation", font=(F, 13, "bold"), height=46,
+                                     corner_radius=14, fg_color=ACCENT, hover_color=ACCENT_D, command=self.run)
+        self.run_btn.pack(fill="x")
+        self.prog = ctk.CTkProgressBar(bot, mode="indeterminate", progress_color=ACCENT)
+        sv = ctk.CTkFrame(bot, fg_color=PANEL); sv.pack(fill="x", pady=(8, 0))
+        ctk.CTkButton(sv, text="⬇ GIF", width=10, fg_color=CARD2, hover_color="#34415d", font=(F, 11),
+                      command=lambda: self.save("gif")).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ctk.CTkButton(sv, text="⬇ MP4", width=10, fg_color=CARD2, hover_color="#34415d", font=(F, 11),
+                      command=lambda: self.save("mp4")).pack(side="left", expand=True, fill="x")
+        self.status = ctk.CTkLabel(bot, text="Ready.", text_color=MUTED, font=(F, 10), anchor="w",
+                                   justify="left", wraplength=300); self.status.pack(fill="x", pady=(10, 0))
 
-        bot = tk.Frame(side, bg=PANEL); bot.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
-        tk.Label(bot, text="Playback FPS", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(anchor="w")
-        tk.Scale(bot, from_=8, to=40, orient="horizontal", variable=self.fps, bg=PANEL, fg=FG,
-                 highlightthickness=0, troughcolor=CARD, bd=0).pack(fill="x")
-        self.run_btn = tk.Button(bot, text="▶  Run simulation", command=self.run, bg=ACCENT,
-                                 fg="white", relief="flat", pady=10, bd=0, activebackground=ACCENT_D,
-                                 font=(FONT, 11, "bold"))
-        self.run_btn.pack(fill="x", pady=(10, 6)); hover(self.run_btn, ACCENT, ACCENT_D)
-        self.prog = ttk.Progressbar(bot, mode="indeterminate", style="A.Horizontal.TProgressbar")
-        sv = tk.Frame(bot, bg=PANEL); sv.pack(fill="x", pady=2)
-        for txt, k in (("⬇ GIF", "gif"), ("⬇ MP4", "mp4")):
-            sb2 = tk.Button(sv, text=txt, command=lambda k=k: self.save(k), bg=CARD2, fg=FG,
-                            relief="flat", bd=0, font=(FONT, 10), activebackground="#33405a")
-            sb2.pack(side="left", expand=True, fill="x", padx=2); hover(sb2, CARD2, "#33405a")
-        self.status = tk.Label(bot, text="Ready.", bg=PANEL, fg=MUTED, wraplength=300,
-                               justify="left", font=(FONT, 9)); self.status.pack(anchor="w", pady=(10, 0))
+        prev = ctk.CTkFrame(body, fg_color=BG, corner_radius=0); prev.pack(side="left", fill="both", expand=True, padx=(14, 0))
+        self.viewbar = ctk.CTkFrame(prev, fg_color=BG, corner_radius=0); self.viewbar.pack(fill="x", pady=(0, 8))
+        self.canvas = tk.Label(prev, bg=INKCV, fg=MUTED, font=(F, 14),
+                               text="Set parameters  ›  Run ▶\nthen switch views live")
+        self.canvas.pack(fill="both", expand=True)
 
-        prev = tk.Frame(body, bg=BG); prev.pack(side="right", fill="both", expand=True)
-        self.viewbar = tk.Frame(prev, bg=BG); self.viewbar.pack(fill="x", padx=10, pady=(10, 0))
-        self.canvas = tk.Label(prev, bg="#05070b",
-                               text="Set parameters  ›  Run ▶\n(then switch Vorticity / Speed / "
-                                    "Streamlines live)", fg=MUTED, font=(FONT, 14))
-        self.canvas.pack(expand=True, fill="both", padx=10, pady=10)
+    def _pick_exhibit(self, name):
+        self.sel = name; self._build_params()
+        self.result = None; self.viewcache = {}
+        for w in self.viewbar.winfo_children():
+            w.destroy()
 
     def _build_params(self):
-        for w in self.inner.winfo_children():
+        for w in self.pscroll.winfo_children():
             w.destroy()
         self.widgets = {}
         params = engine.EXHIBITS[self.sel]["params"]
         groups = {}
         for qd in params:
             groups.setdefault(qd.get("group", "Render"), []).append(qd)
-        for gname in GROUPS:
-            if gname not in groups:
+        for g in ["Geometry", "Physics", "Render"]:
+            if g not in groups:
                 continue
-            tk.Label(self.inner, text=gname.upper(), bg=PANEL, fg=ACCENT,
-                     font=(FONT, 8, "bold")).pack(anchor="w", pady=(12, 2))
-            tk.Frame(self.inner, bg=CARD2, height=1).pack(fill="x", pady=(0, 4))
-            for qd in groups[gname]:
+            ctk.CTkLabel(self.pscroll, text=g.upper(), font=(F, 10, "bold"), text_color=ACCENT,
+                         anchor="w").pack(fill="x", pady=(12, 2))
+            ctk.CTkFrame(self.pscroll, fg_color=CARD2, height=1).pack(fill="x", pady=(0, 4))
+            for qd in groups[g]:
                 self._row(qd)
 
     def _row(self, qd):
-        row = tk.Frame(self.inner, bg=PANEL); row.pack(fill="x", pady=(6, 0))
-        head = tk.Frame(row, bg=PANEL); head.pack(fill="x")
+        row = ctk.CTkFrame(self.pscroll, fg_color=PANEL); row.pack(fill="x", pady=(6, 0))
+        head = ctk.CTkFrame(row, fg_color=PANEL); head.pack(fill="x")
         lab = qd.get("label", qd["name"])
         if qd["type"] == "float":
             lab += f"   {qd['min']:g}–{qd['max']:g}"
-        tk.Label(head, text=lab, bg=PANEL, fg=FG, font=(FONT, 9, "bold")).pack(side="left")
+        ctk.CTkLabel(head, text=lab, font=(F, 11, "bold"), text_color=FG, anchor="w").pack(side="left")
         if qd.get("help"):
-            chip = tk.Label(head, text=" ? ", bg=CARD2, fg=ACCENT, font=(FONT, 8, "bold"),
-                            cursor="question_arrow"); chip.pack(side="right")
+            chip = ctk.CTkLabel(head, text=" ? ", font=(F, 10, "bold"), text_color=ACCENT,
+                                fg_color=CARD2, corner_radius=8); chip.pack(side="right")
             Tooltip(chip, qd["help"])
             chip.bind("<Button-1>", lambda e, t=qd["help"], n=lab: messagebox.showinfo(n, t))
         if qd["type"] == "choice":
             v = tk.StringVar(value=qd["default"])
-            ttk.Combobox(row, textvariable=v, state="readonly", values=qd["choices"],
-                         font=(FONT, 10)).pack(fill="x", pady=(3, 0))
+            ctk.CTkOptionMenu(row, values=qd["choices"], variable=v, font=(F, 11), fg_color=CARD,
+                              button_color=CARD2, button_hover_color=ACCENT).pack(fill="x", pady=(3, 0))
         else:
             v = tk.StringVar(value=qd["default"] if qd["type"] == "str" else f"{qd['default']:g}")
-            tk.Entry(row, textvariable=v, bg=CARD, fg=FG, relief="flat", insertbackground=FG,
-                     font=(FONT, 10)).pack(fill="x", pady=(3, 0), ipady=4)
+            ctk.CTkEntry(row, textvariable=v, font=(F, 11), fg_color=CARD,
+                         border_color=CARD2).pack(fill="x", pady=(3, 0))
         self.widgets[qd["name"]] = (qd, v)
 
     def _params(self):
@@ -359,22 +294,19 @@ class App:
         try:
             params = self._params()
         except ValueError:
-            self.status.config(text="A numeric field has an invalid value.", fg=WARN); return
-        self.busy = True; self.playing = False
-        self.run_btn.config(state="disabled", text="● Simulating…")
-        self.prog.pack(fill="x", pady=(2, 4)); self.prog.start(12)
+            self.status.configure(text="A numeric field has an invalid value.", text_color=WARN); return
+        self.busy = True; self.playing = False; self.viewcache = {}
+        self.run_btn.configure(state="disabled", text="● Simulating…")
+        self.prog.pack(fill="x", pady=(8, 0)); self.prog.start()
         name = self.sel
-
-        self.viewcache = {}
 
         def work():
             try:
                 res = engine.solve_exhibit(name, params, progress=lambda s: self.q.put(("status", s)))
                 self.q.put(("solved", res))
                 cm = engine.DEFCMAP[res.kind]; cache = {}
-                for v in res.views:                       # pre-render EVERY view → instant switching
-                    self.q.put(("status", f"rendering {v}…"))
-                    cache[v] = res.render(v, cm)
+                for v in res.views:
+                    self.q.put(("status", f"rendering {v}…")); cache[v] = res.render(v, cm)
                 self.q.put(("cached", (cache, res.views[0], res.info)))
             except Exception as ex:  # pragma: no cover
                 self.q.put(("error", str(ex)))
@@ -384,44 +316,40 @@ class App:
         for w in self.viewbar.winfo_children():
             w.destroy()
         self.viewbtns = {}
-        tk.Label(self.viewbar, text="View", bg=BG, fg=MUTED, font=(FONT, 9)).pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(self.viewbar, text="View", text_color=MUTED, font=(F, 10)).pack(side="left", padx=(2, 6))
         self.view.set(res.views[0])
         for v in res.views:
-            b = tk.Button(self.viewbar, text=v, bg=CARD, fg=FG, relief="flat", bd=0, padx=11, pady=5,
-                          font=(FONT, 9, "bold"), activebackground=CARD2,
-                          command=lambda vv=v: self._change_view(vv))
+            b = ctk.CTkButton(self.viewbar, text=v, width=10, height=30, corner_radius=10, font=(F, 11, "bold"),
+                              fg_color=CARD, hover_color=CARD2, command=lambda vv=v: self._change_view(vv))
             b.pack(side="left", padx=2); self.viewbtns[v] = b
-        tk.Label(self.viewbar, text="   Palette", bg=BG, fg=MUTED, font=(FONT, 9)).pack(side="left", padx=(8, 4))
+        ctk.CTkLabel(self.viewbar, text="  Palette", text_color=MUTED, font=(F, 10)).pack(side="left", padx=(8, 4))
         self.cmap.set(engine.DEFCMAP[res.kind])
-        cmb = ttk.Combobox(self.viewbar, textvariable=self.cmap, state="readonly",
-                           values=list(render.COLORMAPS), width=16, font=(FONT, 9))
-        cmb.pack(side="left"); cmb.bind("<<ComboboxSelected>>", lambda *_: self._recolor())
-        self.playbtn = tk.Button(self.viewbar, text="⏸ Pause", bg=CARD2, fg=FG, relief="flat", bd=0,
-                                 padx=12, pady=5, font=(FONT, 9, "bold"), activebackground="#33405a",
-                                 command=self._toggle_play)
-        self.playbtn.pack(side="right")
+        ctk.CTkOptionMenu(self.viewbar, values=list(render.COLORMAPS), variable=self.cmap, width=150,
+                          font=(F, 11), fg_color=CARD, button_color=CARD2, button_hover_color=ACCENT,
+                          command=lambda *_: self._recolor()).pack(side="left")
+        self.playbtn = ctk.CTkButton(self.viewbar, text="⏸ Pause", width=90, height=30, corner_radius=10,
+                                     font=(F, 11, "bold"), fg_color=CARD2, hover_color="#34415d",
+                                     command=self._toggle_play); self.playbtn.pack(side="right")
         self._hl_view()
 
     def _hl_view(self):
         for v, b in self.viewbtns.items():
-            on = v == self.view.get()
-            b.config(bg=ACCENT if on else CARD, fg="white" if on else FG)
+            b.configure(fg_color=ACCENT if v == self.view.get() else CARD)
 
     def _change_view(self, v):
         self.view.set(v); self._hl_view()
-        if v in self.viewcache:                  # instant — already rendered
+        if v in self.viewcache:
             self.frames = self.viewcache[v]; self.pidx = 0; self.playing = True
 
     def _toggle_play(self):
         self.playing = not self.playing
-        self.playbtn.config(text="⏸ Pause" if self.playing else "▶ Play")
+        self.playbtn.configure(text="⏸ Pause" if self.playing else "▶ Play")
 
     def _recolor(self):
-        """Re-render all views with the newly chosen palette (cached again)."""
         if not self.result or self.busy:
             return
-        self.busy = True; self.run_btn.config(state="disabled")
-        self.prog.pack(fill="x", pady=(2, 4)); self.prog.start(12)
+        self.busy = True; self.run_btn.configure(state="disabled")
+        self.prog.pack(fill="x", pady=(8, 0)); self.prog.start()
         res, c = self.result, self.cmap.get()
 
         def work():
@@ -439,7 +367,7 @@ class App:
             while True:
                 kind, payload = self.q.get_nowait()
                 if kind == "status":
-                    self.status.config(text="⏳ " + payload, fg=MUTED)
+                    self.status.configure(text="⏳ " + payload, text_color=MUTED)
                 elif kind == "solved":
                     self.result = payload; self._set_views(payload)
                 elif kind == "cached":
@@ -447,21 +375,21 @@ class App:
                     self.viewcache = cache; self.view.set(view); self._hl_view()
                     self.frames = cache[view]
                     self.pidx, self.playing, self.busy = 0, True, False
-                    self.playbtn.config(text="⏸ Pause")
-                    self.status.config(text=f"✓ {info}\n{len(cache)} views ready — switch instantly.",
-                                       fg=GOOD)
-                    self.run_btn.config(state="normal", text="▶  Run simulation")
+                    self.playbtn.configure(text="⏸ Pause")
+                    self.status.configure(text=f"✓ {info}\n{len(cache)} views ready — switch instantly.",
+                                          text_color=GOOD)
+                    self.run_btn.configure(state="normal", text="▶  Run simulation")
                     self.prog.stop(); self.prog.pack_forget()
                 elif kind == "error":
-                    self.busy = False; self.status.config(text=f"⚠ {payload}", fg=WARN)
-                    self.run_btn.config(state="normal", text="▶  Run simulation")
+                    self.busy = False; self.status.configure(text=f"⚠ {payload}", text_color=WARN)
+                    self.run_btn.configure(state="normal", text="▶  Run simulation")
                     self.prog.stop(); self.prog.pack_forget()
         except queue.Empty:
             pass
         self.root.after(80, self._poll)
 
     def _tick_studio(self):
-        if getattr(self, "cur", "") == "studio" and self.playing and self.frames:
+        if self.cur == "studio" and self.playing and self.frames:
             arr = self.frames[self.pidx % len(self.frames)]
             cw, ch = max(self.canvas.winfo_width(), 100), max(self.canvas.winfo_height(), 100)
             img = Image.fromarray(arr); sc = min(cw / img.width, ch / img.height)
@@ -478,19 +406,21 @@ class App:
             return
         try:
             (render.save_gif if kind == "gif" else render.save_mp4)(self.frames, path, fps=self.fps.get())
-            self.status.config(text=f"✓ Saved {path}", fg=GOOD)
+            self.status.configure(text=f"✓ Saved {path}", text_color=GOOD)
         except Exception as ex:
-            messagebox.showerror("Export failed",
-                                 f"{ex}\n\nGIF/MP4 export needs ffmpeg (see docs/windows_build.md).")
+            messagebox.showerror("Export failed", f"{ex}\n\nGIF/MP4 export needs ffmpeg "
+                                 f"(see docs/windows_build.md).")
 
 
 def main():
-    if tk is None:
-        print(f"Tkinter/Pillow unavailable: {_IMPORT_ERR}"); return
+    if ctk is None:
+        print(f"customtkinter/Pillow unavailable: {_IMPORT_ERR}\n  pip install customtkinter pillow")
+        return
     try:
-        root = tk.Tk()
+        ctk.set_appearance_mode("dark")
+        root = ctk.CTk()
     except Exception as e:
-        print(f"No display to open the Studio ({e}).\nRun on a desktop, or use demos/.")
+        print(f"No display to open the Studio ({e}).\nRun on a desktop, or use the demos in demos/.")
         return
     App(root); root.mainloop()
 
