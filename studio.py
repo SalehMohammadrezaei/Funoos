@@ -30,20 +30,23 @@ except Exception as e:  # pragma: no cover
 
 # ─────────────────────────  design system  ─────────────────────────
 # layered surfaces (deepest → raised) + hairline; accents echo the sims (cyan+amber)
-BG     = "#121A33"   # app background  (deep navy, not black)
-SURF   = "#1A2440"   # bars / sidebars
-CARD   = "#212D4F"   # cards
-CARD2  = "#2C3B65"   # raised / hover / active
-LINE   = "#3A4A7A"   # hairline border
-FG     = "#f2f5fc"   # primary text
-MUTED  = "#9aa6c4"   # secondary text
-DIM    = "#6b76a0"   # captions
-CYAN   = "#54d6ee"   # primary accent (interactive)
-CYAN_D = "#3fb6cf"   # accent hover
-GOLD   = "#ffc266"   # secondary accent (validation, method)
-GOOD   = "#5ce3aa"; WARN = "#ff8a78"
-ONACC  = "#08182a"   # text on a bright accent fill
-INKCV  = "#0a0f1e"   # preview / canvas background
+# Premium LIGHT theme: paper surfaces, indigo primary, slate neutrals;
+# the simulation viewports stay dark so they pop as the focal points.
+BG     = "#eef1f8"   # app background (cool paper)
+SURF   = "#ffffff"   # bars / sidebars / scroll panels
+CARD   = "#ffffff"   # cards
+CARD2  = "#e8ecfb"   # raised / hover / active (light indigo tint)
+LINE   = "#dbe2ef"   # hairline border
+FG     = "#1b2438"   # primary text (dark slate)
+MUTED  = "#5c6880"   # secondary text
+DIM    = "#8a93a8"   # captions
+READ   = "#33405c"   # long-form body text
+CYAN   = "#5b5bf0"   # primary accent — indigo
+CYAN_D = "#4845e3"   # accent hover
+GOLD   = "#b45309"   # secondary accent (method kicker) — amber-700, readable on white
+GOOD   = "#16a34a"; WARN = "#dc2626"
+ONACC  = "#ffffff"   # text on the indigo accent fill
+INKCV  = "#0a0f1e"   # simulation preview background (kept dark)
 F = "Segoe UI"
 # type scale
 T_DISPLAY = (F, 46, "bold"); T_H1 = (F, 27, "bold"); T_H2 = (F, 15, "bold")
@@ -206,14 +209,14 @@ class App:
         stat = ctk.CTkFrame(mc, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
         stat.pack(fill="x", pady=(14, 0))
         kicker(stat, "validated", GOOD).pack(fill="x", padx=16, pady=(12, 2))
-        self.g_stat = ctk.CTkLabel(stat, text="", font=T_SMALL, text_color="#c8d2e6", justify="left",
+        self.g_stat = ctk.CTkLabel(stat, text="", font=T_SMALL, text_color=READ, justify="left",
                                    anchor="w", wraplength=510); self.g_stat.pack(fill="x", padx=16, pady=(0, 12))
         self.read = ctk.CTkScrollableFrame(split, fg_color=SURF, corner_radius=18)
         self.read.pack(side="left", fill="both", expand=True)
 
     def _section(self, header, body):
         kicker(self.read, header, CYAN).pack(fill="x", pady=(16, 4), padx=16)
-        ctk.CTkLabel(self.read, text=body, font=T_BODY, text_color="#c8d2e6", justify="left",
+        ctk.CTkLabel(self.read, text=body, font=T_BODY, text_color=READ, justify="left",
                      anchor="w", wraplength=600).pack(fill="x", padx=16)
 
     def _select(self, name):
@@ -237,11 +240,11 @@ class App:
             ctk.CTkLabel(self.read, text="(equation image not found)", text_color=MUTED,
                          font=T_SMALL).pack(anchor="w", padx=16)
         if d.get("terms"):
-            ctk.CTkLabel(self.read, text=d["terms"], font=T_SMALL, text_color="#aeb9d2",
+            ctk.CTkLabel(self.read, text=d["terms"], font=T_SMALL, text_color=MUTED,
                          justify="left", anchor="w", wraplength=600).pack(fill="x", padx=16, pady=(8, 0))
         self._section("how it's solved", m.get("numerics", ""))
         kicker(self.read, "validation", GOOD).pack(fill="x", pady=(16, 4), padx=16)
-        ctk.CTkLabel(self.read, text="✓  " + m.get("validation", ""), font=T_BODY, text_color="#c8d2e6",
+        ctk.CTkLabel(self.read, text="✓  " + m.get("validation", ""), font=T_BODY, text_color=READ,
                      justify="left", anchor="w", wraplength=600).pack(fill="x", padx=16, pady=(0, 8))
 
         self.g_stat.configure(text="✓  " + m.get("validation", ""))
@@ -366,6 +369,8 @@ class App:
                 self.q.put(("solved", res))
                 cm = engine.DEFCMAP[res.kind]; cache = {}
                 for v in res.views:
+                    if v == "Streamlines":      # expensive — rendered lazily on first click
+                        continue
                     self.q.put(("status", f"rendering {v}…")); cache[v] = res.render(v, cm)
                 self.q.put(("cached", (cache, res.views[0], res.info)))
             except Exception as ex:  # pragma: no cover
@@ -396,6 +401,18 @@ class App:
         self.view.set(v)
         if v in self.viewcache:
             self.frames = self.viewcache[v]; self.pidx = 0; self.playing = True
+        elif self.result and not self.busy:          # render this view on demand (e.g. Streamlines)
+            self.busy = True; self.run_btn.configure(state="disabled")
+            self.prog.pack(fill="x", pady=(10, 0)); self.prog.start()
+            self.status.configure(text=f"⏳ rendering {v}…", text_color=MUTED)
+            res, c = self.result, self.cmap.get()
+
+            def work():
+                try:
+                    self.q.put(("rendered_one", (v, res.render(v, c))))
+                except Exception as ex:  # pragma: no cover
+                    self.q.put(("error", str(ex)))
+            threading.Thread(target=work, daemon=True).start()
 
     def _toggle_play(self):
         self.playing = not self.playing
@@ -412,6 +429,8 @@ class App:
             try:
                 cache = {}
                 for v in res.views:
+                    if v == "Streamlines":
+                        continue
                     self.q.put(("status", f"recoloring {v}…")); cache[v] = res.render(v, c)
                 self.q.put(("cached", (cache, self.view.get(), res.info)))
             except Exception as ex:  # pragma: no cover
@@ -428,16 +447,25 @@ class App:
                     self.result = payload; self._set_views(payload)
                 elif kind == "cached":
                     cache, view, info = payload
-                    self.viewcache = cache; self.view.set(view)
+                    self.viewcache = cache
+                    if view not in cache:
+                        view = next(iter(cache))
+                    self.view.set(view)
                     if hasattr(self, "seg"):
                         self.seg.set(view)
                     self.frames = cache[view]
                     self.pidx, self.playing, self.busy = 0, True, False
                     self.playbtn.configure(text="⏸  Pause")
-                    self.status.configure(text=f"✓ {info}\n{len(cache)} views ready — switch instantly.",
-                                          text_color=GOOD)
+                    self.status.configure(text=f"✓ {info} — views switch instantly.", text_color=GOOD)
                     self.run_btn.configure(state="normal", text="▶   Run simulation")
                     self.prog.stop(); self.prog.pack_forget()
+                elif kind == "rendered_one":
+                    v, fr = payload; self.viewcache[v] = fr
+                    if self.view.get() == v:
+                        self.frames = fr; self.pidx = 0; self.playing = True
+                    self.busy = False; self.run_btn.configure(state="normal", text="▶   Run simulation")
+                    self.prog.stop(); self.prog.pack_forget()
+                    self.status.configure(text=f"✓ {v} ready.", text_color=GOOD)
                 elif kind == "error":
                     self.busy = False; self.status.configure(text=f"⚠ {payload}", text_color=WARN)
                     self.run_btn.configure(state="normal", text="▶   Run simulation")
@@ -475,7 +503,7 @@ def main():
         print(f"customtkinter/Pillow unavailable: {_IMPORT_ERR}\n  pip install customtkinter pillow")
         return
     try:
-        ctk.set_appearance_mode("dark")
+        ctk.set_appearance_mode("light")
         root = ctk.CTk()
     except Exception as e:
         print(f"No display to open the Studio ({e}).\nRun on a desktop, or use the demos in demos/.")

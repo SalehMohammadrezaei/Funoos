@@ -11,6 +11,7 @@ text and ranges); `view` and `colormap` are chosen *after* the run.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,8 @@ from . import render, geometry
 _BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 SOLVERS = _BASE / "solvers"
 EXE = ".exe" if sys.platform.startswith("win") else ""
+# 2D grids are modest — ~8 threads is the throughput sweet spot (more = overhead).
+_ENV = {**os.environ, "OMP_NUM_THREADS": str(min(8, os.cpu_count() or 4))}
 
 
 def _bin(d, name):
@@ -35,7 +38,7 @@ def _ensure(b):
     if sys.platform.startswith("win") or getattr(sys, "frozen", False):
         raise FileNotFoundError(f"solver not found: {b}. Build it first "
                                 f"(see docs/windows_build.md).")
-    subprocess.run(["make", "-C", str(Path(b).parent)], check=True)
+    subprocess.run(["make", "-C", str(Path(b).parent)], check=True, env=_ENV)
 
 
 def _read_vel(d, i, nx, ny):
@@ -245,7 +248,7 @@ def _solve_ns(mode, p, pr, tmp):
         args += ["--grav", str(p["gravity"]), "--pert", str(p["perturbation"]), "--conf", "0", "--iters", "80"]
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "density ρ"}
     pr(f"Navier–Stokes ({mode}) {nx}×{ny}, {steps} steps…")
-    subprocess.run(args, check=True)
+    subprocess.run(args, check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100)
     raw = [_read_scalar(tmp, i, nx, ny) for i in range(0, n, skip)]
     r = Result("scalar", raw, f"{mode}  {nx}×{ny}", hints=hints)
@@ -265,7 +268,7 @@ def _solve_euler(mode, p, pr, tmp):
     pr(f"compressible Euler ({mode}) {nx}×{ny}…")
     subprocess.run([str(_bin("compressible", "euler2d")), "--mode", mode, "--nx", str(nx),
                     "--ny", str(ny), "--tend", str(tend), "--cfl", "0.4", "--steps", "200000",
-                    "--save_every", "12", "--out", tmp] + extra, check=True)
+                    "--save_every", "12", "--out", tmp] + extra, check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100)
     raw = [_read_scalar(tmp, i, nx, ny) for i in range(0, n, skip)]
     return Result("density", raw, f"{mode}  {nx}×{ny}", hints=hints)
@@ -279,7 +282,7 @@ def _solve_dam(p, pr, tmp):
     pr(f"SPH dam break (~{int(a * H / dp / dp)} particles)…")
     subprocess.run([str(_bin("sph", "sph2d")), "--a", str(a), "--H", str(H), "--Lx", str(Lx),
                     "--Ly", str(Ly), "--dp", str(dp), "--g", str(p["gravity"]),
-                    "--tend", str(1.6 * _durv(p)), "--save_every", "60", "--out", tmp], check=True)
+                    "--tend", str(1.6 * _durv(p)), "--save_every", "60", "--out", tmp], check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100)
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3)
            for i in range(0, n, skip)]
