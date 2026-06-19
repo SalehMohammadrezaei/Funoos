@@ -1,42 +1,48 @@
 @echo off
 REM ============================================================================
-REM  Funoos - Windows build script.
-REM  Produces a standalone app at  dist\FunoosStudio\FunoosStudio.exe
+REM  Funoos - Windows build script (pywebview desktop app).
+REM  Produces a standalone app at  dist\Funoos\Funoos.exe
 REM
 REM  Prerequisites (one-time):
-REM    * g++ with OpenMP on PATH  (install MSYS2 then `pacman -S mingw-w64-x86_64-gcc`,
-REM      or w64devkit) -- to compile the C++ solvers for Windows.
+REM    * g++ with OpenMP on PATH  (MSYS2: `pacman -S mingw-w64-x86_64-gcc`, or w64devkit)
 REM    * Python 3 with pip on PATH.
-REM    * (optional) ffmpeg.exe placed in a  bin\  folder here, for GIF/MP4 export.
+REM    * ffmpeg.exe  placed in a  bin\  folder here  (REQUIRED — the player encodes
+REM      each run to MP4). Download a static build and drop ffmpeg.exe in bin\.
+REM    * WebView2 runtime (preinstalled on Windows 10/11; else get the Evergreen runtime).
 REM ============================================================================
 setlocal
 
-echo === [0/3] Cleaning old build\ and dist\ (so the .exe is always fresh) ===
+echo === [0/4] Cleaning old build\ and dist\ ===
 if exist build rmdir /s /q build
 if exist dist  rmdir /s /q dist
 
-echo === [1/3] Building C++ solvers (statically linked, OpenMP) ===
+echo === [1/4] Building C++ solvers (statically linked, OpenMP) ===
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\lbm\lbm2d.exe solvers\lbm\lbm2d.cpp || goto :err
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\incompressible\ins2d.exe solvers\incompressible\ins2d.cpp || goto :err
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\compressible\euler2d.exe solvers\compressible\euler2d.cpp || goto :err
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\sph\sph2d.exe solvers\sph\sph2d.cpp || goto :err
 
-echo === [2/3] Installing Python dependencies ===
+echo === [2/4] Installing Python dependencies ===
 python -m pip install --upgrade pip || goto :err
-pip install numpy scipy matplotlib pillow customtkinter pyinstaller || goto :err
+pip install numpy scipy matplotlib pillow pywebview pyinstaller || goto :err
 
-echo === [3/3] Bundling the app with PyInstaller ===
+echo === [3/4] Rendering gallery clips if missing (first build only; ~20-40 min) ===
+if not exist results\gallery\spec_kh.mp4 python render_gallery.py High 1.8
+
+echo === [4/4] Bundling the app with PyInstaller ===
 set FF=
 if exist bin\ffmpeg.exe set FF=--add-binary "bin\ffmpeg.exe;."
-pyinstaller --noconfirm --onedir --windowed --name FunoosStudio ^
-  --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" --collect-all customtkinter ^
-  %FF% studio.py || goto :err
+pyinstaller --noconfirm --onedir --windowed --name Funoos ^
+  --add-data "index.html;." --add-data "web;web" ^
+  --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" ^
+  --collect-all webview ^
+  %FF% funoos_app.py || goto :err
 
 echo.
 echo === SUCCESS ===
-echo App:  dist\FunoosStudio\FunoosStudio.exe
-echo (GIF/MP4 export needs ffmpeg: put ffmpeg.exe in bin\ before building, or on PATH.)
-echo To make an installer, open installer.iss with Inno Setup.
+echo App:  dist\Funoos\Funoos.exe
+echo (If the window is blank, install the WebView2 Evergreen runtime from Microsoft.)
+echo (No ffmpeg.exe in bin\ ^=^> the player can't encode video; add it and rebuild.)
 goto :eof
 
 :err
