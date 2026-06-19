@@ -27,7 +27,7 @@
 static const double G = 1.4;
 
 struct Args{ int nx=400,ny=200,steps=2000,save_every=20,nbub=1,building=0; double cfl=0.4,tend=0.2;
-             double p0=10.0,brad=0.06,bubr=0.18,bubrho=0.18,mach=1.5; std::string mode="sod",out="frames"; };
+             double p0=10.0,brad=0.06,bubr=0.18,bubrho=0.18,mach=1.5,strength=1.0; std::string mode="sod",out="frames"; };
 static Args parse(int c,char**v){ Args a;
     for(int i=1;i<c-1;i+=2){ std::string k=v[i],x=v[i+1];
         if(k=="--nx")a.nx=atoi(x.c_str()); else if(k=="--ny")a.ny=atoi(x.c_str());
@@ -37,6 +37,7 @@ static Args parse(int c,char**v){ Args a;
         else if(k=="--bubr")a.bubr=atof(x.c_str()); else if(k=="--bubrho")a.bubrho=atof(x.c_str());
         else if(k=="--nbub")a.nbub=atoi(x.c_str());
         else if(k=="--mach")a.mach=atof(x.c_str());
+        else if(k=="--strength")a.strength=atof(x.c_str());
         else if(k=="--building")a.building=atoi(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a; }
@@ -86,11 +87,12 @@ int main(int argc,char**argv){
     // Solid obstacles (a "city block" the blast must diffract around / reflect off).
     // Held each RK stage at a stiff, immovable wall state -> approximate reflecting boundary.
     std::vector<char> solid(N,0);
+    std::vector<float> failt(N,-1.0f);     // time each block fails (-1 = intact / never solid)
     auto in_solid=[&](int i,int j){
         if(!a.building) return false;
         // ground line + two towers of different height on the right half
         double fx=i/(double)nx, fy=j/(double)ny;
-        if(fy<0.05) return true;                                   // ground slab
+        if(fy<0.04) return true;                                   // ground slab (never fails)
         if(fx>0.52 && fx<0.62 && fy<0.55) return true;             // near tower
         if(fx>0.70 && fx<0.78 && fy<0.78) return true;             // far (taller) tower
         return false; };
@@ -252,6 +254,28 @@ int main(int argc,char**argv){
             my[s]=0.5*(my[s]+my1[s]+dt*dMY[s]); E[s]=0.5*(E[s]+E1[s]+dt*dE[s]);
             if(solid[s]){ r[s]=WALL_R; mx[s]=my[s]=0; E[s]=WALL_P/(G-1); } }
         t+=dt;
+
+        // structural failure: a block fails when the blast overpressure pressing on
+        // an exposed face exceeds its strength. Failed blocks turn to fluid (the gas
+        // floods the gap) so the towers erode windward-first and visibly collapse.
+        if(a.building){
+            const double pth = 0.1 + 0.9*a.strength;    // ambient 0.1 + strength margin
+            auto pres=[&](int s){ return (G-1)*(E[s]-0.5*(mx[s]*mx[s]+my[s]*my[s])/r[s]); };
+            std::vector<int> fail;
+            const int jg=(int)(0.05*ny);
+            for(int j=jg;j<ny-1;j++)for(int i=1;i<nx-1;i++){ int s=IX(i,j);
+                if(!solid[s]) continue;
+                int nb[4]={IX(i-1,j),IX(i+1,j),IX(i,j-1),IX(i,j+1)};
+                double load=0; for(int k=0;k<4;k++) if(!solid[nb[k]]) load=std::max(load,pres(nb[k]));
+                if(load>pth) fail.push_back(s);
+            }
+            for(int s: fail){ solid[s]=0; failt[s]=(float)t;
+                int i=s%nx,j=s/nx,nb[4]={IX(i-1,j),IX(i+1,j),IX(i,j-1),IX(i,j+1)};
+                double R=0,MX=0,MY=0,EE=0; int c=0;
+                for(int k=0;k<4;k++) if(!solid[nb[k]]){ R+=r[nb[k]];MX+=mx[nb[k]];MY+=my[nb[k]];EE+=E[nb[k]];c++; }
+                if(c){ r[s]=R/c; mx[s]=MX/c; my[s]=MY/c; E[s]=EE/c; }
+            }
+        }
         if(step%a.save_every==0){
             std::vector<float> buf(N); for(int s=0;s<N;s++)buf[s]=(float)r[s];
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
@@ -267,6 +291,9 @@ int main(int argc,char**argv){
     { std::vector<float> buf(N); for(int s=0;s<N;s++)buf[s]=(float)r[s];
       char fn[512]; snprintf(fn,sizeof(fn),"%s/final.bin",a.out.c_str());
       std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float)); }
+    if(a.building){     // per-block failure time (normalised to [0,1]); -1 = intact
+        std::vector<float> fb(N); for(int s=0;s<N;s++) fb[s]= failt[s]<0?-1.0f:failt[s]/(float)t;
+        std::ofstream ff(a.out+"/failt.bin",std::ios::binary); ff.write((char*)fb.data(),N*sizeof(float)); }
     std::ofstream meta(a.out+"/meta.txt");
     meta<<"nx "<<nx<<"\nny "<<ny<<"\nnframes "<<nf<<"\ntime "<<t<<"\nmode_"<<a.mode<<" 1\n";
     printf("done: %d frames, t=%.4f -> %s\n",nf,t,a.out.c_str());
