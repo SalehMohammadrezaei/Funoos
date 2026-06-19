@@ -42,6 +42,7 @@ int main(int argc,char**argv){
     const double c0=10.0*sqrt(g*Href), B=rho0*c0*c0/gamma, m=rho0*dp*dp;
     const double ad=10.0/(7.0*M_PI*h*h);
     const double dt=0.08*h/c0, alphaV=0.20, vmax=1.5*c0;
+    const double deltaSPH=0.10, epsX=0.25;   // density diffusion + XSPH (kill lattice pop & noise)
     const int steps=(int)(A.tend/dt);
 
     std::vector<double> x,y,vx,vy,rho,p;
@@ -59,7 +60,7 @@ int main(int argc,char**argv){
     else if(sc=="slosh"){ double Hs=0.42*A.Ly; add_block(0,A.Lx,0,Hs,Hs); }
     else if(sc=="waves"||sc=="ship"){ double Ho=0.40*A.Ly; add_block(0,A.Lx,0,Ho,Ho); }
     // pour starts from an empty glass and fills via continuous emission
-    std::vector<double> drho, ax, ay;
+    std::vector<double> drho, ax, ay, cvx, cvy;   // cvx/cvy: XSPH velocity correction
 
     // floating-ship rigid body (a tapered hull of boundary particles)
     const bool ship=(sc=="ship");
@@ -108,7 +109,7 @@ int main(int argc,char**argv){
             }
         }
         int N=x.size();
-        if((int)drho.size()<N){ drho.resize(N); ax.resize(N); ay.resize(N); }
+        if((int)drho.size()<N){ drho.resize(N); ax.resize(N); ay.resize(N); cvx.resize(N); cvy.resize(N); }
 
         for(auto&cl:cell) cl.clear();
         for(int i=0;i<N;i++) cell[cellId(x[i],y[i])].push_back(i);
@@ -120,7 +121,7 @@ int main(int argc,char**argv){
 
         #pragma omp parallel for schedule(dynamic,64)
         for(int i=0;i<N;i++){
-            double dr=0,fx=0,fy=0; int ci=(int)(x[i]/supp)+1, cj=(int)(y[i]/supp)+1;
+            double dr=0,fx=0,fy=0,xsx=0,xsy=0; int ci=(int)(x[i]/supp)+1, cj=(int)(y[i]/supp)+1;
             for(int dj=-1;dj<=1;dj++)for(int di=-1;di<=1;di++){
                 int cc=(cj+dj)*gnx+(ci+di); if(cc<0||cc>=gnx*gny) continue;
                 for(int j: cell[cc]){
@@ -129,13 +130,21 @@ int main(int argc,char**argv){
                     double r=sqrt(r2), gxk,gyk; Wgrad(r,dx,dy,gxk,gyk);
                     double dvx=vx[i]-vx[j], dvy=vy[i]-vy[j];
                     dr += m*(dvx*gxk+dvy*gyk);
+                    // delta-SPH density diffusion (Molteni & Colagrossi): smooths the
+                    // pressure field, removing the acoustic noise that pops the lattice
+                    double rdotg=dx*gxk+dy*gyk;   // (x_i-x_j)·∇W < 0; diffusion needs (x_j-x_i)·∇W = -rdotg
+                    dr += deltaSPH*h*c0*(m/rho[j])*2.0*(rho[j]-rho[i])*(-rdotg)/(r2+0.01*h2);
                     double pr=-m*(p[i]/(rho[i]*rho[i])+p[j]/(rho[j]*rho[j]));
                     double visc=0, vrr=dvx*dx+dvy*dy;
                     if(vrr<0){ double mu=h*vrr/(r2+0.01*h2); visc=-alphaV*c0*mu/(0.5*(rho[i]+rho[j])); }
                     fx += (pr - m*visc)*gxk; fy += (pr - m*visc)*gyk;
+                    // XSPH: nudge the advection velocity toward the neighbourhood mean,
+                    // relaxing the initial perfect lattice instead of letting it burst
+                    double q=r/h, W = (q<1)? ad*(1-1.5*q*q+0.75*q*q*q) : ad*0.25*(2-q)*(2-q)*(2-q);
+                    xsx += (m/rho[j])*(vx[j]-vx[i])*W; xsy += (m/rho[j])*(vy[j]-vy[i])*W;
                 }
             }
-            drho[i]=dr; ax[i]=fx+gx; ay[i]=fy-gt;
+            drho[i]=dr; ax[i]=fx+gx; ay[i]=fy-gt; cvx[i]=xsx; cvy[i]=xsy;
         }
 
         // floating ship: penalty contact pushes fluid away from the hull; the
@@ -180,7 +189,7 @@ int main(int argc,char**argv){
             vx[i]+=dt*(ax[i]+wx); vy[i]+=dt*(ay[i]+wy);
             double spd=sqrt(vx[i]*vx[i]+vy[i]*vy[i]);
             if(spd>vmax){ vx[i]*=vmax/spd; vy[i]*=vmax/spd; }
-            x[i]+=dt*vx[i]; y[i]+=dt*vy[i];
+            x[i]+=dt*(vx[i]+epsX*cvx[i]); y[i]+=dt*(vy[i]+epsX*cvy[i]);   // XSPH-corrected advection
             if(x[i]<wallL){x[i]=wallL; vx[i]*=-0.3;} if(x[i]>A.Lx){x[i]=A.Lx; vx[i]*=-0.3;}
             if(y[i]<0){y[i]=0; vy[i]*=-0.3;} if(y[i]>A.Ly){y[i]=A.Ly; vy[i]*=-0.3;}
         }
