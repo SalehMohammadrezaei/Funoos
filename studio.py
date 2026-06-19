@@ -22,7 +22,7 @@ from flowzoo import engine, render, content, postproc, catalog
 try:
     import tkinter as tk
     import customtkinter as ctk
-    from PIL import Image, ImageTk, ImageSequence
+    from PIL import Image, ImageTk, ImageSequence, ImageFilter, ImageDraw
     from tkinter import filedialog, messagebox
 except Exception as e:  # pragma: no cover
     ctk = None
@@ -177,7 +177,7 @@ class App:
         pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["gallery"] = pg
         self.gbrowse = ctk.CTkFrame(pg, fg_color=BG)
         self.gdetail = ctk.CTkFrame(pg, fg_color=BG)
-        self._detail_on = False; self._thumbs = {}
+        self._detail_on = False; self._cardstate = {}
         self._build_browse()
         self._build_detail()
 
@@ -202,38 +202,82 @@ class App:
             for i, s in enumerate(scenes):
                 self._scene_card(grid, s, i // NCOL, i % NCOL)
 
-    def _scene_card(self, parent, s, r, c):
-        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
-        card.grid(row=r, column=c, padx=9, pady=9, sticky="nsew")
-        th = tk.Label(card, bg=INKCV, bd=0); th.pack(padx=10, pady=(10, 8))
-        img = self._thumb(s["key"])
-        if img:
-            th.config(image=img); self._thumbs[s["key"]] = img
-        else:
-            th.config(text="rendering…", fg=MUTED, font=(F, 10), width=42, height=9)
-        ctk.CTkLabel(card, text=s["name"], font=(F, 15, "bold"), text_color=FG, anchor="w").pack(fill="x", padx=15)
-        snip = s["blurb"][:92].rsplit(" ", 1)[0] + "…"
-        ctk.CTkLabel(card, text=snip, font=T_SMALL, text_color=MUTED, anchor="w",
-                     justify="left", wraplength=296).pack(fill="x", padx=15, pady=(3, 14))
-        bind_click(card, lambda k=s["key"]: self._open_detail(k))
+    # frosted-glass thumbnail: the whole simulation (contained, never cropped) over a
+    # blurred cover-fill of its own flow, rounded with a soft light border
+    _THW, _THH = 320, 184
 
-        def on(_=None): card.configure(border_color=CYAN, fg_color=CARD2)
-        def off(_=None): card.configure(border_color=LINE, fg_color=CARD)
-        for w in [card] + list(card.winfo_children()):
-            w.bind("<Enter>", on); w.bind("<Leave>", off)
-
-    def _thumb(self, key, w=300, h=165):
+    def _glass_pil(self, key, w=None, h=None, rad=16):
+        w = w or self._THW; h = h or self._THH
         try:
-            im = Image.open(ROOT / "results" / "gallery" / (key + ".gif"))
-            n = getattr(im, "n_frames", 1); im.seek(int(0.7 * max(0, n - 1)))   # a developed frame
-            fr = im.convert("RGB")
-            fr = fr.crop((0, 0, int(fr.width * 0.80), fr.height))               # drop the side colorbar
-            sc = max(w / fr.width, h / fr.height)
-            fr = fr.resize((max(1, int(fr.width * sc)), max(1, int(fr.height * sc))))
-            x = (fr.width - w) // 2; y = (fr.height - h) // 2
-            return ImageTk.PhotoImage(fr.crop((x, y, x + w, y + h)))
+            src = Image.open(ROOT / "results" / "gallery" / (key + ".gif"))
+            n = getattr(src, "n_frames", 1); src.seek(int(0.7 * max(0, n - 1)))
+            fr = src.convert("RGB")
+            fr = fr.crop((0, 0, int(fr.width * 0.80), fr.height))               # drop the colorbar
         except Exception:
             return None
+        sc = max(w / fr.width, h / fr.height)                                   # blurred cover backdrop
+        bg = fr.resize((max(1, int(fr.width * sc)), max(1, int(fr.height * sc))))
+        x = (bg.width - w) // 2; y = (bg.height - h) // 2
+        bg = bg.crop((x, y, x + w, y + h)).filter(ImageFilter.GaussianBlur(10))
+        bg = Image.blend(bg, Image.new("RGB", (w, h), (12, 26, 46)), 0.30)
+        sc2 = min((w - 22) / fr.width, (h - 22) / fr.height)                    # crisp contained flow
+        fg = fr.resize((max(1, int(fr.width * sc2)), max(1, int(fr.height * sc2))))
+        card = bg.convert("RGBA"); card.paste(fg, ((w - fg.width) // 2, (h - fg.height) // 2))
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], rad, fill=255)
+        out = Image.new("RGBA", (w, h), (0, 0, 0, 0)); out.paste(card, (0, 0), mask)
+        ImageDraw.Draw(out).rounded_rectangle([0, 0, w - 1, h - 1], rad, outline=(255, 255, 255, 95), width=2)
+        return out
+
+    def _scene_card(self, parent, s, r, c):
+        key = s["key"]
+        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=18, border_width=1, border_color=LINE,
+                            width=self._THW + 22, height=self._THH + 78)
+        card.grid(row=r, column=c, padx=10, pady=10, sticky="nsew")
+        card.pack_propagate(False); card.grid_propagate(False)
+        holder = ctk.CTkFrame(card, fg_color=CARD, width=self._THW, height=self._THH)
+        holder.pack(padx=11, pady=(11, 0)); holder.pack_propagate(False)
+        lbl = tk.Label(holder, bg=CARD, bd=0); lbl.place(relx=0.5, rely=0.5, anchor="center")
+        base = self._glass_pil(key)
+        ctk.CTkLabel(card, text=s["name"], font=(F, 14, "bold"), text_color=FG, anchor="w").pack(fill="x", padx=14, pady=(6, 0))
+        if base is None:
+            lbl.config(text="rendering…", fg=MUTED, font=(F, 10))
+        self._cardstate[key] = {"base": base, "lbl": lbl, "frame": card, "scale": 0.9,
+                                "target": 0.9, "anim": False, "photo": None}
+        self._set_card_img(key)
+        bind_click(card, lambda k=key: self._open_detail(k))
+        for w in [card, holder, lbl]:
+            w.bind("<Enter>", lambda e, k=key: self._hover_card(k, True))
+            w.bind("<Leave>", lambda e, k=key: self._hover_card(k, False))
+
+    def _set_card_img(self, key):
+        st = self._cardstate[key]
+        if st["base"] is None:
+            return
+        sclt = st["scale"]
+        bw, bh = st["base"].size
+        im = st["base"].resize((max(1, int(bw * sclt)), max(1, int(bh * sclt))), Image.LANCZOS)
+        st["photo"] = ImageTk.PhotoImage(im); st["lbl"].config(image=st["photo"])
+
+    def _hover_card(self, key, grow):
+        st = self._cardstate.get(key)
+        if not st:
+            return
+        st["target"] = 1.0 if grow else 0.9
+        st["frame"].configure(border_color=CYAN if grow else LINE)
+        if not st["anim"]:
+            st["anim"] = True; self._step_card(key)
+
+    def _step_card(self, key):
+        st = self._cardstate.get(key)
+        if not st or st["base"] is None:
+            return
+        s, t = st["scale"], st["target"]
+        if abs(s - t) < 0.006:
+            st["scale"] = t; st["anim"] = False; self._set_card_img(key); return
+        st["scale"] = s + (t - s) * 0.35          # ease toward target
+        self._set_card_img(key)
+        self.root.after(16, lambda: self._step_card(key))
 
     # ---- detail: one scene, full write-up + animated clip ----
     def _build_detail(self):
