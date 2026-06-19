@@ -27,7 +27,7 @@
 static const double G = 1.4;
 
 struct Args{ int nx=400,ny=200,steps=2000,save_every=20,nbub=1,building=0; double cfl=0.4,tend=0.2;
-             double p0=10.0,brad=0.06,bubr=0.18,bubrho=0.18; std::string mode="sod",out="frames"; };
+             double p0=10.0,brad=0.06,bubr=0.18,bubrho=0.18,mach=1.5; std::string mode="sod",out="frames"; };
 static Args parse(int c,char**v){ Args a;
     for(int i=1;i<c-1;i+=2){ std::string k=v[i],x=v[i+1];
         if(k=="--nx")a.nx=atoi(x.c_str()); else if(k=="--ny")a.ny=atoi(x.c_str());
@@ -36,6 +36,7 @@ static Args parse(int c,char**v){ Args a;
         else if(k=="--p0")a.p0=atof(x.c_str()); else if(k=="--radius")a.brad=atof(x.c_str());
         else if(k=="--bubr")a.bubr=atof(x.c_str()); else if(k=="--bubrho")a.bubrho=atof(x.c_str());
         else if(k=="--nbub")a.nbub=atoi(x.c_str());
+        else if(k=="--mach")a.mach=atof(x.c_str());
         else if(k=="--building")a.building=atoi(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a; }
@@ -95,6 +96,13 @@ int main(int argc,char**argv){
         return false; };
     const double WALL_R=6.0, WALL_P=0.1;   // stiff wall: heavy + ambient pressure, zero velocity
 
+    // post-shock state behind a shock of Mach number a.mach moving into still
+    // ambient air (rho1=1, p1=1) — exact Rankine-Hugoniot relations
+    const double Ms=a.mach, c1=sqrt(G);
+    const double psR=((G+1)*Ms*Ms)/((G-1)*Ms*Ms+2.0);
+    const double psP=(2.0*G*Ms*Ms-(G-1))/(G+1);
+    const double psU=(2.0/(G+1))*(Ms*Ms-1.0)/Ms*c1;
+
     // --- initial conditions ---
     for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){ int s=IX(i,j);
         if(in_solid(i,j)) solid[s]=1;
@@ -112,7 +120,7 @@ int main(int argc,char**argv){
                 double d1=dx*dx+(j-ny*0.32)*(j-ny*0.32), d2=dx*dx+(j-ny*0.68)*(j-ny*0.68);
                 inb=(d1<r2b)||(d2<r2b);
             } else { double dx=i-cx,dy=j-ny*0.5; inb=(dx*dx+dy*dy<rad*rad); }
-            if(i< nx*0.12) setprim(s,1.34,0.40,0,1.5);      // post-shock inflow (Mach ~1.5)
+            if(i< nx*0.12) setprim(s,psR,psU,0,psP);         // post-shock inflow (Mach a.mach)
             else if(inb) setprim(s,a.bubrho,0,0,1.0);        // bubble gas (light or heavy)
             else setprim(s,1.0,0,0,1.0); }
     }

@@ -256,6 +256,11 @@ def _f(name, label, default, lo, hi, group, help):
             "min": lo, "max": hi, "group": group, "help": help}
 
 
+def _when(qd, ctrl, vals):
+    # mark a descriptor so the app only shows it when control `ctrl` ∈ vals
+    qd = dict(qd); qd["when"] = (ctrl, vals); return qd
+
+
 _H = {
     "Re": "Reynolds number Re = U·D/ν (inertia ÷ viscosity). Low → smooth steady flow; "
           "high → vortex shedding and turbulence.",
@@ -314,7 +319,8 @@ def _solve_ns(mode, p, pr, tmp):
         args += ["--buoy", str(p["buoyancy"]), "--conf", str(p["confinement"]), "--srcw", str(p["source"])]
         hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
     else:
-        args += ["--grav", str(p["gravity"]), "--pert", str(p["perturbation"]), "--conf", "0", "--iters", "80"]
+        args += ["--grav", str(p["gravity"]), "--pert", str(p["perturbation"]), "--conf", "0",
+                 "--iters", "80", "--atwood", str(p.get("atwood", 1.0))]
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "density ρ"}
     pr(f"Navier–Stokes ({mode}) {nx}×{ny}, {steps} steps…")
     subprocess.run(args, check=True, env=_ENV)
@@ -338,9 +344,10 @@ def _solve_euler(mode, p, pr, tmp):
                  "building": bld}
     else:
         nx, ny = int(620 * s), int(320 * s); tend = 230 * _durv(p)
-        rho_b, nb = {"Light bubble": (0.18, 1), "Heavy bubble": (3.0, 1),
-                     "Two bubbles": (0.18, 2)}.get(p.get("variant", "Light bubble"), (0.18, 1))
-        extra = ["--bubr", str(p["bubble"]), "--bubrho", str(rho_b), "--nbub", str(nb)]
+        nb = 2 if p.get("target") == "Two bubbles" else 1
+        rho_b = float(p.get("densratio", 0.18)); mach = float(p.get("mach", 1.5))
+        extra = ["--bubr", str(p["bubble"]), "--bubrho", str(rho_b), "--nbub", str(nb),
+                 "--mach", str(mach)]
         hints = {"mode": "bubble", "nx": nx, "ny": ny}
     _ensure(_bin("compressible", "euler2d"))
     pr(f"compressible Euler ({mode}) {nx}×{ny}…")
@@ -370,16 +377,27 @@ _SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2),
 def _solve_dam(p, pr, tmp):
     sc = _SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam")
     Lx, Ly = _SPLASH_TANK[sc]
-    a, H = float(p["width"]), float(p["height"])
+    a = float(p.get("dropsize", 1.0)) if sc == "drop" else float(p["width"])
+    H = float(p["height"])
     npart = max(500.0, float(p["particles"]))
     dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08))
     g = float(p["gravity"])
+    args = [str(_bin("sph", "sph2d")), "--scene", sc, "--a", str(a), "--H", str(H),
+            "--Lx", str(Lx), "--Ly", str(Ly), "--dp", str(dp), "--g", str(g),
+            "--tend", str(2.0 * _durv(p)), "--save_every", "60", "--out", tmp]
+    if sc == "drop":
+        args += ["--dh", str(p.get("dropheight", 0.70))]
+    elif sc == "slosh":
+        args += ["--sloshA", str(p.get("sloshA", 0.7)), "--sloshT", str(p.get("sloshT", 1.1))]
+    elif sc == "pour":
+        args += ["--sw", str(p.get("spout", 0.045)), "--pourv", str(p.get("pourv", 2.2))]
+    elif sc in ("waves", "ship"):
+        args += ["--waveA", str(p.get("waveA", 0.4)), "--waveT", str(p.get("waveT", 0.9))]
+        if sc == "ship":
+            args += ["--shipsz", str(p.get("shipsz", 1.0))]
     _ensure(_bin("sph", "sph2d"))
     pr(f"SPH · {p.get('scene', 'Dam break')} · dp={dp:.3f}…")
-    subprocess.run([str(_bin("sph", "sph2d")), "--scene", sc, "--a", str(a), "--H", str(H),
-                    "--Lx", str(Lx), "--Ly", str(Ly), "--dp", str(dp), "--g", str(g),
-                    "--tend", str(2.0 * _durv(p)), "--save_every", "60", "--out", tmp],
-                   check=True, env=_ENV)
+    subprocess.run(args, check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3) for i in idx]
     hints = {"Lx": Lx, "Ly": Ly, "vmax": 1.2 * np.sqrt(2 * g * max(H, Ly * 0.5))}
@@ -434,7 +452,11 @@ EXHIBITS = {
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("smoke", p, pr, t)},
     "Mushroom Clouds": {
-        "params": [_f("gravity", "Gravity", 1.2e-3, 4e-4, 3e-3, "Physics", _H["grav"]),
+        "params": [_f("atwood", "Atwood number", 0.7, 0.2, 1.0, "Physics",
+                      "A = (ρ_heavy − ρ_light)/(ρ_heavy + ρ_light), the density contrast across "
+                      "the interface. It sets how hard the heavy fluid falls: higher A → faster, "
+                      "narrower spikes and more vigorous mushroom roll-up."),
+                   _f("gravity", "Gravity", 1.2e-3, 4e-4, 3e-3, "Physics", _H["grav"]),
                    _f("viscosity", "Viscosity", 1.5e-4, 3e-5, 5e-4, "Physics", _H["visc"]),
                    _f("perturbation", "Interface ripple (×)", 1.0, 0.2, 3.0, "Physics",
                       "Amplitude of the initial interface ripple that seeds the fingers."),
@@ -456,11 +478,18 @@ EXHIBITS = {
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("blast", p, pr, t)},
     "Shockwave Strike": {
-        "params": [{"name": "variant", "label": "Target", "type": "choice", "group": "Geometry",
-                    "choices": ["Light bubble", "Heavy bubble", "Two bubbles"],
-                    "default": "Light bubble",
-                    "help": "What the shock hits: a light gas bubble (rolls up fast), a heavy "
-                    "bubble (the shock focuses through it), or two bubbles that interact."},
+        "params": [{"name": "target", "label": "Target", "type": "choice", "group": "Geometry",
+                    "choices": ["Single bubble", "Two bubbles"], "default": "Single bubble",
+                    "help": "One gas bubble, or two stacked bubbles whose roll-ups interact."},
+                   _f("mach", "Shock Mach number", 1.5, 1.1, 3.0, "Physics",
+                      "Strength of the incoming shock, M_s = (shock speed)/(sound speed). The "
+                      "post-shock gas state is set from the exact Rankine–Hugoniot relations, so "
+                      "higher M → stronger compression, hotter gas and a faster, tighter roll-up."),
+                   _f("densratio", "Density ratio ρ_bub/ρ_air", 0.18, 0.05, 4.0, "Physics",
+                      "Bubble density ÷ ambient air density. <1 = a light bubble (the shock "
+                      "accelerates through it and it rolls up fast); >1 = a heavy bubble (the "
+                      "shock slows and focuses inside it). This is the Atwood-number analogue that "
+                      "sets the sign and strength of the baroclinic vorticity."),
                    _f("bubble", "Bubble size (frac.)", 0.18, 0.08, 0.32, "Geometry",
                       "Bubble radius as a fraction of the domain height."),
                    P_RES(), P_DUR()],
@@ -470,14 +499,49 @@ EXHIBITS = {
                     "choices": ["Dam break", "Drop & splash", "Sloshing tank",
                                 "Pour into a glass", "Wavy ocean", "Ship on waves"],
                     "default": "Dam break",
-                    "help": "Which free-surface scenario to run. Dam break uses the width/height "
-                    "below; the others set up their own tank."},
-                   _f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry", "Column width (Dam break)."),
-                   _f("height", "Dam height (m)", 2.0, 0.6, 3.0, "Geometry", "Column height (Dam break)."),
+                    "help": "Which free-surface scenario to run. Each scene exposes its own "
+                    "controls below."},
+                   # --- dam break ---
+                   _when(_f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry",
+                            "Width of the held-back water column."), "scene", ["Dam break"]),
+                   _when(_f("height", "Dam height (m)", 2.0, 0.6, 3.0, "Geometry",
+                            "Height of the column — more head → a faster, taller surge."),
+                         "scene", ["Dam break"]),
+                   # --- drop & splash ---
+                   _when(_f("dropsize", "Drop size (m)", 1.0, 0.4, 1.8, "Geometry",
+                            "Width of the falling block of water."), "scene", ["Drop & splash"]),
+                   _when(_f("dropheight", "Release height (frac.)", 0.70, 0.45, 0.92, "Geometry",
+                            "How high the block starts, as a fraction of tank height. Higher → "
+                            "faster impact and a bigger crown."), "scene", ["Drop & splash"]),
+                   # --- sloshing tank ---
+                   _when(_f("sloshA", "Slosh strength (×g)", 0.7, 0.1, 1.5, "Physics",
+                            "Amplitude of the oscillating sideways gravity, as a multiple of g."),
+                         "scene", ["Sloshing tank"]),
+                   _when(_f("sloshT", "Slosh period (s)", 1.1, 0.5, 3.0, "Physics",
+                            "Period of the side-to-side forcing. Near the tank's natural period "
+                            "the wave resonates and breaks."), "scene", ["Sloshing tank"]),
+                   # --- pour into a glass ---
+                   _when(_f("spout", "Spout width (frac.)", 0.045, 0.02, 0.12, "Geometry",
+                            "Width of the pour stream as a fraction of the tank width."),
+                         "scene", ["Pour into a glass"]),
+                   _when(_f("pourv", "Pour speed (m/s)", 2.2, 0.5, 5.0, "Physics",
+                            "Speed the water leaves the spout. Faster → more splashing on impact."),
+                         "scene", ["Pour into a glass"]),
+                   # --- wavy ocean / ship ---
+                   _when(_f("waveA", "Wave height (m)", 0.4, 0.1, 0.9, "Physics",
+                            "Stroke of the wavemaker paddle — sets the wave amplitude."),
+                         "scene", ["Wavy ocean", "Ship on waves"]),
+                   _when(_f("waveT", "Wave period (s)", 0.9, 0.4, 2.0, "Physics",
+                            "Period of the wavemaker — sets the wavelength of the train."),
+                         "scene", ["Wavy ocean", "Ship on waves"]),
+                   _when(_f("shipsz", "Ship size (×)", 1.0, 0.5, 1.8, "Geometry",
+                            "Scale of the floating hull. Bigger ships sit deeper and roll slower."),
+                         "scene", ["Ship on waves"]),
+                   # --- common ---
                    _f("particles", "Particles (≈)", 3000, 600, 12000, "Geometry",
                       "Approximate number of SPH particles. More → finer splash, slower."),
                    _f("gravity", "Gravity (m/s²)", 9.81, 1.0, 25.0, "Physics",
-                      "Gravitational acceleration pulling the column down."),
+                      "Gravitational acceleration."),
                    P_DUR()],
         "solve": lambda p, pr, t: _solve_dam(p, pr, t)},
     "Cloud Billows": {

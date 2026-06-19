@@ -308,7 +308,31 @@ class App:
         for w in self.viewbar.winfo_children():
             w.destroy()
 
+    def _curval(self, name):
+        # current value of a control: a built widget, else the value being carried
+        # across a rebuild (controller may not be rebuilt yet), else the default
+        if name in self.widgets:
+            return self.widgets[name][1].get()
+        pending = getattr(self, "_pending", {})
+        if name in pending:
+            return pending[name]
+        for qd in engine.EXHIBITS[self.sel]["params"]:
+            if qd["name"] == name:
+                return qd["default"]
+        return None
+
+    def _visible(self, qd):
+        # a param with "when": (control, [values]) only shows for those values
+        w = qd.get("when")
+        if not w:
+            return True
+        ctrl, vals = w
+        return self._curval(ctrl) in vals
+
     def _build_params(self):
+        # preserve any values the user already typed across a rebuild
+        saved = {n: v.get() for n, (qd, v) in self.widgets.items()}
+        self._pending = saved
         for w in self.pscroll.winfo_children():
             w.destroy()
         self.widgets = {}
@@ -316,15 +340,16 @@ class App:
         for qd in engine.EXHIBITS[self.sel]["params"]:
             groups.setdefault(qd.get("group", "Render"), []).append(qd)
         for g in ["Geometry", "Physics", "Render"]:
-            if g not in groups:
+            vis = [qd for qd in groups.get(g, []) if self._visible(qd)]
+            if not vis:
                 continue
             kicker(self.pscroll, g, GOLD).pack(fill="x", pady=(14, 6))
             cardg = ctk.CTkFrame(self.pscroll, fg_color=CARD, corner_radius=12)
             cardg.pack(fill="x")
-            for qd in groups[g]:
-                self._row(cardg, qd)
+            for qd in vis:
+                self._row(cardg, qd, saved.get(qd["name"]))
 
-    def _row(self, parent, qd):
+    def _row(self, parent, qd, saved=None):
         row = ctk.CTkFrame(parent, fg_color=CARD); row.pack(fill="x", padx=10, pady=(8, 4))
         head = ctk.CTkFrame(row, fg_color=CARD); head.pack(fill="x")
         lab = qd.get("label", qd["name"])
@@ -337,19 +362,26 @@ class App:
             Tooltip(chip, qd["help"])
             chip.bind("<Button-1>", lambda e, t=qd["help"], n=lab: messagebox.showinfo(n, t))
         if qd["type"] == "choice":
-            v = tk.StringVar(value=qd["default"])
+            init = saved if saved in qd["choices"] else qd["default"]
+            v = tk.StringVar(value=init)
+            # changing a control re-flows the panel so scene-specific params appear
             ctk.CTkOptionMenu(row, values=qd["choices"], variable=v, font=T_SMALL, fg_color=CARD2,
-                              button_color="#2c3856", button_hover_color=CYAN, dropdown_fg_color=CARD2
-                              ).pack(fill="x", pady=(4, 0))
+                              button_color="#2c3856", button_hover_color=CYAN, dropdown_fg_color=CARD2,
+                              command=lambda *_: self._build_params()).pack(fill="x", pady=(4, 0))
         else:
-            v = tk.StringVar(value=qd["default"] if qd["type"] == "str" else f"{qd['default']:g}")
+            default = qd["default"] if qd["type"] == "str" else f"{qd['default']:g}"
+            v = tk.StringVar(value=saved if saved is not None else default)
             ctk.CTkEntry(row, textvariable=v, font=T_SMALL, fg_color=CARD2, border_color=LINE,
                          border_width=1).pack(fill="x", pady=(4, 0))
         self.widgets[qd["name"]] = (qd, v)
 
     def _params(self):
-        return {n: (float(v.get()) if qd["type"] == "float" else v.get())
-                for n, (qd, v) in self.widgets.items()}
+        # start from every param's default, then override with the built (visible) widgets,
+        # so scene-hidden params still pass a sane value to the engine
+        vals = {qd["name"]: qd["default"] for qd in engine.EXHIBITS[self.sel]["params"]}
+        for n, (qd, v) in self.widgets.items():
+            vals[n] = float(v.get()) if qd["type"] == "float" else v.get()
+        return vals
 
     def run(self):
         if self.busy:

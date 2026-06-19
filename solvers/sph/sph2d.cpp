@@ -24,6 +24,8 @@
 #include <algorithm>
 
 struct Args{ double a=1.0,H=2.0,Lx=5.0,Ly=3.2,dp=0.03,g=9.81,tend=2.0;
+             double dh=0.70, sloshA=0.7, sloshT=1.1, sw=0.045, pourv=2.2,
+                    waveA=0.0, waveT=0.9, shipsz=1.0;   // per-scene controls
              int save_every=12; std::string scene="dam",out="frames"; };
 static Args parse(int c,char**v){ Args a;
     for(int i=1;i<c-1;i+=2){ std::string k=v[i],x=v[i+1];
@@ -31,6 +33,10 @@ static Args parse(int c,char**v){ Args a;
         else if(k=="--Lx")a.Lx=atof(x.c_str()); else if(k=="--Ly")a.Ly=atof(x.c_str());
         else if(k=="--dp")a.dp=atof(x.c_str()); else if(k=="--tend")a.tend=atof(x.c_str());
         else if(k=="--g")a.g=atof(x.c_str()); else if(k=="--scene")a.scene=x;
+        else if(k=="--dh")a.dh=atof(x.c_str()); else if(k=="--sloshA")a.sloshA=atof(x.c_str());
+        else if(k=="--sloshT")a.sloshT=atof(x.c_str()); else if(k=="--sw")a.sw=atof(x.c_str());
+        else if(k=="--pourv")a.pourv=atof(x.c_str()); else if(k=="--waveA")a.waveA=atof(x.c_str());
+        else if(k=="--waveT")a.waveT=atof(x.c_str()); else if(k=="--shipsz")a.shipsz=atof(x.c_str());
         else if(k=="--save_every")a.save_every=atoi(x.c_str()); else if(k=="--out")a.out=x; }
     return a; }
 
@@ -55,7 +61,8 @@ int main(int argc,char**argv){
     // --- scene initial conditions ---
     if(sc=="dam"){ add_block(0,A.a,0,A.H,A.H); }
     else if(sc=="drop"){ double Hp=0.30*A.Ly; add_block(0,A.Lx,0,Hp,Hp);
-        double bw=A.a, bh=0.55*A.H, cx=A.Lx*0.5, by=0.70*A.Ly;
+        double bw=A.a, bh=0.55*A.H, cx=A.Lx*0.5, by=A.dh*A.Ly;   // release height = dh
+        if(by+bh>A.Ly) by=A.Ly-bh;
         add_block(cx-bw/2,cx+bw/2,by,by+bh,by+bh); }
     else if(sc=="slosh"){ double Hs=0.42*A.Ly; add_block(0,A.Lx,0,Hs,Hs); }
     else if(sc=="waves"||sc=="ship"){ double Ho=0.40*A.Ly; add_block(0,A.Lx,0,Ho,Ho); }
@@ -67,7 +74,7 @@ int main(int argc,char**argv){
     std::vector<double> hlx,hly;                 // hull particle coords, body frame
     double Cx=0,Cy=0,th=0, bvx=0,bvy=0,bom=0, Mship=1,Iship=1;
     if(ship){
-        double Ho=0.40*A.Ly, Wt=0.95, Wb=0.50, Hh=0.50;
+        double Ho=0.40*A.Ly, Wt=0.95*A.shipsz, Wb=0.50*A.shipsz, Hh=0.50*A.shipsz;
         for(double py=-Hh/2; py<=Hh/2+1e-9; py+=dp){
             double frac=(py+Hh/2)/Hh, halfw=0.5*(Wb+(Wt-Wb)*frac);
             for(double px=-halfw; px<=halfw+1e-9; px+=dp){ hlx.push_back(px); hly.push_back(py); }
@@ -93,9 +100,9 @@ int main(int argc,char**argv){
     int nf=0;
     const double kw=0.10*c0*c0/h;
     // pour spout + wave paddle parameters
-    const double sx=A.Lx*0.5, sw=std::max(3.0*dp, 0.045*A.Lx);   // narrow pour stream
-    const double Tw=0.9, paddle=0.45*A.Lx*0.0 + std::min(0.5, 0.12*A.Lx);  // wave amplitude
-    const double Ts=1.1, sloshA=0.7*g;
+    const double sx=A.Lx*0.5, sw=std::max(3.0*dp, A.sw*A.Lx);    // pour stream half-width
+    const double Tw=A.waveT, paddle=(A.waveA>0.0)? A.waveA : std::min(0.5, 0.12*A.Lx);  // wave amplitude
+    const double Ts=A.sloshT, sloshA=A.sloshA*g;
     const int Ncap=22000;
 
     for(int step=0; step<=steps; step++){
@@ -104,7 +111,7 @@ int main(int argc,char**argv){
         // continuous emission for the pour scene
         if(sc=="pour" && (int)x.size()<Ncap && step%std::max(1,(int)(0.012/dt))==0){
             for(double px=sx-sw; px<sx+sw; px+=dp){
-                x.push_back(px); y.push_back(A.Ly-2*dp); vx.push_back(0); vy.push_back(-2.2);
+                x.push_back(px); y.push_back(A.Ly-2*dp); vx.push_back(0); vy.push_back(-A.pourv);
                 rho.push_back(rho0); p.push_back(0);
             }
         }

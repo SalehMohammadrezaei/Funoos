@@ -26,7 +26,7 @@
 
 struct Args {
     int nx=240, ny=360, steps=4000, save_every=20, iters=60;
-    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0;
+    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0;
     std::string mode="smoke", out="frames";
 };
 static Args parse(int c, char** v){
@@ -38,6 +38,7 @@ static Args parse(int c, char** v){
         else if(k=="--visc")a.visc=atof(x.c_str()); else if(k=="--buoy")a.buoy=atof(x.c_str());
         else if(k=="--grav")a.grav=atof(x.c_str()); else if(k=="--conf")a.conf=atof(x.c_str());
         else if(k=="--srcw")a.srcw=atof(x.c_str()); else if(k=="--pert")a.pert=atof(x.c_str());
+        else if(k=="--atwood")a.atwood=atof(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a;
 }
@@ -111,7 +112,9 @@ int main(int argc,char**argv){
         for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){
             double yi=0.5*ny + 0.04*ny*a.pert*sin(2*M_PI*i/(double)nx*3)
                               + 0.015*ny*a.pert*sin(2*M_PI*i/(double)nx*7);
-            s[IX(i,j)] = 0.5*(1.0+tanh((j-yi)/2.0));
+            // Atwood number sets the density contrast across the interface:
+            // s in [0.5(1-A), 0.5(1+A)], so the buoyant forcing scales with A
+            s[IX(i,j)] = 0.5 + 0.5*a.atwood*tanh((j-yi)/2.0);
         }
     }
 
