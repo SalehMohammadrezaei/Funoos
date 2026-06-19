@@ -87,7 +87,10 @@ DETAIL = {
 "• u, ∂t u + (u·∇)u, −∇p, ν∇²u, ∇·u=0 — the incompressible Navier–Stokes terms\n"
 "• −g·ρ·ŷ — the gravitational body force; heavier fluid (larger ρ) is pulled "
 "down harder, which is the source of the instability\n"
-"• ρ here is an advected density field carried with the flow"),
+"• ρ here is an advected density field carried with the flow\n"
+"• A = (ρ_heavy − ρ_light)/(ρ_heavy + ρ_light) — the Atwood number sets the "
+"density contrast across the interface; the spike growth rate scales like "
+"√(A·g·k), so higher A gives faster, narrower fingers"),
 },
 "Detonation": {
 "physics": (
@@ -109,8 +112,16 @@ DETAIL = {
 "towers: the front reflects off the walls (the incident and reflected shocks can "
 "merge into a stronger 'Mach stem' near the ground), diffracts around the "
 "corners, and leaves a quiet shadow zone in the lee of each building — the same "
-"reasoning blast-protection engineering is built on. The masonry is flung off as "
-"glowing debris on a ballistic arc the moment the front sweeps past it.\n\n"
+"reasoning blast-protection engineering is built on.\n\n"
+"The towers can also break. Each block carries a strength; when the local "
+"overpressure on an exposed face exceeds it, the block fails, turns to gas (the "
+"flow floods the gap) and is flung off as glowing debris on a ballistic arc. "
+"Because only exposed faces feel the load, damage propagates inward from the "
+"windward side — the towers are scoured front-first and visibly change shape as "
+"the shock passes, leaving a sheltered stump in the lee. This is an "
+"overpressure-failure model (fluid–structure coupling through the gas pressure), "
+"not a full stress-and-fracture solid-mechanics simulation, but it captures why "
+"blast damage is so directional.\n\n"
 "The 'schlieren' view mimics a classic laboratory technique that makes density "
 "gradients visible, so the shock fronts light up as sharp bright lines; the "
 "Speed view shows the gas velocity, where you can watch the flow accelerate "
@@ -143,16 +154,24 @@ DETAIL = {
 "explosion; only the initial condition differs."),
 "terms": (
 "• U, F(U), ∂t U + ∇·F(U) = 0, γ — the compressible Euler conservation laws "
-"(see the Explosion exhibit)\n"
-"• the new ingredient is purely in the initial condition: a circular region of "
-"low-density gas struck by an incoming post-shock state\n"
+"(see the Detonation exhibit)\n"
+"• M_s — the shock Mach number you set; the post-shock density, pressure and "
+"velocity follow from the exact Rankine–Hugoniot jump conditions, so a stronger "
+"shock means a hotter, faster, more compressed incoming flow\n"
+"• ρ_bub/ρ_air — the bubble-to-air density ratio: below 1 the bubble is light "
+"(the shock speeds through and it rolls up fast), above 1 it is heavy (the shock "
+"focuses inside it); this ratio sets the sign and size of the baroclinic torque\n"
 "• baroclinic vorticity generation, ∝ ∇ρ×∇p, is what rolls the bubble up"),
 },
 "The Big Splash": {
 "physics": (
-"This exhibit runs five free-surface scenes from one solver — pick from the "
+"This exhibit runs six free-surface scenes from one solver — pick from the "
 "'Scene' control: a dam break, a block dropped into a pool, a sloshing tank, "
-"pouring water into a glass, and a wavemaker driving an ocean of waves.\n\n"
+"pouring water into a glass, a wavemaker driving an ocean of waves, and a "
+"rigid ship floating on those waves. Each scene exposes its own controls (drop "
+"size and release height, slosh strength and period, spout width and pour speed, "
+"wave height and period, ship size), so you can dial in the physics that matters "
+"for that scenario.\n\n"
 "Take the dam break: hold back a column of water with a wall, remove the wall "
 "instantly, and gravity converts the column's potential energy into a fast "
 "horizontal surge. The front races along the floor, climbs the opposite wall, "

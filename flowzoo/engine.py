@@ -652,7 +652,10 @@ META = {
                     "piecewise-linear MUSCL reconstruction with a minmod slope limiter, an "
                     "HLLC approximate Riemann solver at each cell face, and a two-stage "
                     "strong-stability-preserving Runge–Kutta time step under a CFL condition "
-                    "(γ = 1.4). Schlieren imaging shows |∇ρ|, lighting up the shock fronts.",
+                    "(γ = 1.4). Schlieren imaging shows |∇ρ|, lighting up the shock fronts. In "
+                    "the city scene, solid blocks are held as reflecting walls and fail when the "
+                    "overpressure on an exposed face exceeds their strength — an overpressure-"
+                    "driven fluid–structure coupling that lets the towers crumble into debris.",
         "validation": "The identical solver reproduces the exact Sod shock-tube Riemann "
                        "solution to a mean density error of ≈ 0.002 — capturing the "
                        "rarefaction, contact and shock crisply.",
@@ -666,8 +669,10 @@ META = {
                  "model problem for supersonic mixing and inertial-confinement fusion.",
         "eq": _EULER_EQ,
         "numerics": "Same compressible finite-volume scheme (MUSCL + minmod, HLLC Riemann "
-                    "solver, SSP-RK2, γ = 1.4). The setup is a low-density circular bubble in "
-                    "still air, struck by an inflowing post-shock state from the left.",
+                    "solver, SSP-RK2, γ = 1.4). One or two circular bubbles of a chosen "
+                    "density ratio sit in still air; the incoming flow is the exact "
+                    "Rankine–Hugoniot post-shock state for the Mach number you set, so shock "
+                    "strength and density contrast are both physical, tunable inputs.",
         "validation": "Uses the same HLLC solver validated against the exact Sod shock tube "
                        "(mean density error ≈ 0.002).",
         "demo": "results/shock_bubble.gif"},
@@ -675,16 +680,20 @@ META = {
         "blurb": "Water you can actually splash — six scenes from one meshfree solver. "
                  "Break a dam and watch the surge overturn against the far wall; drop a block "
                  "into a pool for a crown splash; slosh a tank back and forth until it "
-                 "breaks; pour a stream into a tall glass; or drive a wavemaker across an "
-                 "ocean of travelling waves. There is no grid at all — the fluid is a cloud "
-                 "of moving particles, which is why it handles violent free surfaces and "
-                 "breaking, folding water so naturally.",
+                 "breaks; pour a stream into a tall glass; drive a wavemaker across an "
+                 "ocean of travelling waves; or float a rigid ship on them. There is no grid "
+                 "at all — the fluid is a cloud of moving particles, which is why it handles "
+                 "violent free surfaces and breaking, folding water so naturally.",
         "eq": r"$\dfrac{D\mathbf{v}_i}{Dt}=-\sum_j m_j\!\left(\dfrac{p_i}{\rho_i^2}+\dfrac{p_j}{\rho_j^2}+\Pi_{ij}\right)\nabla W_{ij}+\mathbf{g}$",
         "numerics": "Weakly-compressible SPH: each particle carries mass and velocity; "
                     "density and forces are smoothed sums over neighbours using a cubic-"
                     "spline kernel. Pressure follows a stiff Tait equation of state (clamped "
                     "≥ 0 to avoid the free-surface tensile instability), with Monaghan "
-                    "artificial viscosity and a uniform background grid for fast neighbour search.",
+                    "artificial viscosity and a uniform background grid for fast neighbour "
+                    "search. A δ-SPH density-diffusion term and XSPH velocity smoothing damp "
+                    "the acoustic noise and relax the initial particle lattice so the fluid "
+                    "starts genuinely at rest; the floating ship is a rigid body whose heave, "
+                    "surge and roll are driven by the pressure the water exerts on its hull.",
         "validation": "The leading surge-front advances at a speed within the physical range "
                        "of the frictionless Ritter dry-bed limit 2√(gH) — the column must "
                        "first collapse vertically, so the real front lags that ideal bound.",
