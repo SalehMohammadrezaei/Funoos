@@ -60,7 +60,7 @@ VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
          "spectral": ["Vorticity", "Speed", "Streamlines"],
          "density": ["Schlieren", "Density", "Speed"],
          "ns": ["Dye", "Speed", "Vorticity", "Streamlines"],
-         "particles": ["Particles"]}
+         "particles": ["Particles", "Foam & spray", "Speed field"]}
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
            "density": "Ember (fire)", "ns": "Ember (fire)", "particles": "Ocean (water)"}
 
@@ -99,7 +99,9 @@ class Result:
                     cm, v0, v1, self.hints.get("label", "")) for s in self.raw]
             return self._render_vel(self.hints["vel"], view, cm, None)
         if self.kind == "particles":
-            return self._render_particles(cm)
+            if view == "Speed field":
+                return self._render_sph_field(cm)
+            return self._render_particles(cm, foam=(view == "Foam & spray"))
 
     def _render_vel(self, vel, view, cm, mask):
         if view == "Streamlines":
@@ -183,7 +185,7 @@ class Result:
             out.append(render.add_colorbar(img, cm, 0, sv, "|∇ρ|"))
         return out
 
-    def _render_particles(self, cm):
+    def _render_particles(self, cm, foam=False):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
@@ -194,15 +196,47 @@ class Result:
             fig = plt.figure(figsize=(6.4, 6.4 * Ly / Lx), dpi=110)
             ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(render.INK)
             fig.patch.set_facecolor(render.INK)
-            ax.scatter(d[:, 0], d[:, 1], c=np.clip(d[:, 2] / vmax, 0, 1), cmap=cm, s=6,
-                       edgecolors="none")
+            sp = np.clip(d[:, 2] / vmax, 0, 1)
+            if foam:
+                # deep water + whitewater on the fast (breaking/spray) particles
+                ax.scatter(d[:, 0], d[:, 1], c="#173a6b", s=7, edgecolors="none")
+                fast = sp > 0.45
+                if fast.any():
+                    ax.scatter(d[fast, 0], d[fast, 1], c="white", s=4.5,
+                               alpha=np.clip(sp[fast], 0.3, 0.95), edgecolors="none")
+            else:
+                ax.scatter(d[:, 0], d[:, 1], c=sp, cmap=cm, s=6, edgecolors="none")
             if hull is not None:
                 hp = hull[fi]; ax.scatter(hp[:, 0], hp[:, 1], c="#c79a5b", s=9, edgecolors="none")
             ax.set_xlim(0, Lx); ax.set_ylim(0, Ly); ax.axis("off")
             fig.canvas.draw(); w, hh = fig.canvas.get_width_height()
             rgb = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(hh, w, 4)[..., :3].copy()
             plt.close(fig)
-            out.append(render.add_colorbar(rgb, cm, 0, vmax, "|v|"))
+            out.append(rgb if foam else render.add_colorbar(rgb, cm, 0, vmax, "|v|"))
+        return out
+
+    def _render_sph_field(self, cm):
+        # bin the particles onto a grid and reconstruct a smooth speed field (the
+        # SPH "continuum" view) — the mesh-free analogue of the LBM Speed view
+        Lx, Ly, vmax = self.hints["Lx"], self.hints["Ly"], self.hints["vmax"]
+        gx = 150; gy = max(40, int(gx * Ly / Lx))
+
+        def blur(a, k=2):
+            w = np.ones(2 * k + 1) / (2 * k + 1)
+            for ax in (0, 1):
+                a = np.apply_along_axis(lambda m: np.convolve(m, w, mode="same"), ax, a)
+            return a
+        out = []
+        for d in self.raw:
+            ix = np.clip((d[:, 0] / Lx * gx).astype(int), 0, gx - 1)
+            iy = np.clip((d[:, 1] / Ly * gy).astype(int), 0, gy - 1)
+            cnt = np.zeros((gy, gx)); ssum = np.zeros((gy, gx))
+            np.add.at(cnt, (iy, ix), 1.0)
+            np.add.at(ssum, (iy, ix), d[:, 2])
+            field = blur(ssum, 2) / (blur(cnt, 2) + 1e-6)
+            field[blur(cnt, 2) < 0.05] = 0.0          # empty (air) cells stay dark
+            out.append(render.add_colorbar(
+                render.field_to_rgb(field, cm, 0, vmax, upscale=3), cm, 0, vmax, "|v|"))
         return out
 
 
