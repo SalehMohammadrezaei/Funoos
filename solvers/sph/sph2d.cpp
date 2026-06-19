@@ -207,8 +207,13 @@ int main(int argc,char**argv){
             double spd=sqrt(vx[i]*vx[i]+vy[i]*vy[i]);
             if(spd>vmax){ vx[i]*=vmax/spd; vy[i]*=vmax/spd; }
             x[i]+=dt*(vx[i]+epsX*cvx[i]); y[i]+=dt*(vy[i]+epsX*cvy[i]);   // XSPH-corrected advection
-            if(x[i]<wallL){x[i]=wallL; vx[i]*=-0.3;} if(x[i]>A.Lx){x[i]=A.Lx; vx[i]*=-0.3;}
-            if(y[i]<0){y[i]=0; vy[i]*=-0.3;} if(y[i]>A.Ly){y[i]=A.Ly; vy[i]*=-0.3;}
+            // no-penetration walls: stop at the wall and remove ONLY the into-wall
+            // normal velocity (no artificial bounce-back — water doesn't rebound off
+            // a wall), keeping the tangential component (free slip along the wall)
+            if(x[i]<wallL){ x[i]=wallL; if(vx[i]<0) vx[i]=0; }
+            if(x[i]>A.Lx) { x[i]=A.Lx;  if(vx[i]>0) vx[i]=0; }
+            if(y[i]<0)    { y[i]=0;     if(vy[i]<0) vy[i]=0; }
+            if(y[i]>A.Ly) { y[i]=A.Ly;  if(vy[i]>0) vy[i]=0; }
         }
 
         if(step%A.save_every==0){
