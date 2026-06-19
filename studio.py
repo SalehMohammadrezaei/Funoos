@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
 sys.path.insert(0, str(ROOT))
-from flowzoo import engine, render, content, postproc
+from flowzoo import engine, render, content, postproc, catalog
 
 try:
     import tkinter as tk
@@ -117,6 +117,7 @@ class App:
         self.viewbtns = {}; self.widgets = {}; self.cur = ""; self.viewcache = {}
         self.iframes, self.iidx = [], 0
         self.diag_on = False; self._scrub_guard = False; self._plotimgs = []
+        self.scene_key = catalog.SCENES[0]["key"]; self.preset_seed = {}
         self.pages = {}
         self._intro(); self._gallery(); self._studio()
         self.show("intro")
@@ -129,9 +130,10 @@ class App:
         self.pages[name].pack(fill="both", expand=True)
         self.cur = name
         if name == "gallery":
-            self._select(self.sel)
+            self._select_scene(self.scene_key)
         if name == "studio":
             self._build_params()
+            self.preset_seed = {}                  # consumed on this build; don't re-impose on re-flow
 
     # ─────────────────────────  intro  ─────────────────────────
     def _intro(self):
@@ -174,85 +176,97 @@ class App:
     def _gallery(self):
         pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["gallery"] = pg
         bar = self._topbar(pg, "‹ Home", lambda: self.show("intro"), "")
-        ctk.CTkLabel(bar, text="The Exhibits", font=T_H2, text_color=FG).pack(side="left", padx=4)
+        ctk.CTkLabel(bar, text="The Gallery", font=T_H2, text_color=FG).pack(side="left", padx=4)
+        ctk.CTkLabel(bar, text="   browse by method, then scene", font=T_SMALL,
+                     text_color=MUTED).pack(side="left", padx=2)
 
-        body = ctk.CTkFrame(pg, fg_color=BG); body.pack(fill="both", expand=True, padx=20, pady=20)
+        body = ctk.CTkFrame(pg, fg_color=BG); body.pack(fill="both", expand=True, padx=20, pady=18)
 
-        listfr = ctk.CTkFrame(body, fg_color=BG, width=288); listfr.pack(side="left", fill="y")
-        listfr.pack_propagate(False)
-        self.exh_cards = {}
-        for name in engine.EXHIBITS:
-            card = ctk.CTkFrame(listfr, fg_color=CARD, corner_radius=14, border_width=1, border_color=CARD)
-            card.pack(fill="x", pady=5)
-            ctk.CTkLabel(card, text=name.split(" (")[0], font=(F, 13, "bold"), text_color=FG,
-                         anchor="w").pack(fill="x", padx=16, pady=(11, 0))
-            ctk.CTkLabel(card, text=engine.META[name]["method"], font=T_CAP, text_color=MUTED,
-                         anchor="w").pack(fill="x", padx=16, pady=(0, 11))
-            bind_click(card, lambda n=name: self._select(n))
-            self.exh_cards[name] = card
+        # left: method → scene navigation
+        nav = ctk.CTkScrollableFrame(body, fg_color=SURF, width=296, corner_radius=18)
+        nav.pack(side="left", fill="y")
+        self.scene_cards = {}
+        for method, scenes in catalog.by_method().items():
+            kicker(nav, method, GOLD).pack(fill="x", padx=16, pady=(16, 4))
+            for s in scenes:
+                card = ctk.CTkFrame(nav, fg_color=CARD, corner_radius=12, border_width=1, border_color=CARD)
+                card.pack(fill="x", padx=8, pady=3)
+                ctk.CTkLabel(card, text=s["name"], font=(F, 12, "bold"), text_color=FG,
+                             anchor="w").pack(fill="x", padx=13, pady=8)
+                bind_click(card, lambda k=s["key"]: self._select_scene(k))
+                self.scene_cards[s["key"]] = card
 
-        det = ctk.CTkFrame(body, fg_color=BG); det.pack(side="left", fill="both", expand=True, padx=(20, 0))
+        # right: scene detail
+        det = ctk.CTkFrame(body, fg_color=BG); det.pack(side="left", fill="both", expand=True, padx=(18, 0))
         self.g_method = kicker(det, "", GOLD); self.g_method.pack(fill="x")
         self.g_title = ctk.CTkLabel(det, text="", font=T_H1, text_color=FG, anchor="w")
-        self.g_title.pack(fill="x", pady=(4, 6))
-        rule(det).pack(anchor="w", pady=(0, 6))
+        self.g_title.pack(fill="x", pady=(2, 6)); rule(det).pack(anchor="w", pady=(0, 8))
 
         split = ctk.CTkFrame(det, fg_color=BG); split.pack(fill="both", expand=True)
-        media = ctk.CTkFrame(split, fg_color=BG, width=580); media.pack(side="right", fill="y", padx=(20, 0))
+        media = ctk.CTkFrame(split, fg_color=BG, width=580); media.pack(side="right", fill="y", padx=(18, 0))
         media.pack_propagate(False)
-        mc = ctk.CTkFrame(media, fg_color=BG); mc.pack(expand=True)         # vertically centred
+        mc = ctk.CTkFrame(media, fg_color=BG); mc.pack(expand=True)
         demo_card = ctk.CTkFrame(mc, fg_color=CARD, corner_radius=18, border_width=1, border_color=LINE)
         demo_card.pack()
         self.g_demo = tk.Label(demo_card, bg=INKCV, bd=0); self.g_demo.pack(padx=12, pady=12)
-        ctk.CTkButton(mc, text="Customize & run   →", font=(F, 15, "bold"), height=54, corner_radius=16,
+        self.g_caption = ctk.CTkLabel(mc, text="", font=T_CAP, text_color=DIM); self.g_caption.pack(pady=(8, 0))
+        ctk.CTkButton(mc, text="Open in Studio   →", font=(F, 15, "bold"), height=52, corner_radius=16,
                       fg_color=CYAN, hover_color=CYAN_D, text_color=ONACC,
-                      command=lambda: self.show("studio")).pack(fill="x", pady=(16, 0))
-        stat = ctk.CTkFrame(mc, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
-        stat.pack(fill="x", pady=(14, 0))
-        kicker(stat, "validated", GOOD).pack(fill="x", padx=16, pady=(12, 2))
-        self.g_stat = ctk.CTkLabel(stat, text="", font=T_SMALL, text_color=READ, justify="left",
-                                   anchor="w", wraplength=510); self.g_stat.pack(fill="x", padx=16, pady=(0, 12))
+                      command=self._open_in_studio).pack(fill="x", pady=(14, 0))
         self.read = ctk.CTkScrollableFrame(split, fg_color=SURF, corner_radius=18)
         self.read.pack(side="left", fill="both", expand=True)
 
-    def _section(self, header, body):
-        kicker(self.read, header, CYAN).pack(fill="x", pady=(16, 4), padx=16)
+    def _section(self, header, body, color=CYAN):
+        kicker(self.read, header, color).pack(fill="x", pady=(16, 4), padx=16)
         ctk.CTkLabel(self.read, text=body, font=T_BODY, text_color=READ, justify="left",
                      anchor="w", wraplength=600).pack(fill="x", padx=16)
 
-    def _select(self, name):
-        self.sel = name
-        for n, c in self.exh_cards.items():
-            on = n == name
+    def _select_scene(self, key):
+        s = catalog.scene(key)
+        if not s:
+            return
+        self.scene_key = key; self.sel = s["exhibit"]
+        for k, c in self.scene_cards.items():
+            on = k == key
             c.configure(fg_color=CARD2 if on else CARD, border_color=CYAN if on else CARD)
-        m = engine.META.get(name, {}); d = content.DETAIL.get(name, {})
-        self.g_method.configure(text="  ".join(m.get("method", "").upper()))
-        self.g_title.configure(text=name.split(" (")[0])
+        m = engine.META.get(s["exhibit"], {}); d = content.DETAIL.get(s["exhibit"], {})
+        self.g_method.configure(text="  ".join(s["method"].upper()))
+        self.g_title.configure(text=s["name"])
         for w in self.read.winfo_children():
             w.destroy()
-        self._section("what you're seeing", d.get("physics", m.get("blurb", "")))
+        self._section("this scene", s["blurb"])
+        self._section("the physics", d.get("physics", m.get("blurb", "")))
         kicker(self.read, "governing equation", CYAN).pack(fill="x", pady=(18, 6), padx=16)
         try:
-            im = Image.open(ROOT / "docs" / "eq" / (slug(name) + ".png"))
+            im = Image.open(ROOT / "docs" / "eq" / (slug(s["exhibit"]) + ".png"))
             w = min(600, im.width); h = int(im.height * w / im.width)
             self._eqimg = ctk.CTkImage(light_image=im, dark_image=im, size=(w, h))
             ctk.CTkLabel(self.read, image=self._eqimg, text="").pack(anchor="w", padx=16)
         except Exception:
-            ctk.CTkLabel(self.read, text="(equation image not found)", text_color=MUTED,
-                         font=T_SMALL).pack(anchor="w", padx=16)
+            pass
         if d.get("terms"):
             ctk.CTkLabel(self.read, text=d["terms"], font=T_SMALL, text_color=MUTED,
                          justify="left", anchor="w", wraplength=600).pack(fill="x", padx=16, pady=(8, 0))
         self._section("how it's solved", m.get("numerics", ""))
-        kicker(self.read, "validation", GOOD).pack(fill="x", pady=(16, 4), padx=16)
-        ctk.CTkLabel(self.read, text="✓  " + m.get("validation", ""), font=T_BODY, text_color=READ,
-                     justify="left", anchor="w", wraplength=600).pack(fill="x", padx=16, pady=(0, 8))
+        self._section("validation", "✓  " + m.get("validation", ""), color=GOOD)
+        ctk.CTkLabel(self.read, text="", font=T_CAP).pack(pady=4)        # bottom breathing room
 
-        self.g_stat.configure(text="✓  " + m.get("validation", ""))
-        self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=540); self.gidx = 0
+        self.g_caption.configure(text=f"{s['exhibit']} · {m.get('method', '')}")
+        self.gframes = load_gif(ROOT / "results" / "gallery" / (key + ".gif"), maxw=540)
+        if not self.gframes:                                            # fall back to stock demo
+            self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=540)
+        self.gidx = 0
         if not self.gframes:
-            self.g_demo.config(image="", text="\n  demo clip not found —\n  open in Studio and Run\n",
-                               fg=MUTED, font=(F, 11))
+            self.g_demo.config(image="", text="\n  clip rendering —\n  run  render_gallery.py\n",
+                               fg=MUTED, font=(F, 11), width=58, height=14)
+
+    def _open_in_studio(self):
+        s = catalog.scene(self.scene_key)
+        if s:
+            self.sel = s["exhibit"]; self.widgets = {}
+            self.preset_seed = {k: (v if isinstance(v, str) else f"{v:g}") for k, v in s["preset"].items()}
+            self.exhibit.set(s["exhibit"])
+        self.show("studio")
 
     def _tick_gallery(self):
         if self.cur == "gallery" and self.gframes:
@@ -393,7 +407,8 @@ class App:
         self.diag_on = True; self.diagbtn.configure(text="▶  Animation")
 
     def _pick_exhibit(self, name):
-        self.sel = name; self._build_params(); self.result = None; self.viewcache = {}
+        self.sel = name; self.preset_seed = {}; self.widgets = {}
+        self._build_params(); self.result = None; self.viewcache = {}
         for w in self.viewbar.winfo_children():
             w.destroy()
 
@@ -419,8 +434,9 @@ class App:
         return self._curval(ctrl) in vals
 
     def _build_params(self):
-        # preserve any values the user already typed across a rebuild
-        saved = {n: v.get() for n, (qd, v) in self.widgets.items()}
+        # seed from a gallery preset (if any), then keep values the user already typed
+        saved = dict(self.preset_seed)
+        saved.update({n: v.get() for n, (qd, v) in self.widgets.items()})
         self._pending = saved
         for w in self.pscroll.winfo_children():
             w.destroy()

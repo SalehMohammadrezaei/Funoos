@@ -34,3 +34,4 @@ dist/
 *.spec
 solvers/**/*.exe
 bin/
+results/gallery/
