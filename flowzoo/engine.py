@@ -1,4 +1,4 @@
-"""FlowZoo engine: solve an exhibit, then render any visualization on demand.
+"""Funoos engine: solve an exhibit, then render any visualization on demand.
 
 `solve_exhibit(name, params)` runs the solver once and returns a Result holding
 the raw fields. `Result.render(view, colormap)` turns those into RGB frames —
@@ -481,7 +481,7 @@ EXHIBITS = {
                     "choices": ["Cylinder", "Square", "Diamond", "Airfoil", "Your text"],
                     "default": "Cylinder",
                     "help": "What to drop into the stream — a shape, or your own text."},
-                   _when({"name": "text", "label": "Your text", "type": "str", "default": "FlowZoo",
+                   _when({"name": "text", "label": "Your text", "type": "str", "default": "Funoos",
                           "group": "Geometry", "help": "The word to drop into the stream. Short words read best."},
                          "obstacle", ["Your text"]),
                    _f("size", "Obstacle size (frac.)", 0.13, 0.05, 0.30, "Geometry",

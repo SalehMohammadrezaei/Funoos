@@ -20,7 +20,7 @@ SCENES = [
               "suction side and separates near the trailing edge, generating lift and a deflected "
               "wake — the same mechanism that holds an aircraft up."},
     {"method": "Lattice–Boltzmann", "exhibit": "Wind Tunnel", "key": "lbm_name",
-     "name": "Flow Around Your Name", "preset": {"obstacle": "Your text", "text": "FlowZoo", "reynolds": 220},
+     "name": "Flow Around Your Name", "preset": {"obstacle": "Your text", "text": "Funoos", "reynolds": 220},
      "blurb": "Because lattice-Boltzmann treats any obstacle as just a set of solid cells, you can "
               "drop the pixels of your own name into the tunnel and watch the wake braid around "
               "every letter — no mesh generation at all."},

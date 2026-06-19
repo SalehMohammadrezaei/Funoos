@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import numpy as np
 
-# ---- theme (matches the dark simulation viewports) ----
-_BG = "#0a0f1e"; _FG = "#c7d0e4"; _GRID = "#1b2440"; _MUTED = "#7c89a8"
-_CYAN = "#6f6ff6"; _AMBER = "#e0a23a"; _GOOD = "#34d07a"
+# ---- theme (Funoos: deep-navy viewport, blue + lime accents) ----
+_BG = "#0C1A2E"; _FG = "#C7D4E8"; _GRID = "#1c2c44"; _MUTED = "#7e8eaa"
+_CYAN = "#6F90E8"; _AMBER = "#E1FC66"; _GOOD = "#9BE25A"
 
 
 def _new_ax(xl, yl, title):

@@ -1,6 +1,6 @@
-"""FlowZoo Studio — a polished, multi-page CFD gallery (CustomTkinter UI).
+"""Funoos Studio — a polished, multi-page CFD gallery (CustomTkinter UI).
 
-  • Intro   — what FlowZoo is, and who made it.
+  • Intro   — what Funoos is, and who made it.
   • Gallery — browse exhibits: in-depth physics, governing equation, live demo.
   • Studio  — tune every parameter, Run once, then switch visualization
               (vorticity / speed / streamlines / …) live, with play/pause + export.
@@ -28,28 +28,30 @@ except Exception as e:  # pragma: no cover
     ctk = None
     _IMPORT_ERR = e
 
-# ─────────────────────────  design system  ─────────────────────────
-# layered surfaces (deepest → raised) + hairline; accents echo the sims (cyan+amber)
-# Premium LIGHT theme: paper surfaces, indigo primary, slate neutrals;
-# the simulation viewports stay dark so they pop as the focal points.
-BG     = "#eef1f8"   # app background (cool paper)
-SURF   = "#ffffff"   # bars / sidebars / scroll panels
-CARD   = "#ffffff"   # cards
-CARD2  = "#e8ecfb"   # raised / hover / active (light indigo tint)
-LINE   = "#dbe2ef"   # hairline border
-FG     = "#1b2438"   # primary text (dark slate)
-MUTED  = "#5c6880"   # secondary text
-DIM    = "#8a93a8"   # captions
-READ   = "#33405c"   # long-form body text
-CYAN   = "#5b5bf0"   # primary accent — indigo
-CYAN_D = "#4845e3"   # accent hover
-GOLD   = "#b45309"   # secondary accent (method kicker) — amber-700, readable on white
-GOOD   = "#16a34a"; WARN = "#dc2626"
-ONACC  = "#ffffff"   # text on the indigo accent fill
-INKCV  = "#0a0f1e"   # simulation preview background (kept dark)
-F = "Segoe UI"
+# ─────────────────────────  Funoos design system  ─────────────────────────
+# Funoos (فانوس, the lantern of imagination) — "where imagination becomes vision."
+# Warm-cream paper, deep-navy ink, a blue primary, and a lime-green signature pop.
+# The simulation viewports stay deep-navy so the flows glow as the focal points.
+BG     = "#F7EEE9"   # app background — warm cream
+SURF   = "#FBF8F7"   # bars / sidebars / scroll panels — off-white
+CARD   = "#FFFFFF"   # cards
+CARD2  = "#ECF1FD"   # raised / hover / active — pale-blue tint
+LINE   = "#E7DCD2"   # hairline border — warm
+FG     = "#163251"   # primary text — dark navy
+MUTED  = "#5A6E8C"   # secondary text — slate blue
+DIM    = "#9A8C80"   # captions — warm gray
+READ   = "#21405F"   # long-form body text — deep ocean
+CYAN   = "#476DD5"   # primary accent — Funoos blue
+CYAN_D = "#225090"   # accent hover — royal blue
+GOLD   = "#3359A6"   # method kicker — mid blue
+LIME   = "#E1FC66"   # signature pop — lime green
+ON_LIME = "#163251"  # text on the lime fill
+GOOD   = "#2F8F5E"; WARN = "#C0392B"
+ONACC  = "#FBF8F7"   # text on the blue accent fill
+INKCV  = "#0C1A2E"   # simulation preview background — deep navy
+F = "Aptos"          # brand UI font (modern Windows / Office)
 # type scale
-T_DISPLAY = (F, 46, "bold"); T_H1 = (F, 27, "bold"); T_H2 = (F, 15, "bold")
+T_DISPLAY = (F, 52, "bold"); T_H1 = (F, 27, "bold"); T_H2 = (F, 15, "bold")
 T_KICK = (F, 11, "bold"); T_BODY = (F, 13); T_SMALL = (F, 11); T_CAP = (F, 10)
 
 
@@ -86,7 +88,7 @@ class Tooltip:
             return
         self.tip = tk.Toplevel(self.w); self.tip.wm_overrideredirect(True)
         self.tip.wm_geometry(f"+{self.w.winfo_rootx()+22}+{self.w.winfo_rooty()+20}")
-        tk.Label(self.tip, text=self.text, bg="#05070d", fg=FG, justify="left",
+        tk.Label(self.tip, text=self.text, bg=FG, fg=ONACC, justify="left",
                  wraplength=320, padx=12, pady=10, relief="solid", bd=1, font=(F, 9)).pack()
 
     def hide(self, _=None):
@@ -106,7 +108,7 @@ def rule(parent, w=42, color=CYAN):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("FlowZoo Studio"); root.geometry("1360x840"); root.minsize(1120, 700)
+        root.title("Funoos  ·  where imagination becomes vision"); root.geometry("1360x840"); root.minsize(1120, 700)
         root.configure(fg_color=BG)
         self.q = queue.Queue()
         self.frames, self.pidx, self.playing, self.busy = [], 0, False, False
@@ -139,30 +141,46 @@ class App:
     def _intro(self):
         pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["intro"] = pg
         col = ctk.CTkFrame(pg, fg_color=BG); col.place(relx=0.5, rely=0.5, anchor="center")
-        # animated hero clip
-        hero = ctk.CTkFrame(col, fg_color=CARD, corner_radius=20, border_width=1, border_color=LINE)
-        hero.pack(pady=(0, 16))
+        # animated hero clip — the lantern's light
+        hero = ctk.CTkFrame(col, fg_color=CARD, corner_radius=22, border_width=1, border_color=LINE)
+        hero.pack(pady=(0, 14))
         self.intro_demo = tk.Label(hero, bg=INKCV, bd=0); self.intro_demo.pack(padx=10, pady=10)
-        self.iframes = load_gif(ROOT / engine.META["Wind Tunnel"]["demo"], maxw=660); self.iidx = 0
+        self.iframes = load_gif(ROOT / "results" / "gallery" / "spec_kh.gif", maxw=560) \
+            or load_gif(ROOT / engine.META["Wind Tunnel"]["demo"], maxw=560)
+        self.iidx = 0
         if not self.iframes:
-            self.intro_demo.config(text="  FlowZoo  ", fg=MUTED, font=(F, 24), width=40, height=4)
-        kicker(col, "interactive cfd gallery", MUTED).pack(pady=(4, 2))
-        t = ctk.CTkFrame(col, fg_color=BG); t.pack()
-        ctk.CTkLabel(t, text="FlowZoo", font=T_DISPLAY, text_color=FG).pack(side="left")
-        ctk.CTkLabel(t, text=" Studio", font=T_DISPLAY, text_color=CYAN).pack(side="left")
-        ctk.CTkLabel(col, text="Five fluid solvers, written from scratch — each validated, each built to be watched.",
-                     font=(F, 14), text_color=GOLD).pack(pady=(8, 14))
-        chips = ctk.CTkFrame(col, fg_color=BG); chips.pack(pady=(0, 20))
+            self.intro_demo.config(text="  Funoos  ", fg=MUTED, font=(F, 24), width=40, height=4)
+        # FUNOOS wordmark — FUN (blue) · OOS (navy), echoing the logo
+        t = ctk.CTkFrame(col, fg_color=BG); t.pack(pady=(2, 0))
+        ctk.CTkLabel(t, text="FUN", font=T_DISPLAY, text_color=CYAN).pack(side="left")
+        ctk.CTkLabel(t, text="OOS", font=T_DISPLAY, text_color=FG).pack(side="left")
+        ctk.CTkLabel(col, text="Where imagination becomes vision.", font=(F, 16, "bold"),
+                     text_color=GOLD).pack(pady=(4, 10))
+        # the couplet — Bidel Dehlavi (فانوس = the lantern of imagination)
+        couplet = ctk.CTkFrame(col, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
+        couplet.pack(pady=(0, 12))
+        ctk.CTkLabel(couplet, text="نگه شد شمعِ فانوسِ خیال از چشم‌پوشیدن",
+                     font=(F, 13), text_color=READ).pack(padx=26, pady=(14, 0))
+        ctk.CTkLabel(couplet, text="فنا، مشکل که از عاشق برد ذوقِ تماشا را",
+                     font=(F, 13), text_color=READ).pack(padx=26, pady=(2, 8))
+        ctk.CTkLabel(couplet, text="“When the eyes close, vision itself becomes the candle inside\n"
+                     "imagination’s lantern — even annihilation can hardly take from the\n"
+                     "lover the desire to visualize.”",
+                     font=(F, 11), text_color=MUTED, justify="center").pack(padx=26, pady=(0, 2))
+        ctk.CTkLabel(couplet, text="— Bidel Dehlavi", font=(F, 10, "bold"),
+                     text_color=DIM).pack(padx=26, pady=(0, 12))
+        ctk.CTkLabel(col, text="A visual exhibition of worlds in motion — flows illuminated through simulation.",
+                     font=(F, 12), text_color=MUTED).pack(pady=(0, 12))
+        chips = ctk.CTkFrame(col, fg_color=BG); chips.pack(pady=(0, 18))
         for c in ["Lattice-Boltzmann", "Navier–Stokes", "Compressible Euler", "SPH", "Spectral"]:
-            ctk.CTkLabel(chips, text=f"  {c}  ", font=T_SMALL, text_color=MUTED, fg_color=CARD,
+            ctk.CTkLabel(chips, text=f"  {c}  ", font=T_SMALL, text_color=READ, fg_color=CARD2,
                          corner_radius=20, height=30).pack(side="left", padx=4)
-        cta = ctk.CTkButton(col, text="Explore the zoo   →", font=(F, 15, "bold"), width=250, height=50,
-                            corner_radius=25, fg_color=CYAN, hover_color=CYAN_D, text_color=ONACC,
+        cta = ctk.CTkButton(col, text="Enter the gallery   →", font=(F, 15, "bold"), width=260, height=50,
+                            corner_radius=25, fg_color=LIME, hover_color="#CDEA4D", text_color=ON_LIME,
                             command=lambda: self.show("gallery")); cta.pack()
-        ctk.CTkFrame(col, fg_color=LINE, height=1, width=320).pack(pady=(34, 14))
-        kicker(col, "created by", MUTED).pack()
-        ctk.CTkLabel(col, text="Saleh Mohammadrezaei", font=(F, 16, "bold"), text_color=FG).pack(pady=(4, 0))
-        ctk.CTkLabel(col, text="salehmrezaee@gmail.com", font=T_SMALL, text_color=CYAN).pack()
+        ctk.CTkFrame(col, fg_color=LINE, height=1, width=320).pack(pady=(26, 12))
+        ctk.CTkLabel(col, text="created by   Saleh Mohammadrezaei   ·   salehmrezaee@gmail.com",
+                     font=T_SMALL, text_color=MUTED).pack()
 
     # ─────────────────────────  gallery  ─────────────────────────
     def _topbar(self, pg, back_label, back_cmd, title):
@@ -194,6 +212,7 @@ class App:
                 ctk.CTkLabel(card, text=s["name"], font=(F, 12, "bold"), text_color=FG,
                              anchor="w").pack(fill="x", padx=13, pady=8)
                 bind_click(card, lambda k=s["key"]: self._select_scene(k))
+                self._bind_hover(card, s["key"])
                 self.scene_cards[s["key"]] = card
 
         # right: scene detail
@@ -215,6 +234,18 @@ class App:
                       command=self._open_in_studio).pack(fill="x", pady=(14, 0))
         self.read = ctk.CTkScrollableFrame(split, fg_color=SURF, corner_radius=18)
         self.read.pack(side="left", fill="both", expand=True)
+
+    def _bind_hover(self, card, key):
+        # cards lift (pale-blue fill + accent border) as the pointer floats over them
+        def on(_=None):
+            if key != self.scene_key:
+                card.configure(fg_color=CARD2, border_color=CYAN)
+
+        def off(_=None):
+            if key != self.scene_key:
+                card.configure(fg_color=CARD, border_color=CARD)
+        for w in [card] + list(card.winfo_children()):
+            w.bind("<Enter>", on); w.bind("<Leave>", off)
 
     def _section(self, header, body, color=CYAN):
         kicker(self.read, header, color).pack(fill="x", pady=(16, 4), padx=16)
@@ -300,9 +331,9 @@ class App:
                                      command=self.run); self.run_btn.pack(fill="x")
         self.prog = ctk.CTkProgressBar(bot, mode="indeterminate", progress_color=CYAN, height=6)
         sv = ctk.CTkFrame(bot, fg_color=SURF); sv.pack(fill="x", pady=(10, 0))
-        ctk.CTkButton(sv, text="⬇  GIF", fg_color=CARD2, hover_color="#2c3856", text_color=FG, font=T_SMALL,
+        ctk.CTkButton(sv, text="⬇  GIF", fg_color=CARD2, hover_color=CYAN_D, text_color=FG, font=T_SMALL,
                       command=lambda: self.save("gif")).pack(side="left", expand=True, fill="x", padx=(0, 4))
-        ctk.CTkButton(sv, text="⬇  MP4", fg_color=CARD2, hover_color="#2c3856", text_color=FG, font=T_SMALL,
+        ctk.CTkButton(sv, text="⬇  MP4", fg_color=CARD2, hover_color=CYAN_D, text_color=FG, font=T_SMALL,
                       command=lambda: self.save("mp4")).pack(side="left", expand=True, fill="x")
         self.status = ctk.CTkLabel(bot, text="Ready.", text_color=MUTED, font=T_CAP, anchor="w",
                                    justify="left", wraplength=300); self.status.pack(fill="x", pady=(12, 0))
@@ -471,7 +502,7 @@ class App:
             v = tk.StringVar(value=init)
             # changing a control re-flows the panel so scene-specific params appear
             ctk.CTkOptionMenu(row, values=qd["choices"], variable=v, font=T_SMALL, fg_color=CARD2,
-                              button_color="#2c3856", button_hover_color=CYAN, dropdown_fg_color=CARD2,
+                              button_color=CYAN, button_hover_color=CYAN, dropdown_fg_color=CARD2,
                               command=lambda *_: self._build_params()).pack(fill="x", pady=(4, 0))
         else:
             default = qd["default"] if qd["type"] == "str" else f"{qd['default']:g}"
@@ -631,7 +662,7 @@ class App:
 
     def save(self, kind):
         if not self.frames:
-            messagebox.showinfo("FlowZoo", "Run a simulation first."); return
+            messagebox.showinfo("Funoos", "Run a simulation first."); return
         path = filedialog.asksaveasfilename(defaultextension="." + kind, initialfile="flowzoo." + kind)
         if not path:
             return
