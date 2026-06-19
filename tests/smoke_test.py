@@ -44,6 +44,37 @@ def test_sod_shock_tube():
     assert err < 0.02, f"Sod mean abs error too large: {err:.4f}"
 
 
+def test_quantum_unitarity():
+    """Split-step Schrödinger conserves probability in the closed harmonic well."""
+    from flowzoo.quantum import simulate
+    prob, phase, V, norm = simulate(n=96, scene="harmonic", steps=240, nframes=20)
+    drift = max(abs(x - 1) for x in norm)
+    assert drift < 1e-6, f"quantum norm drift too large: {drift:.2e}"
+
+
+def test_reaction_bounded():
+    """Gray–Scott concentrations stay in [0,1] and form structure."""
+    from flowzoo.reaction import gray_scott
+    fr = gray_scott(n=96, F=0.035, k=0.065, steps=3000, nframes=10, seed=2)
+    v = fr[-1]
+    assert v.min() >= -1e-6 and v.max() <= 1.0 + 1e-6, "Gray–Scott out of [0,1]"
+    assert v.std() > 1e-3, "Gray–Scott formed no structure"
+
+
+def test_porous_permeability_monotone():
+    """Pore-scale LBM permeability rises with porosity (Darcy/Kozeny–Carman trend)."""
+    import flowzoo.engine as engine
+    k = {}
+    for phi in (0.5, 0.72):
+        p = {q["name"]: q["default"] for q in engine.EXHIBITS["Porous Flow"]["params"]}
+        p.update({"resolution": "Low (fast)", "duration": 0.4, "porosity": phi})
+        k[phi] = engine.solve_exhibit("Porous Flow", p).hints["permeability"]
+    assert k[0.72] > k[0.5] > 0, f"permeability not monotonic in porosity: {k}"
+
+
 if __name__ == "__main__":
     test_spectral_energy_conservation(); print("spectral energy: PASS")
     test_sod_shock_tube(); print("sod shock tube: PASS")
+    test_quantum_unitarity(); print("quantum unitarity: PASS")
+    test_reaction_bounded(); print("reaction-diffusion bounds: PASS")
+    test_porous_permeability_monotone(); print("porous permeability: PASS")

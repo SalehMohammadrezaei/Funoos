@@ -32,11 +32,11 @@ OUT = ROOT / "results" / "gallery"
 OUT.mkdir(parents=True, exist_ok=True)
 RES = sys.argv[1] if len(sys.argv) > 1 else "High"
 DUR = float(sys.argv[2]) if len(sys.argv) > 2 else 1.6
-ONLY = sys.argv[3] if len(sys.argv) > 3 else None     # optional single key
+ONLY = set(sys.argv[3].split(",")) if len(sys.argv) > 3 else None   # optional key list
 
 t_all = time.time()
 for s in catalog.SCENES:
-    if ONLY and s["key"] != ONLY:
+    if ONLY and s["key"] not in ONLY:
         continue
     name, key = s["exhibit"], s["key"]
     params = {qd["name"]: qd["default"] for qd in engine.EXHIBITS[name]["params"]}
