@@ -709,10 +709,15 @@ META = {
                     "spline kernel. Pressure follows a stiff Tait equation of state (clamped "
                     "≥ 0 to avoid the free-surface tensile instability), with Monaghan "
                     "artificial viscosity and a uniform background grid for fast neighbour "
-                    "search. A δ-SPH density-diffusion term and XSPH velocity smoothing damp "
-                    "the acoustic noise and relax the initial particle lattice so the fluid "
-                    "starts genuinely at rest; the floating ship is a rigid body whose heave, "
-                    "surge and roll are driven by the pressure the water exerts on its hull.",
+                    "search. The walls are dynamic boundary particles — fixed layers of "
+                    "particles that develop pressure through the same equation of state when "
+                    "the fluid presses on them, so the wall pushes back with real pressure "
+                    "(no penalty force on the fluid, no spurious near-wall motion); the "
+                    "wavemaker is simply a wall layer that moves. A δ-SPH density-diffusion "
+                    "term and XSPH velocity smoothing damp the acoustic noise and relax the "
+                    "initial lattice so the fluid starts genuinely at rest; the floating ship "
+                    "is a rigid body whose heave, surge and roll are driven by the pressure "
+                    "the water exerts on its hull.",
         "validation": "The leading surge-front advances at a speed within the physical range "
                        "of the frictionless Ritter dry-bed limit 2√(gH) — the column must "
                        "first collapse vertically, so the real front lags that ideal bound.",

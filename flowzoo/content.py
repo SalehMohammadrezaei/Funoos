@@ -197,7 +197,10 @@ DETAIL = {
 "• ∇Wij — gradient of the smoothing kernel between particles i and j; it carries "
 "the pressure force along the line joining them\n"
 "• Πij — Monaghan artificial viscosity, added for stability at shocks/impacts\n"
-"• g — gravity, the driving body force"),
+"• g — gravity, the driving body force\n"
+"• the walls are dynamic boundary particles: a fixed layer that feels the fluid "
+"pressure through the same equation of state and pushes back — a physical wall, "
+"not a penalty force, so the water near the walls behaves like the bulk"),
 },
 "Cloud Billows": {
 "physics": (
