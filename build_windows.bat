@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================================
-REM  FlowZoo - Windows build script.
-REM  Produces a standalone app at  dist\FlowZooStudio\FlowZooStudio.exe
+REM  Funoos - Windows build script.
+REM  Produces a standalone app at  dist\FunoosStudio\FunoosStudio.exe
 REM
 REM  Prerequisites (one-time):
 REM    * g++ with OpenMP on PATH  (install MSYS2 then `pacman -S mingw-w64-x86_64-gcc`,
@@ -28,13 +28,13 @@ pip install numpy scipy matplotlib pillow customtkinter pyinstaller || goto :err
 echo === [3/3] Bundling the app with PyInstaller ===
 set FF=
 if exist bin\ffmpeg.exe set FF=--add-binary "bin\ffmpeg.exe;."
-pyinstaller --noconfirm --onedir --windowed --name FlowZooStudio ^
+pyinstaller --noconfirm --onedir --windowed --name FunoosStudio ^
   --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" --collect-all customtkinter ^
   %FF% studio.py || goto :err
 
 echo.
 echo === SUCCESS ===
-echo App:  dist\FlowZooStudio\FlowZooStudio.exe
+echo App:  dist\FunoosStudio\FunoosStudio.exe
 echo (GIF/MP4 export needs ffmpeg: put ffmpeg.exe in bin\ before building, or on PATH.)
 echo To make an installer, open installer.iss with Inno Setup.
 goto :eof

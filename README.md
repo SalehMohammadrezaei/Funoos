@@ -1,11 +1,11 @@
-# 🦓 FlowZoo
+# 🦓 Funoos
 
 **A zoo of fluid phenomena — each one solved from scratch with a different numerical method, validated against a textbook benchmark, and rendered as a cinematic animation.**
 
-Most CFD portfolios show one solver run one way. FlowZoo shows fluids from **five** angles — kinetic (lattice Boltzmann), continuum (projection-method Navier–Stokes), compressible (finite-volume shock capturing), meshfree (SPH), and spectral (FFT). Every exhibit is checked against an analytical or experimental benchmark, and every one is built to be *watched*.
+Most CFD portfolios show one solver run one way. Funoos shows fluids from **five** angles — kinetic (lattice Boltzmann), continuum (projection-method Navier–Stokes), compressible (finite-volume shock capturing), meshfree (SPH), and spectral (FFT). Every exhibit is checked against an analytical or experimental benchmark, and every one is built to be *watched*.
 
 <p align="center">
-  <img src="results/flow_around_flowzoo.gif" alt="Flow shedding vortices off the word FlowZoo" width="92%">
+  <img src="results/flow_around_flowzoo.gif" alt="Flow shedding vortices off the word Funoos" width="92%">
 </p>
 <p align="center"><em>The signature exhibit: type your name and watch the flow shed vortices off the letters (lattice Boltzmann).</em></p>
 
@@ -84,9 +84,9 @@ python demos/turbulence.py
 # add --quick to any demo for a fast, low-res smoke test
 ```
 
-## 🎛️ FlowZoo Studio (interactive app)
+## 🎛️ Funoos Studio (interactive app)
 A multi-page desktop app containing every solver:
-- **Intro** → what FlowZoo is and who built it.
+- **Intro** → what Funoos is and who built it.
 - **Gallery** → browse exhibits; each shows its method, **governing equation**,
   a plain-English description, and a looping **demo clip**.
 - **Studio** → tune *every* parameter — each with a **"?"** explaining what it

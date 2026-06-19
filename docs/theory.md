@@ -1,4 +1,4 @@
-# FlowZoo — methods & validation notes
+# Funoos — methods & validation notes
 
 Each exhibit is a from-scratch implementation of a distinct numerical method.
 This file records the governing equations, the discretization, and how each is

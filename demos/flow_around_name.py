@@ -3,9 +3,9 @@
 Renders any string as a solid obstacle and runs the lattice-Boltzmann
 external-flow solver, so the flow peels vortices off the letters.
 
-    python demos/flow_around_name.py                 # default: "FlowZoo"
+    python demos/flow_around_name.py                 # default: "Funoos"
     python demos/flow_around_name.py --text "Saleh"
-    python demos/flow_around_name.py --text "FlowZoo" --quick
+    python demos/flow_around_name.py --text "Funoos" --quick
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ SOLVER = ROOT / "solvers" / "lbm" / "lbm2d"
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--text", default="FlowZoo")
+    ap.add_argument("--text", default="Funoos")
     ap.add_argument("--quick", action="store_true")
     args = ap.parse_args()
 

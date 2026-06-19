@@ -1,4 +1,4 @@
-"""FlowZoo shared rendering pipeline — the gallery's visual identity.
+"""Funoos shared rendering pipeline — the gallery's visual identity.
 
 Every exhibit renders through here so the whole zoo looks like one polished
 product: a custom cinematic colormap, dark background, crisp upscaling, and
@@ -30,7 +30,7 @@ def _ffmpeg():
             return str(cand)
     return "ffmpeg"
 
-# --- FlowZoo signature colormaps ---------------------------------------------
+# --- Funoos signature colormaps ---------------------------------------------
 # Diverging "curl" map for vorticity: cyan -> teal -> ink -> rust -> amber,
 # dark-centered so structures glow on a near-black background.
 FLOWZOO_CURL = LinearSegmentedColormap.from_list("flowzoo_curl", [
@@ -54,7 +54,7 @@ FLOWZOO_RT = LinearSegmentedColormap.from_list("flowzoo_rt", [
 INK = "#0a0b12"   # canonical background
 SOLID = "#aab4c4"  # solid-phase color (obstacles: cylinder, letters)
 
-# Curated palette set the GUI lets users pick from (FlowZoo customs + classics).
+# Curated palette set the GUI lets users pick from (Funoos customs + classics).
 COLORMAPS = {
     "Curl (cyan–amber)": FLOWZOO_CURL,
     "Ember (fire)": FLOWZOO_EMBER,
@@ -150,7 +150,7 @@ def schlieren(rho):
 
 def field_to_rgb(field, cmap, vmin, vmax, mask=None, mask_color=INK,
                  upscale=2, gamma=1.0):
-    """Map a scalar field to an RGB uint8 image with the FlowZoo look."""
+    """Map a scalar field to an RGB uint8 image with the Funoos look."""
     x = np.clip((field - vmin) / (vmax - vmin + 1e-30), 0, 1)
     if gamma != 1.0:
         x = x ** gamma

@@ -1,6 +1,6 @@
-# Running FlowZoo on Windows
+# Running Funoos on Windows
 
-There are two ways to get FlowZoo Studio running on Windows. Pick one.
+There are two ways to get Funoos Studio running on Windows. Pick one.
 
 ---
 
@@ -10,7 +10,7 @@ If you already use **WSL2 on Windows 11** (or recent Windows 10), the GUI works
 out of the box via **WSLg** — no packaging needed:
 
 ```bash
-# in your WSL Ubuntu terminal, inside the FlowZoo folder
+# in your WSL Ubuntu terminal, inside the Funoos folder
 make -C solvers/lbm && make -C solvers/incompressible
 make -C solvers/compressible && make -C solvers/sph
 pip install numpy scipy matplotlib pillow customtkinter
@@ -24,7 +24,7 @@ something like `:0`, WSLg is active.) This is the recommended path.
 
 ## Option B — Build a native Windows `.exe` + installer
 
-This produces a standalone `FlowZooStudio.exe` (and an optional setup installer)
+This produces a standalone `FunoosStudio.exe` (and an optional setup installer)
 that runs on any Windows PC with no Python required.
 
 ### Prerequisites (one-time)
@@ -38,22 +38,22 @@ that runs on any Windows PC with no Python required.
 4. *(optional)* **Inno Setup** (https://jrsoftware.org/isinfo.php) to build the installer.
 
 ### Build
-From a terminal in the FlowZoo folder:
+From a terminal in the Funoos folder:
 ```bat
 build_windows.bat
 ```
 This compiles the four C++ solvers to `.exe`, installs the Python deps, and
 bundles everything with PyInstaller. Result:
 ```
-dist\FlowZooStudio\FlowZooStudio.exe
+dist\FunoosStudio\FunoosStudio.exe
 ```
 Double-click it to run. To **share** the app, copy the *whole*
-`dist\FlowZooStudio\` folder — the `.exe` needs its sibling `_internal\` folder
+`dist\FunoosStudio\` folder — the `.exe` needs its sibling `_internal\` folder
 (this is a one-folder PyInstaller build, not a single loose file).
 
 ### Make an installer (optional)
 Open `installer.iss` in Inno Setup and click **Compile**. You get
-`FlowZooStudio-Setup.exe` — a normal Windows installer with Start-menu and
+`FunoosStudio-Setup.exe` — a normal Windows installer with Start-menu and
 desktop shortcuts.
 
 ---

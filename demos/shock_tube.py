@@ -49,7 +49,7 @@ def main():
     fig, ax = plt.subplots(figsize=(8, 4.2))
     ax.plot(x, exact, "-", color="#c0392b", lw=2.2, label="exact Riemann solution")
     ax.plot(x[::6], rho[::6], "o", ms=4, color="#1f3a93", mfc="white",
-            label="FlowZoo HLLC solver")
+            label="Funoos HLLC solver")
     ax.set_xlabel("x"); ax.set_ylabel(r"density $\rho$")
     ax.set_title(f"Sod shock tube at t = {t_phys:.2f}  (mean abs error {err:.3f})")
     ax.legend(frameon=False)
