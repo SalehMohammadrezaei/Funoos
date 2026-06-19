@@ -19,7 +19,7 @@ from PIL import Image
 
 
 def _ffmpeg():
-    """Locate ffmpeg: env override, bundled (PyInstaller), then PATH."""
+    """Locate ffmpeg: env override, bundled (PyInstaller), imageio-ffmpeg, then PATH."""
     if os.environ.get("FLOWZOO_FFMPEG"):
         return os.environ["FLOWZOO_FFMPEG"]
     base = getattr(sys, "_MEIPASS", None)
@@ -28,7 +28,14 @@ def _ffmpeg():
         cand = Path(base) / exe
         if cand.exists():
             return str(cand)
-    return "ffmpeg"
+    # pip-installable ffmpeg binary (no separate install needed): pip install imageio-ffmpeg
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    import shutil
+    return shutil.which("ffmpeg") or "ffmpeg"
 
 # --- Funoos signature colormaps ---------------------------------------------
 # Diverging "curl" map for vorticity: cyan -> teal -> ink -> rust -> amber,

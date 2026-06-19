@@ -6,8 +6,8 @@ REM
 REM  Prerequisites (one-time):
 REM    * g++ with OpenMP on PATH  (MSYS2: `pacman -S mingw-w64-x86_64-gcc`, or w64devkit)
 REM    * Python 3 with pip on PATH.
-REM    * ffmpeg.exe  placed in a  bin\  folder here  (REQUIRED — the player encodes
-REM      each run to MP4). Download a static build and drop ffmpeg.exe in bin\.
+REM    * ffmpeg: handled automatically by the pip package imageio-ffmpeg (installed below).
+REM      A separate ffmpeg install / bin\ffmpeg.exe is optional.
 REM    * WebView2 runtime (preinstalled on Windows 10/11; else get the Evergreen runtime).
 REM ============================================================================
 setlocal
@@ -24,7 +24,7 @@ g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\sph\sph2d.exe
 
 echo === [2/4] Installing Python dependencies ===
 python -m pip install --upgrade pip || goto :err
-pip install numpy scipy matplotlib pillow pywebview pyinstaller || goto :err
+pip install numpy scipy matplotlib pillow pywebview imageio-ffmpeg pyinstaller || goto :err
 
 echo === [3/4] Rendering gallery clips if missing (first build only; ~20-40 min) ===
 if not exist results\gallery\spec_kh.mp4 python render_gallery.py High 1.8
@@ -35,7 +35,7 @@ if exist bin\ffmpeg.exe set FF=--add-binary "bin\ffmpeg.exe;."
 pyinstaller --noconfirm --onedir --windowed --name Funoos ^
   --add-data "index.html;." --add-data "web;web" ^
   --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" ^
-  --collect-all webview ^
+  --collect-all webview --collect-all imageio_ffmpeg ^
   %FF% funoos_app.py || goto :err
 
 echo.
