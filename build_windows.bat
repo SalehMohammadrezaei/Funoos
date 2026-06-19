@@ -11,6 +11,10 @@ REM    * (optional) ffmpeg.exe placed in a  bin\  folder here, for GIF/MP4 expor
 REM ============================================================================
 setlocal
 
+echo === [0/3] Cleaning old build\ and dist\ (so the .exe is always fresh) ===
+if exist build rmdir /s /q build
+if exist dist  rmdir /s /q dist
+
 echo === [1/3] Building C++ solvers (statically linked, OpenMP) ===
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\lbm\lbm2d.exe solvers\lbm\lbm2d.cpp || goto :err
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\incompressible\ins2d.exe solvers\incompressible\ins2d.cpp || goto :err
