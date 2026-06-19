@@ -26,7 +26,7 @@
 
 static const double G = 1.4;
 
-struct Args{ int nx=400,ny=200,steps=2000,save_every=20,nbub=1; double cfl=0.4,tend=0.2;
+struct Args{ int nx=400,ny=200,steps=2000,save_every=20,nbub=1,building=0; double cfl=0.4,tend=0.2;
              double p0=10.0,brad=0.06,bubr=0.18,bubrho=0.18; std::string mode="sod",out="frames"; };
 static Args parse(int c,char**v){ Args a;
     for(int i=1;i<c-1;i+=2){ std::string k=v[i],x=v[i+1];
@@ -36,6 +36,7 @@ static Args parse(int c,char**v){ Args a;
         else if(k=="--p0")a.p0=atof(x.c_str()); else if(k=="--radius")a.brad=atof(x.c_str());
         else if(k=="--bubr")a.bubr=atof(x.c_str()); else if(k=="--bubrho")a.bubrho=atof(x.c_str());
         else if(k=="--nbub")a.nbub=atoi(x.c_str());
+        else if(k=="--building")a.building=atoi(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a; }
 
@@ -81,11 +82,29 @@ int main(int argc,char**argv){
     auto setprim=[&](int s,double rho,double u,double v,double p){
         r[s]=rho; mx[s]=rho*u; my[s]=rho*v; E[s]=p/(G-1)+0.5*rho*(u*u+v*v); };
 
+    // Solid obstacles (a "city block" the blast must diffract around / reflect off).
+    // Held each RK stage at a stiff, immovable wall state -> approximate reflecting boundary.
+    std::vector<char> solid(N,0);
+    auto in_solid=[&](int i,int j){
+        if(!a.building) return false;
+        // ground line + two towers of different height on the right half
+        double fx=i/(double)nx, fy=j/(double)ny;
+        if(fy<0.05) return true;                                   // ground slab
+        if(fx>0.52 && fx<0.62 && fy<0.55) return true;             // near tower
+        if(fx>0.70 && fx<0.78 && fy<0.78) return true;             // far (taller) tower
+        return false; };
+    const double WALL_R=6.0, WALL_P=0.1;   // stiff wall: heavy + ambient pressure, zero velocity
+
     // --- initial conditions ---
     for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){ int s=IX(i,j);
+        if(in_solid(i,j)) solid[s]=1;
         if(a.mode=="sod"){ if(i<nx/2) setprim(s,1.0,0,0,1.0); else setprim(s,0.125,0,0,0.1); }
-        else if(a.mode=="blast"){ double dx=i-nx/2.0,dy=j-ny/2.0;
-            if(dx*dx+dy*dy < (nx*a.brad)*(nx*a.brad)) setprim(s,1.0,0,0,a.p0);
+        else if(a.mode=="blast"){
+            // ground burst offset to the left when a building is present, else centred
+            double bx=a.building? nx*0.20 : nx/2.0, by=a.building? ny*0.14 : ny/2.0;
+            double dx=i-bx,dy=j-by;
+            if(solid[s]) setprim(s,WALL_R,0,0,WALL_P);
+            else if(dx*dx+dy*dy < (nx*a.brad)*(nx*a.brad)) setprim(s,1.0,0,0,a.p0);
             else setprim(s,0.5,0,0,0.1); }
         else { // bubble(s): ambient air struck by a planar shock at the left
             double cx=nx*0.45, rad=ny*a.bubr; bool inb;
@@ -205,6 +224,8 @@ int main(int argc,char**argv){
             double a2=sqrt(G*q.p/q.r); m=std::max(m,std::max(fabs(q.u),fabs(q.v))+a2);} return m; };
 
     std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
+    if(a.building){ std::vector<float> sb(N); for(int s=0;s<N;s++)sb[s]=(float)solid[s];
+        std::ofstream sf(a.out+"/solid.bin",std::ios::binary); sf.write((char*)sb.data(),N*sizeof(float)); }
     std::vector<double> dR(N),dMX(N),dMY(N),dE(N);
     double t=0; int nf=0;
     for(int step=0; step<a.steps && t<a.tend; step++){
@@ -213,18 +234,24 @@ int main(int argc,char**argv){
         residual(r,mx,my,E,dR,dMX,dMY,dE);
         #pragma omp parallel for
         for(int s=0;s<N;s++){ r1[s]=r[s]+dt*dR[s]; mx1[s]=mx[s]+dt*dMX[s];
-            my1[s]=my[s]+dt*dMY[s]; E1[s]=E[s]+dt*dE[s]; }
+            my1[s]=my[s]+dt*dMY[s]; E1[s]=E[s]+dt*dE[s];
+            if(solid[s]){ r1[s]=WALL_R; mx1[s]=my1[s]=0; E1[s]=WALL_P/(G-1); } }
         // stage 2 (Heun)
         residual(r1,mx1,my1,E1,dR,dMX,dMY,dE);
         #pragma omp parallel for
         for(int s=0;s<N;s++){
             r[s]=0.5*(r[s]+r1[s]+dt*dR[s]); mx[s]=0.5*(mx[s]+mx1[s]+dt*dMX[s]);
-            my[s]=0.5*(my[s]+my1[s]+dt*dMY[s]); E[s]=0.5*(E[s]+E1[s]+dt*dE[s]); }
+            my[s]=0.5*(my[s]+my1[s]+dt*dMY[s]); E[s]=0.5*(E[s]+E1[s]+dt*dE[s]);
+            if(solid[s]){ r[s]=WALL_R; mx[s]=my[s]=0; E[s]=WALL_P/(G-1); } }
         t+=dt;
         if(step%a.save_every==0){
             std::vector<float> buf(N); for(int s=0;s<N;s++)buf[s]=(float)r[s];
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
             std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
+            std::vector<float> vb(2*N);                  // velocity field (for the Speed view)
+            for(int s=0;s<N;s++){ vb[s]=(float)(mx[s]/r[s]); vb[N+s]=(float)(my[s]/r[s]); }
+            char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
+            std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
             nf++; if(step%(a.save_every*10)==0)printf("step %d t=%.4f (%d frames)\n",step,t,nf);
         }
     }

@@ -58,7 +58,7 @@ def _nframes(d):
 RES = {"Low (fast)": 0.6, "Medium": 1.0, "High": 1.35, "Ultra (slow)": 1.8}
 VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
          "spectral": ["Vorticity", "Speed", "Streamlines"],
-         "density": ["Schlieren", "Density"],
+         "density": ["Schlieren", "Density", "Speed"],
          "ns": ["Dye", "Speed", "Vorticity", "Streamlines"],
          "particles": ["Particles"]}
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
@@ -123,15 +123,39 @@ class Result:
     def _render_density(self, view, cm):
         out = []
         h = self.hints; deb = h.get("debris", 0); nx, ny = h.get("nx"), h.get("ny")
+        solid = h.get("solid"); city = solid is not None
+        if view == "Speed":
+            vel = h.get("vel")
+            sp = [np.hypot(ux, uy) for ux, uy in vel]
+            ref = sp[-1] if not city else sp[-1][~solid]
+            vmax = np.percentile(ref, 99.0) + 1e-9
+            res = []
+            for s in sp:
+                img = render.field_to_rgb(s, cm, 0, vmax, upscale=1)
+                if city: img = np.array(img); img[solid[::-1]] = np.array([78, 82, 102], np.uint8)
+                res.append(render.add_colorbar(img, cm, 0, vmax, "|u|"))
+            return res
         if view == "Density":
             dv0, dv1 = np.percentile(self.raw[-1], 1), np.percentile(self.raw[-1], 99.5) + 1e-6
         else:
-            sv = np.percentile(render.schlieren(self.raw[-1]), 99.5) + 1e-6
+            # ignore the stiff solid cells (ρ=6, huge edge gradients) when scaling
+            sref = render.schlieren(self.raw[-1])
+            if city: sref = sref[~solid]
+            sv = np.percentile(sref, 99.5) + 1e-6
         if deb and h.get("mode") == "blast" and view == "Schlieren":
             rng = np.random.default_rng(7)
-            bx = rng.uniform(0, nx, deb); by = rng.uniform(0, ny, deb)
-            cx, cy = nx / 2, ny / 2
+            if city:
+                # debris is the masonry of the towers: seed on the solid cells, fling
+                # outward & up once the blast front sweeps past each piece
+                ys, xs = np.where(solid)
+                pick = rng.integers(0, len(xs), deb)
+                bx = xs[pick] + rng.uniform(-1, 1, deb); by = ys[pick] + rng.uniform(-1, 1, deb)
+                cx, cy = nx * 0.20, ny * 0.14         # the ground-burst origin
+            else:
+                bx = rng.uniform(0, nx, deb); by = rng.uniform(0, ny, deb)
+                cx, cy = nx / 2, ny / 2
             dist = np.hypot(bx - cx, by - cy) + 1e-6; ang = np.arctan2(by - cy, bx - cx)
+            if city: ang += rng.uniform(-0.35, 0.35, deb)   # scatter the fragments
             push = rng.uniform(0.5, 1.0, deb); Rmax = 0.75 * np.hypot(nx, ny) / 2
         for fi, rho in enumerate(self.raw):
             if view == "Density":
@@ -140,15 +164,21 @@ class Result:
                 continue
             sch = render.schlieren(rho)
             img = render.field_to_rgb(sch, cm, 0.0, sv, upscale=1, gamma=0.7)
+            if city:                                       # draw the concrete towers
+                img = np.array(img); img[solid[::-1]] = np.array([78, 82, 102], np.uint8)
             if deb and h.get("mode") == "blast":
                 tau = fi / max(1, len(self.raw) - 1)
                 arrival = dist / (Rmax * 1.25)            # when the shock front reaches a particle
                 since = tau - arrival
                 disp = np.where(since > 0, since * Rmax * 1.25 * push * 0.7, 0.0)
-                px = bx + np.cos(ang) * disp; py = by + np.sin(ang) * disp; iy = ny - 1 - py
+                px = bx + np.cos(ang) * disp; py = by + np.sin(ang) * disp
+                if city:                                   # ballistic arc: fling up, fall under gravity
+                    py = py + np.where(since > 0, since * Rmax * 0.9 - (since ** 2) * Rmax * 2.2, 0.0)
+                iy = ny - 1 - py
                 heat = np.clip(np.where(since > 0, np.exp(-2.2 * since), 0.12), 0.08, 1.0)
                 size = 1.0 + 1.8 * heat
                 keep = (px > 1) & (px < nx - 1) & (iy > 1) & (iy < ny - 1)
+                if city: keep &= (since > 0)              # towers stay intact until the shock hits
                 img = render.overlay_particles(img, px[keep], iy[keep], size[keep], heat[keep])
             out.append(render.add_colorbar(img, cm, 0, sv, "|∇ρ|"))
         return out
@@ -268,8 +298,10 @@ def _solve_euler(mode, p, pr, tmp):
     s = _res(p)
     if mode == "blast":
         nx = ny = int(420 * s); tend = 70 * _durv(p)
-        extra = ["--p0", str(p["pressure"]), "--radius", str(p["charge"])]
-        hints = {"mode": "blast", "debris": int(p.get("debris", 0)), "nx": nx, "ny": ny}
+        bld = 1 if p.get("scene") == "Shock hits a city" else 0
+        extra = ["--p0", str(p["pressure"]), "--radius", str(p["charge"]), "--building", str(bld)]
+        hints = {"mode": "blast", "debris": int(p.get("debris", 0)), "nx": nx, "ny": ny,
+                 "building": bld}
     else:
         nx, ny = int(620 * s), int(320 * s); tend = 230 * _durv(p)
         rho_b, nb = {"Light bubble": (0.18, 1), "Heavy bubble": (3.0, 1),
@@ -281,8 +313,17 @@ def _solve_euler(mode, p, pr, tmp):
     subprocess.run([str(_bin("compressible", "euler2d")), "--mode", mode, "--nx", str(nx),
                     "--ny", str(ny), "--tend", str(tend), "--cfl", "0.4", "--steps", "200000",
                     "--save_every", "12", "--out", tmp] + extra, check=True, env=_ENV)
-    n = _nframes(tmp); skip = max(1, n // 100)
-    raw = [_read_scalar(tmp, i, nx, ny) for i in range(0, n, skip)]
+    n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
+    raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
+
+    def _rv(i):
+        b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
+        return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
+    if (Path(tmp) / f"vel_{idx[0]:05d}.bin").exists():
+        hints["vel"] = [_rv(i) for i in idx]
+    sp = Path(tmp) / "solid.bin"
+    if sp.exists():
+        hints["solid"] = np.fromfile(sp, dtype=np.float32).reshape(ny, nx) > 0.5
     return Result("density", raw, f"{mode}  {nx}×{ny}", hints=hints)
 
 
@@ -366,7 +407,12 @@ EXHIBITS = {
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("rt", p, pr, t)},
     "Detonation": {
-        "params": [_f("pressure", "Blast pressure", 10.0, 2.0, 40.0, "Physics",
+        "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
+                    "choices": ["Open air", "Shock hits a city"], "default": "Open air",
+                    "help": "Open air: a free blast wave expanding into still gas. Shock hits a "
+                    "city: a ground burst whose blast diffracts around and reflects off two solid "
+                    "towers — watch the Mach stems and shadow zones behind the buildings."},
+                   _f("pressure", "Blast pressure", 10.0, 2.0, 40.0, "Physics",
                       "Pressure inside the charge. Higher → a stronger, faster shock."),
                    _f("charge", "Charge size (frac.)", 0.06, 0.02, 0.18, "Geometry",
                       "Radius of the high-pressure charge as a fraction of the domain width."),

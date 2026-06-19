@@ -104,8 +104,17 @@ DETAIL = {
 "central differences (they would oscillate wildly at the shock). Instead the "
 "physics of how waves propagate must be built into the numerical method, which "
 "is what a Riemann solver does at every cell face.\n\n"
+"Two scenes share the solver. In the open air the blast is a clean, expanding "
+"circular shock. 'Shock hits a city' fires a ground burst beside two solid "
+"towers: the front reflects off the walls (the incident and reflected shocks can "
+"merge into a stronger 'Mach stem' near the ground), diffracts around the "
+"corners, and leaves a quiet shadow zone in the lee of each building — the same "
+"reasoning blast-protection engineering is built on. The masonry is flung off as "
+"glowing debris on a ballistic arc the moment the front sweeps past it.\n\n"
 "The 'schlieren' view mimics a classic laboratory technique that makes density "
-"gradients visible, so the shock fronts light up as sharp bright lines."),
+"gradients visible, so the shock fronts light up as sharp bright lines; the "
+"Speed view shows the gas velocity, where you can watch the flow accelerate "
+"around and pile up against the buildings."),
 "terms": (
 "• U — the vector of conserved quantities: density ρ, momentum ρu and ρv, and "
 "total energy E\n"
