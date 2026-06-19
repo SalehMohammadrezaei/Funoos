@@ -343,9 +343,14 @@ def _solve_windtunnel(p, pr, tmp):
                     "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
                     "--out", tmp, "--probe_x", str(min(probe, nx - 2)), "--probe_y", str(ny // 2)],
                    check=True, env=_ENV)
-    n = _nframes(tmp); use = range(n // 5, n, max(1, (n - n // 5) // 90))
+    save_every = max(1, steps // 120)
+    n = _nframes(tmp); stride = max(1, (n - n // 5) // 90)
+    use = range(n // 5, n, stride)
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
-    return Result("lbm", raw, f"wind tunnel · {obs} · Re={Re:.0f} · {nx}×{ny}", mask=mask)
+    hints = {"probe_x": min(probe, nx - 2), "probe_y": ny // 2, "D": D, "U": U,
+             "frame_dt_steps": stride * save_every}     # for the lift / Strouhal diagnostic
+    return Result("lbm", raw, f"wind tunnel · {obs} · Re={Re:.0f} · {nx}×{ny}",
+                  mask=mask, hints=hints)
 
 
 def _solve_ns(mode, p, pr, tmp):
