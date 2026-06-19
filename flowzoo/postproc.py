@@ -199,12 +199,27 @@ def _particles(result):
     return out
 
 
+def _porous(result):
+    h = result.hints
+    phi = h.get("porosity", 0.6); k = h.get("permeability", 0.0); d = 2.0 * h.get("grain", 12)
+    P = np.linspace(0.35, 0.9, 120)
+    kc = P ** 3 * d * d / (180.0 * (1.0 - P) ** 2)        # Kozeny–Carman reference
+    fig, ax, plt = _new_ax("porosity  φ", "permeability  k  (lattice cells²)",
+                           "Permeability vs porosity")
+    ax.plot(P, kc, color=_MUTED, lw=1.8, ls="--", label="Kozeny–Carman")
+    ax.scatter([phi], [max(k, 1e-9)], color=_AMBER, s=90, zorder=5, edgecolor="#1a1a1a",
+               label=f"measured: φ={phi:.2f}, k={k:.2f}")
+    ax.set_yscale("log")
+    ax.legend(facecolor=_BG, edgecolor=_GRID, labelcolor=_FG, fontsize=8, loc="upper left")
+    return [("Permeability (Darcy)", _rgb(fig, plt))]
+
+
 def plots(result):
     """Return [(title, rgb ndarray), …] of diagnostics for this result."""
     try:
         k = result.kind
         if k == "lbm":
-            return _wind_tunnel(result)
+            return _porous(result) if result.hints.get("permeability") is not None else _wind_tunnel(result)
         if k == "spectral":
             return _ke_enstrophy(result, "2-D turbulence — energy & enstrophy")
         if k == "ns":

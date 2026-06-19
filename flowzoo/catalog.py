@@ -24,6 +24,12 @@ SCENES = [
      "blurb": "Because lattice-Boltzmann treats any obstacle as just a set of solid cells, you can "
               "drop the pixels of your own name into the tunnel and watch the wake braid around "
               "every letter — no mesh generation at all."},
+    {"method": "Lattice–Boltzmann", "exhibit": "Porous Flow", "key": "porous_phi60",
+     "name": "Flow Through Porous Rock", "preset": {"porosity": 0.60, "grain": 0.035},
+     "blurb": "Fluid driven through a packed bed of grains, winding along tortuous pore paths. "
+              "Funoos resolves the pore-scale flow and reads off the permeability k directly "
+              "(k = ν⟨u⟩/g) — the same 'digital rock physics' used for reservoirs and filters. "
+              "❖ built on the LBM permeability work behind Funoos."},
     # ───────── Navier–Stokes (projection) ─────────
     {"method": "Incompressible Navier–Stokes", "exhibit": "Rising Smoke", "key": "ns_smoke",
      "name": "Rising Smoke Plume", "preset": {},
@@ -35,6 +41,11 @@ SCENES = [
      "blurb": "Heavy fluid resting on light fluid in gravity. The interface is unstable: heavy "
               "spikes fall, light bubbles rise, and each finger curls into the iconic mushroom "
               "cap. The Atwood number sets how violently it overturns."},
+    {"method": "Incompressible Navier–Stokes", "exhibit": "Rising Smoke", "key": "ns_flame",
+     "name": "Candle Flame", "preset": {"source": 0.5, "buoyancy": 0.0045, "confinement": 13, "flicker": 1.0},
+     "blurb": "A narrow, flickering hot source — the lantern's own flame. The same buoyant "
+              "plume physics, dialed to a candle: a dancing tongue of fire that wanders and "
+              "pulses as shed vortices tug at it. ❖ the heart of Funoos (فانوس, the lantern)."},
     # ───────── Compressible Euler (HLLC) ─────────
     {"method": "Compressible Euler", "exhibit": "Detonation", "key": "euler_blast",
      "name": "Open-Air Blast", "preset": {"scene": "Open air", "pressure": 14},
@@ -88,10 +99,57 @@ SCENES = [
               "prescribed motion."},
     # ───────── Pseudo-spectral ─────────
     {"method": "Pseudo-spectral", "exhibit": "Cloud Billows", "key": "spec_kh",
-     "name": "Kelvin–Helmholtz Billows", "preset": {},
+     "name": "Kelvin–Helmholtz Billows", "preset": {"init": "Shear layers"},
      "blurb": "Two fluid layers shearing past each other. The interface rolls into a regular row "
               "of spiral billows that pair and merge — the cloud-street pattern in the sky and on "
               "Jupiter, solved with a spectrally-accurate Fourier method."},
+    {"method": "Pseudo-spectral", "exhibit": "Cloud Billows", "key": "spec_decay",
+     "name": "Decaying Turbulence", "preset": {"init": "Random turbulence"},
+     "blurb": "A random swirl of vorticity left to evolve. Like-signed vortices merge into ever "
+              "larger ones — the 2-D inverse cascade — while fine structure is ground away: the "
+              "paradoxical way two-dimensional turbulence organises itself as it decays."},
+    {"method": "Pseudo-spectral", "exhibit": "Ink in Motion", "key": "mix_bands",
+     "name": "Chaotic Mixing of Dye", "preset": {"bands": 6},
+     "blurb": "Clean stripes of dye dropped into a turbulent flow, stretched and folded into "
+              "ever-finer filaments. Chaotic advection mixes far faster than diffusion alone — "
+              "the same way cream laces into coffee and pollutants disperse in the sea."},
+    # ───────── Reaction–Diffusion ─────────
+    {"method": "Reaction–Diffusion", "exhibit": "Turing Patterns", "key": "rd_spots",
+     "name": "Spots", "preset": {"pattern": "Spots"},
+     "blurb": "Two chemicals, reacting and diffusing at different rates, settle from noise into a "
+              "regular field of spots — Turing's 1952 idea for how a leopard gets its spots, with "
+              "no template guiding them."},
+    {"method": "Reaction–Diffusion", "exhibit": "Turing Patterns", "key": "rd_stripes",
+     "name": "Stripes & Coral", "preset": {"pattern": "Stripes"},
+     "blurb": "Shift the feed/kill balance and the spots elongate into branching stripes and "
+              "coral-like ridges — the same morphology as fingerprints and brain folds."},
+    {"method": "Reaction–Diffusion", "exhibit": "Turing Patterns", "key": "rd_maze",
+     "name": "Labyrinth", "preset": {"pattern": "Maze"},
+     "blurb": "A regime where the stripes never close into spots nor straighten into lines, but "
+              "wander into an endless maze — a frozen snapshot of self-organisation."},
+    {"method": "Reaction–Diffusion", "exhibit": "Turing Patterns", "key": "rd_mitosis",
+     "name": "Mitosis", "preset": {"pattern": "Mitosis"},
+     "blurb": "The most striking regime: blobs that grow, stretch and pinch in two — patterns "
+              "that self-replicate like dividing cells, from nothing but chemistry and diffusion."},
+    # ───────── Quantum Mechanics ─────────
+    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_barrier",
+     "name": "Quantum Tunnelling", "preset": {"scene": "Tunnelling barrier"},
+     "blurb": "A wavepacket hits a wall taller than its energy — and part of it leaks straight "
+              "through. Tunnelling is impossible in classical physics yet drives radioactive "
+              "decay, the STM, and flash memory."},
+    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_slit",
+     "name": "Double Slit", "preset": {"scene": "Double slit"},
+     "blurb": "One particle, two slits — and it interferes with itself, building the striped "
+              "probability pattern that is the clearest proof matter behaves as a wave."},
+    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_free",
+     "name": "Free Spreading", "preset": {"scene": "Free spreading"},
+     "blurb": "A Gaussian wavepacket left alone: it glides at its group velocity while inexorably "
+              "spreading — position uncertainty growing exactly as the uncertainty principle says."},
+    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_harmonic",
+     "name": "Harmonic Well", "preset": {"scene": "Harmonic well"},
+     "blurb": "A coherent state trapped in a parabolic well sloshes back and forth without "
+              "spreading — the quantum analogue of a frictionless pendulum, and the closed-system "
+              "check where probability is conserved to round-off."},
 ]
 
 

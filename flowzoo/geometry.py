@@ -79,6 +79,22 @@ def text(nx, ny, string, font_frac=0.55, x_frac=0.5, max_w_frac=0.9,
     return (arr[::-1] > 127).astype(np.uint8)  # flip so text is upright in +y-up
 
 
+def porous(nx, ny, solid_frac=0.4, grain=12, seed=0):
+    """Random grain pack (periodic) filling to a target solid fraction — a porous sample."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    mask = np.zeros((ny, nx), np.uint8)
+    tries = 0
+    while mask.mean() < solid_frac and tries < 8000:
+        cx, cy = rng.integers(0, nx), rng.integers(0, ny)
+        r = grain * rng.uniform(0.6, 1.4)
+        dx = np.minimum(np.abs(xx - cx), nx - np.abs(xx - cx))   # periodic distance
+        dy = np.minimum(np.abs(yy - cy), ny - np.abs(yy - cy))
+        mask |= (dx * dx + dy * dy <= r * r).astype(np.uint8)
+        tries += 1
+    return mask
+
+
 def save_mask(mask, path):
     """Write the uint8 (Ny, Nx) mask as the flat binary the C++ solver reads."""
     mask.astype(np.uint8).tofile(path)

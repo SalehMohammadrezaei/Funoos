@@ -26,7 +26,7 @@
 
 struct Args {
     int nx=240, ny=360, steps=4000, save_every=20, iters=60;
-    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0;
+    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0, flicker=0.0;
     std::string mode="smoke", out="frames";
 };
 static Args parse(int c, char** v){
@@ -38,7 +38,7 @@ static Args parse(int c, char** v){
         else if(k=="--visc")a.visc=atof(x.c_str()); else if(k=="--buoy")a.buoy=atof(x.c_str());
         else if(k=="--grav")a.grav=atof(x.c_str()); else if(k=="--conf")a.conf=atof(x.c_str());
         else if(k=="--srcw")a.srcw=atof(x.c_str()); else if(k=="--pert")a.pert=atof(x.c_str());
-        else if(k=="--atwood")a.atwood=atof(x.c_str());
+        else if(k=="--atwood")a.atwood=atof(x.c_str()); else if(k=="--flicker")a.flicker=atof(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a;
 }
@@ -125,10 +125,15 @@ int main(int argc,char**argv){
     for(int step=0; step<=a.steps; step++){
         // forces: buoyancy + (smoke) continuous source + vorticity confinement
         if(smoke){
-            for(int j=1;j<1+sh;j++)for(int i=sx-sw;i<=sx+sw;i++){
-                double r=double(i-sx)/sw; double g=exp(-3*r*r);
-                s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g);
-                v[IX(i,j)] += 0.02*g;
+            // flicker: a wobbling, pulsing source so the plume dances like a flame
+            double ph=step*0.06;
+            int off=(int)(a.flicker*sw*0.8*(sin(ph)+0.4*sin(2.3*ph+1.0)));
+            double str=1.0 + a.flicker*0.5*sin(1.7*ph);
+            int sxx=std::min(nx-2-sw, std::max(1+sw, sx+off));
+            for(int j=1;j<1+sh;j++)for(int i=sxx-sw;i<=sxx+sw;i++){
+                double r=double(i-sxx)/sw; double g=exp(-3*r*r);
+                s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g*str);
+                v[IX(i,j)] += 0.02*g*str;
             }
         }
         #pragma omp parallel for schedule(static)

@@ -228,4 +228,102 @@ DETAIL = {
 "• ∇²ψ = −ω — the streamfunction ψ is obtained from vorticity by inverting the "
 "Laplacian (a simple division in Fourier space), then u = (∂ψ/∂y, −∂ψ/∂x)"),
 },
+"Turing Patterns": {
+"physics": (
+"In 1952 Alan Turing proposed that the patterns of nature — a leopard's spots, a "
+"zebra's stripes, the whorls of a seashell — could arise spontaneously from two "
+"chemicals that react and diffuse, with no blueprint guiding them. The trick is "
+"differential diffusion: a slowly-spreading 'activator' locally amplifies itself "
+"while a fast-spreading 'inhibitor' suppresses it nearby. Local growth plus "
+"long-range suppression carves a regular length scale out of a uniform soup.\n\n"
+"The Gray–Scott model is the classic two-chemical realisation. U is fed in "
+"steadily; the reaction U + 2V → 3V converts it to V (V autocatalyses); V slowly "
+"decays. Tiny initial noise grows into structure, and the precise balance between "
+"the feed rate F and the kill rate k decides which structure: isolated spots, "
+"labyrinthine stripes, or — astonishingly — blobs that grow, pinch in two and "
+"replicate like dividing cells.\n\n"
+"The same activator–inhibitor mathematics models animal coat markings, the "
+"spacing of hair follicles and the ridges of fingerprints, vegetation patterns in "
+"arid landscapes, and chemical waves in the lab."),
+"terms": (
+"• U, V — the two reacting/diffusing chemical concentrations\n"
+"• Du, Dv — their diffusion rates; the pattern needs Du > Dv (activator V spreads slower)\n"
+"• U V² — the autocatalytic reaction that converts U into V\n"
+"• F(1−U) — the steady feed replenishing U\n"
+"• (F+k)V — feed plus kill removing V\n"
+"• ∇² — the Laplacian (diffusion); a 9-point isotropic stencil here"),
+},
+"Quantum Ripples": {
+"physics": (
+"In quantum mechanics a particle has no definite position; it is described by a "
+"complex wavefunction ψ whose squared magnitude |ψ|² is the probability of finding "
+"it at each point. The wavefunction evolves by the Schrödinger equation, the "
+"quantum counterpart of Newton's law — and because it is a wave, it does things a "
+"classical particle never could.\n\n"
+"Send a wavepacket at a barrier taller than its energy and part of it leaks "
+"through — quantum tunnelling, the effect behind radioactive decay, the scanning "
+"tunnelling microscope and flash memory. Send it through two slits and it "
+"interferes with itself, building the striped pattern that proves matter is wave-"
+"like. Leave it free and it inexorably spreads; trap it in a parabolic well and it "
+"sloshes back and forth as a coherent state.\n\n"
+"The phase view colours arg(ψ): the swirling bands are the wavefronts whose "
+"spacing is the de Broglie wavelength, and whose bending is momentum changing."),
+"terms": (
+"• ψ — the complex wavefunction; |ψ|² (shown) is the probability density\n"
+"• iℏ ∂t ψ — the quantum 'time derivative' (i makes evolution a rotation in the "
+"complex plane, hence waves)\n"
+"• −ℏ²/2m ∇²ψ — the kinetic-energy operator (curvature of ψ)\n"
+"• V(x) ψ — the potential: a barrier, a slitted wall, or a harmonic well\n"
+"• split-step: evolve V and the kinetic term in turn — the latter is diagonal in "
+"Fourier space, so an FFT makes it a multiply"),
+},
+"Ink in Motion": {
+"physics": (
+"Stir a drop of cream into coffee and it doesn't simply diffuse — the swirls "
+"stretch it into long thin ribbons, fold them over, stretch again, until the "
+"ribbons are so fine that the last bit of molecular diffusion finishes the job in "
+"an instant. This is chaotic advection: mixing done by the flow's stretching and "
+"folding, not by diffusion. It is exponentially faster than diffusion alone, which "
+"is why stirring works.\n\n"
+"Here a turbulent 2-D velocity field (from the same spectral solver as the cloud "
+"billows) carries a passive dye that starts as clean stripes. The dye doesn't "
+"change the flow — it just goes along for the ride — so it traces the flow's "
+"invisible stretching, revealing the filamentary, self-similar structure that "
+"chaotic stirring always produces. The same process disperses pollutants in the "
+"ocean, ash in the atmosphere, and plankton across the sea surface.\n\n"
+"Because the dye is merely transported, total dye is conserved as the filaments "
+"thin — mixing redistributes, it doesn't create or destroy."),
+"terms": (
+"• c — the dye concentration (a passive scalar; it does not affect the flow)\n"
+"• u — the turbulent velocity stirring it, from the spectral solver\n"
+"• (u·∇)c — advection: the flow carrying the dye and stretching it into filaments\n"
+"• κ∇²c — molecular diffusion, small, smoothing only the very finest filaments\n"
+"• ∇·u = 0 — the stirring flow is incompressible (area-preserving)"),
+},
+"Porous Flow": {
+"physics": (
+"Soils, rocks, filters, catalyst beds, even bone — all are porous: solid matrices "
+"threaded by pore space. When you drive fluid through, it cannot go straight; it "
+"winds through the connected pores, speeding up in the throats and stalling in the "
+"dead ends. Henry Darcy discovered in 1856, while engineering Dijon's water "
+"supply, that despite this complexity the average flow rate is simply proportional "
+"to the pressure gradient. The proportionality constant — the permeability k — "
+"packs all the pore geometry into one number with units of area.\n\n"
+"Permeability is what petroleum engineers need to predict oil recovery, what "
+"hydrologists need for groundwater, and what battery and fuel-cell designers tune "
+"in porous electrodes. You cannot read k off a photo of the pores; you have to "
+"solve the flow. 'Digital rock physics' does exactly that — simulate the "
+"pore-scale flow in a 3D/2D image of the material and measure the averaged "
+"response. That is precisely what this exhibit does with lattice-Boltzmann.\n\n"
+"Here a constant body force drives flow through a random grain pack in a periodic "
+"box; once steady, the volume-averaged velocity ⟨u⟩ gives k = ν⟨u⟩/g. Drop the "
+"porosity and the tortuous paths choke down — permeability falls steeply, as the "
+"Kozeny–Carman relation predicts."),
+"terms": (
+"• ⟨u⟩ — the velocity averaged over the whole sample (Darcy/superficial velocity)\n"
+"• k — permeability: the area-dimensioned measure of how easily fluid passes\n"
+"• μ = ρν — dynamic viscosity; ∇p — the driving pressure gradient (here a body force)\n"
+"• φ — porosity, the void fraction; k climbs steeply with φ\n"
+"• Kozeny–Carman: k ≈ φ³d²/[180(1−φ)²] links k to porosity and grain size d"),
+},
 }

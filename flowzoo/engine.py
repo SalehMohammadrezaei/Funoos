@@ -67,9 +67,12 @@ VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
          "spectral": ["Vorticity", "Speed", "Streamlines"],
          "density": ["Schlieren", "Density", "Speed"],
          "ns": ["Dye", "Speed", "Vorticity", "Streamlines"],
-         "particles": ["Particles", "Foam & spray", "Speed field"]}
+         "particles": ["Particles", "Foam & spray", "Speed field"],
+         "field": ["Pattern"],
+         "quantum": ["Probability |ψ|²", "Phase"]}
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
-           "density": "Ember (fire)", "ns": "Ember (fire)", "particles": "Ocean (water)"}
+           "density": "Ember (fire)", "ns": "Ember (fire)", "particles": "Ocean (water)",
+           "field": "Inferno", "quantum": "Magma"}
 
 
 def _res(p):
@@ -109,6 +112,27 @@ class Result:
             if view == "Speed field":
                 return self._render_sph_field(cm)
             return self._render_particles(cm, foam=(view == "Foam & spray"))
+        if self.kind == "field":
+            v1 = np.percentile(self.raw[-1], 99.0) + 1e-9
+            return [render.add_colorbar(render.field_to_rgb(s, cm, 0, v1, upscale=2),
+                                        cm, 0, v1, self.hints.get("label", "")) for s in self.raw]
+        if self.kind == "quantum":
+            return self._render_quantum(view, cm)
+
+    def _render_quantum(self, view, cm):
+        import matplotlib.cm as mcm
+        out = []
+        pmax = np.percentile(self.raw[-1], 99.7) + 1e-12
+        if view == "Phase":
+            twil = mcm.get_cmap("twilight")
+            for prob, ph in zip(self.raw, self.hints["phase"]):
+                hue = twil((ph + np.pi) / (2 * np.pi))[..., :3]      # cyclic phase → color
+                val = np.clip(prob / pmax, 0, 1)[..., None]          # brightness ∝ |ψ|²
+                rgb = (hue * val * 255).astype(np.uint8)
+                out.append(render.add_colorbar(np.flipud(rgb), cm, -np.pi, np.pi, "arg ψ"))
+            return out
+        return [render.add_colorbar(render.field_to_rgb(p, cm, 0, pmax, upscale=2),
+                                    cm, 0, pmax, "|ψ|²") for p in self.raw]
 
     def _render_vel(self, vel, view, cm, mask):
         if view == "Streamlines":
@@ -353,6 +377,32 @@ def _solve_windtunnel(p, pr, tmp):
                   mask=mask, hints=hints)
 
 
+def _solve_porous(p, pr, tmp):
+    s = _res(p); nx, ny = int(380 * s), int(360 * s)
+    phi = float(p["porosity"]); grain = max(4, int(float(p["grain"]) * ny))
+    mask = geometry.porous(nx, ny, solid_frac=1.0 - phi, grain=grain, seed=int(p.get("seed", 1)))
+    geometry.save_mask(mask, Path(tmp) / "m.bin")
+    _ensure(_bin("lbm", "lbm2d"))
+    tau, force = 0.8, 1.2e-5            # viscous (Stokes regime → Darcy valid), gentle body force
+    steps = int(24000 * _durv(p))
+    pr(f"LBM porous medium · φ={phi:.2f} · {nx}×{ny}…")
+    subprocess.run([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
+                    "--mask", str(Path(tmp) / "m.bin"), "--periodic", "1", "--force", str(force),
+                    "--tau", str(tau), "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
+                    "--out", tmp], check=True, env=_ENV)
+    n = _nframes(tmp); use = range(n // 3, n, max(1, (n - n // 3) // 70))
+    raw = [_read_vel(tmp, i, nx, ny) for i in use]
+    meta = {}
+    for line in (Path(tmp) / "meta.txt").read_text().splitlines():
+        kk = line.split()
+        if len(kk) == 2:
+            try: meta[kk[0]] = float(kk[1])
+            except ValueError: pass
+    poro = meta.get("porosity", phi); perm = meta.get("permeability", 0.0)
+    hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force}
+    return Result("lbm", raw, f"porous · φ={poro:.2f} · k={perm:.2e}", mask=mask, hints=hints)
+
+
 def _solve_ns(mode, p, pr, tmp):
     s = _res(p); nx, ny = int(280 * s), int(440 * s); steps = int(4800 * _durv(p))
     _ensure(_bin("incompressible", "ins2d"))
@@ -360,7 +410,8 @@ def _solve_ns(mode, p, pr, tmp):
             "--ny", str(ny), "--steps", str(steps), "--save_every", str(max(1, steps // 110)),
             "--out", tmp, "--visc", str(p["viscosity"])]
     if mode == "smoke":
-        args += ["--buoy", str(p["buoyancy"]), "--conf", str(p["confinement"]), "--srcw", str(p["source"])]
+        args += ["--buoy", str(p["buoyancy"]), "--conf", str(p["confinement"]), "--srcw", str(p["source"]),
+                 "--flicker", str(p.get("flicker", 0.0))]
         hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
     else:
         args += ["--grav", str(p["gravity"]), "--pert", str(p["perturbation"]), "--conf", "0",
@@ -458,21 +509,69 @@ def _solve_dam(p, pr, tmp):
 
 
 def _solve_spectral(p, pr, tmp):
-    from .spectral import Spectral2D, double_shear_layer
+    from .spectral import Spectral2D, double_shear_layer, random_field
     s = _res(p); n = int(256 * s); steps = int(2800 * _durv(p)); nu = float(p["viscosity"])
     sim = Spectral2D(n=n, nu=nu)
-    wh = double_shear_layer(n, amp=float(p["perturbation"])); dt = 0.4 * (2 * np.pi / n)
+    if p.get("init") == "Random turbulence":
+        wh = random_field(n, seed=1); label = "decaying turbulence"
+    else:
+        wh = double_shear_layer(n, amp=float(p["perturbation"])); label = "Kelvin–Helmholtz"
+    dt = 0.4 * (2 * np.pi / n)
     pr(f"spectral {n}×{n}, ν={nu:.1e}, {steps} steps…")
-    raw = []
+    vel = []
     for st in range(steps + 1):
         if st % max(1, steps // 90) == 0:
-            u, v = sim.velocity(wh)
-            raw.append((sim.vorticity(wh), u, v))
+            vel.append(sim.velocity(wh))
         wh = sim.step(wh, dt)
-    # store as (ux,uy) pairs + carry vorticity by reusing 'lbm' renderer on (u,v);
-    # vorticity recomputed from (u,v) matches sim vorticity to round-off.
-    vel = [(u, v) for (_w, u, v) in raw]
-    return Result("spectral", vel, f"Kelvin–Helmholtz  {n}×{n}")
+    return Result("spectral", vel, f"{label}  {n}×{n}")
+
+
+def _solve_mixing(p, pr, tmp):
+    from .spectral import Spectral2D, random_field, advect_sl
+    s = _res(p); n = int(256 * s); steps = int(2600 * _durv(p)); nu = 4e-4
+    sim = Spectral2D(n=n, nu=nu); wh = random_field(n, seed=3); dt = 0.4 * (2 * np.pi / n)
+    L = 2 * np.pi
+    # dye: alternating horizontal bands (so stirring shows the folding/filamentation)
+    yy = np.linspace(0, L, n, endpoint=False)[None, :] * np.ones((n, 1))
+    c = 0.5 * (1 + np.sign(np.sin(float(p.get("bands", 6)) * yy)))
+    kap = float(p.get("diffusion", 1e-4))
+    pr(f"chaotic mixing {n}×{n}, {steps} steps…")
+    raw = []
+    for st in range(steps + 1):
+        u, v = sim.velocity(wh)
+        if st % max(1, steps // 100) == 0:
+            raw.append(c.copy())
+        c = advect_sl(c, u, v, dt, L)
+        if kap > 0:                                   # gentle scalar diffusion (spectral)
+            c = np.real(np.fft.ifft2(np.exp(-kap * sim.k2 * dt) * np.fft.fft2(c)))
+        wh = sim.step(wh, dt)
+    return Result("field", raw, f"chaotic mixing  {n}×{n}", hints={"label": "dye"})
+
+
+def _solve_reaction(p, pr, tmp):
+    from .reaction import gray_scott, PRESETS
+    s = _res(p); n = int(220 * s)
+    pat = p.get("pattern", "Spots"); F, k = PRESETS.get(pat, (0.035, 0.065))
+    steps = int(9000 * _durv(p))
+    pr(f"Gray–Scott {n}×{n}, {pat} (F={F:.4f}, k={k:.4f}), {steps} steps…")
+    frames = gray_scott(n=n, F=F, k=k, steps=steps, nframes=110, seed=1)
+    return Result("field", frames, f"{pat}  {n}×{n}", hints={"label": "V concentration"})
+
+
+def _solve_quantum(p, pr, tmp):
+    from .quantum import simulate
+    s = _res(p); n = int(220 * s); steps = int(360 * _durv(p))
+    scene = {"Free spreading": "free", "Tunnelling barrier": "barrier",
+             "Double slit": "slit", "Harmonic well": "harmonic"}.get(p.get("scene", "Tunnelling barrier"), "barrier")
+    pr(f"Schrödinger {n}×{n} ({scene}), {steps} steps…")
+    prob, phase, V, norm = simulate(n=n, scene=scene, steps=steps, nframes=110,
+                                    k0=float(p.get("momentum", 360)), width=float(p.get("width", 0.06)),
+                                    v0=float(p.get("barrier", 320)))
+    if scene == "harmonic":          # closed system → unitarity check
+        info = f"harmonic well  {n}×{n} · norm conserved to {max(abs(x - 1) for x in norm):.0e}"
+    else:                            # open: the absorbing border removes escaping probability
+        info = f"{scene}  {n}×{n} · absorbing boundary"
+    return Result("quantum", prob, info, hints={"phase": phase})
 
 
 EXHIBITS = {
@@ -497,6 +596,9 @@ EXHIBITS = {
         "params": [_f("buoyancy", "Buoyancy", 2.5e-3, 5e-4, 6e-3, "Physics", _H["buoy"]),
                    _f("confinement", "Vorticity confinement", 8, 0, 20, "Physics", _H["conf"]),
                    _f("viscosity", "Viscosity", 8e-5, 0, 5e-4, "Physics", _H["visc"]),
+                   _f("flicker", "Flame flicker", 0.0, 0.0, 1.0, "Physics",
+                      "Wobble & pulse the source so the plume dances like a flame. 0 = a steady "
+                      "column; 1 = a lively candle flame."),
                    _f("source", "Source width (×)", 1.0, 0.3, 3.0, "Geometry",
                       "Width of the hot source at the floor."),
                    P_RES(), P_DUR()],
@@ -601,11 +703,55 @@ EXHIBITS = {
                    P_DUR()],
         "solve": lambda p, pr, t: _solve_dam(p, pr, t)},
     "Cloud Billows": {
-        "params": [_f("viscosity", "Viscosity", 8e-5, 1e-5, 4e-4, "Physics", _H["visc"]),
-                   _f("perturbation", "Shear perturbation", 0.05, 0.005, 0.2, "Physics",
-                      "Strength of the initial shear-layer kick that seeds the billows."),
+        "params": [{"name": "init", "label": "Initial field", "type": "choice", "group": "Geometry",
+                    "choices": ["Shear layers", "Random turbulence"], "default": "Shear layers",
+                    "help": "Shear layers roll into Kelvin–Helmholtz billows; random turbulence "
+                    "decays as vortices merge (the 2-D inverse cascade)."},
+                   _f("viscosity", "Viscosity", 8e-5, 1e-5, 4e-4, "Physics", _H["visc"]),
+                   _when(_f("perturbation", "Shear perturbation", 0.05, 0.005, 0.2, "Physics",
+                            "Strength of the initial shear-layer kick that seeds the billows."),
+                         "init", ["Shear layers"]),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_spectral(p, pr, t)},
+    "Porous Flow": {
+        "params": [_f("porosity", "Porosity  φ (void frac.)", 0.60, 0.40, 0.85, "Geometry",
+                      "Fraction of the sample that is open pore space. Lower porosity (denser "
+                      "grain packing) → far lower permeability."),
+                   _f("grain", "Grain size (frac.)", 0.035, 0.02, 0.07, "Geometry",
+                      "Radius of the packed grains as a fraction of the sample height."),
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_porous(p, pr, t)},
+    "Turing Patterns": {
+        "params": [{"name": "pattern", "label": "Pattern", "type": "choice", "group": "Geometry",
+                    "choices": ["Spots", "Stripes", "Maze", "Mitosis", "Coral", "Waves"],
+                    "default": "Spots",
+                    "help": "Each pattern is a different (feed, kill) regime of the Gray–Scott "
+                    "model — Pearson's classification of reaction–diffusion morphologies."},
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_reaction(p, pr, t)},
+    "Quantum Ripples": {
+        "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
+                    "choices": ["Tunnelling barrier", "Double slit", "Free spreading", "Harmonic well"],
+                    "default": "Tunnelling barrier",
+                    "help": "What the wavepacket meets: a thin barrier (tunnelling), a two-slit "
+                    "wall (interference), open space (spreading), or a parabolic well (sloshing)."},
+                   _when(_f("momentum", "Momentum  k₀", 360, 120, 700, "Physics",
+                            "Initial momentum of the packet — its speed toward the obstacle."),
+                         "scene", ["Tunnelling barrier", "Double slit", "Free spreading"]),
+                   _f("width", "Packet width", 0.06, 0.03, 0.12, "Physics",
+                      "Initial spatial spread of the Gaussian wavepacket (fraction of the box)."),
+                   _when(_f("barrier", "Barrier height  V₀", 320, 80, 800, "Physics",
+                            "Height of the potential wall. Higher → less tunnels through."),
+                         "scene", ["Tunnelling barrier", "Double slit"]),
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_quantum(p, pr, t)},
+    "Ink in Motion": {
+        "params": [_f("bands", "Dye bands", 6, 2, 14, "Geometry",
+                      "How many stripes of dye to start with before the turbulence stirs them."),
+                   _f("diffusion", "Dye diffusion", 1e-4, 0.0, 1e-3, "Physics",
+                      "Molecular diffusion of the dye — higher blurs the fine filaments sooner."),
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_mixing(p, pr, t)},
 }
 
 _LBM_EQ = r"$f_q(\mathbf{x}+\mathbf{c}_q,\,t{+}1)=f_q(\mathbf{x},t)-\dfrac{1}{\tau}\,(f_q-f_q^{\rm eq})$"
@@ -744,6 +890,64 @@ META = {
         "validation": "With viscosity switched off the scheme conserves kinetic energy to "
                        "≈ 1.5×10⁻⁷ over hundreds of steps — the hallmark of spectral accuracy.",
         "demo": "results/turbulence.gif"},
+    "Turing Patterns": {"method": "Reaction–Diffusion · Gray–Scott",
+        "blurb": "Two chemicals diffuse at different rates while one feeds on the other. From a "
+                 "nearly uniform start, that simple competition spontaneously organises into "
+                 "spots, stripes, mazes and self-replicating blobs — the mechanism Alan Turing "
+                 "proposed in 1952 for how a featureless embryo becomes a patterned animal. A "
+                 "small change in the feed/kill rates switches the whole morphology.",
+        "eq": r"$\partial_t U = D_u\nabla^2U - UV^2 + F(1-U),\ \ \partial_t V = D_v\nabla^2V + UV^2 - (F{+}k)V$",
+        "numerics": "Explicit time stepping of the two coupled reaction–diffusion equations on a "
+                    "periodic grid, with a 9-point isotropic Laplacian for the diffusion term. "
+                    "The (F, k) pair is taken from Pearson's classification to select each regime.",
+        "validation": "Reproduces Pearson's catalogue of Gray–Scott regimes — the same (F, k) "
+                       "values yield the published spot / stripe / maze / mitosis morphologies; "
+                       "the concentrations stay bounded in [0, 1] throughout.",
+        "demo": "results/gallery/rd_spots.gif"},
+    "Quantum Ripples": {"method": "Schrödinger · split-step Fourier",
+        "blurb": "A quantum particle isn't a dot but a wave of probability. Launch a wavepacket "
+                 "and watch it spread, tunnel through a wall it classically could not cross, "
+                 "interfere with itself through a double slit, or slosh coherently in a trap. "
+                 "The glow is |ψ|² — where the particle is likely to be found.",
+        "eq": r"$i\hbar\,\partial_t\psi = -\tfrac{\hbar^2}{2m}\nabla^2\psi + V(\mathbf{x})\,\psi$",
+        "numerics": "The time-dependent Schrödinger equation by the split-step Fourier method: "
+                    "a half-step potential phase kick, a full kinetic step applied as a diagonal "
+                    "multiply in Fourier space (FFT), then another half potential kick. The split "
+                    "is second-order accurate and exactly unitary; a soft absorbing border lets "
+                    "scattered waves leave without reflecting.",
+        "validation": "Because every step is unitary the total probability ∫|ψ|² is conserved to "
+                       "round-off (≈ 10⁻¹⁴ drift in the closed harmonic well) — shown live in the "
+                       "run info.",
+        "demo": "results/gallery/qm_barrier.gif"},
+    "Ink in Motion": {"method": "Chaotic mixing · spectral + passive scalar",
+        "blurb": "Drop bands of dye into a turbulent flow and watch them stretch and fold into "
+                 "ever-finer filaments — the route by which stirring mixes things long before "
+                 "molecular diffusion could. The same chaotic advection mixes cream into coffee, "
+                 "pollutants into the ocean, and plankton blooms across the sea surface.",
+        "eq": r"$\partial_t c + (\mathbf{u}\!\cdot\!\nabla)c = \kappa\nabla^2 c$",
+        "numerics": "The turbulent velocity comes from the same spectral vorticity solver; the "
+                    "dye is a passive scalar advected by it with periodic bilinear semi-Lagrangian "
+                    "transport (unconditionally stable) and a touch of spectral diffusion.",
+        "validation": "Semi-Lagrangian advection is monotone and conservative to interpolation "
+                       "error — the dye stays in [0, 1] and total dye is preserved as the "
+                       "filaments thin, the signature of stirring-dominated mixing.",
+        "demo": "results/gallery/mix_bands.gif"},
+    "Porous Flow": {"method": "Pore-scale Lattice-Boltzmann · Darcy",
+        "blurb": "Push fluid through a packed bed of grains and it threads a tortuous path "
+                 "between them. Averaged over the sample, the flow rate is simply proportional to "
+                 "the driving force — Darcy's law — and the constant of proportionality is the "
+                 "permeability k, the single number that says how easily a rock, soil or filter "
+                 "lets fluid through. Funoos resolves the pore-scale flow and measures k directly.",
+        "eq": r"$\langle\mathbf{u}\rangle = -\tfrac{k}{\mu}\nabla p$",
+        "numerics": "The same D2Q9 lattice-Boltzmann scheme, here in a periodic box driven by a "
+                    "constant body force (Guo forcing) through a random grain pack, in the "
+                    "viscous (Stokes) regime. Permeability is read off as k = ν⟨u⟩/g from the "
+                    "volume-averaged pore velocity ⟨u⟩ — exactly how digital-rock physics "
+                    "computes it.",
+        "validation": "The measured permeability tracks the Kozeny–Carman relation "
+                       "k ≈ φ³d²/180(1−φ)² across porosities, and rises monotonically with the "
+                       "void fraction φ — the expected pore-scale behaviour (see the Plots).",
+        "demo": "results/gallery/porous_phi60.gif"},
 }
 
 

@@ -52,6 +52,29 @@ class Spectral2D:
         return np.real(np.fft.ifft2(wh))
 
 
+def random_field(n, L=2 * np.pi, k0=14.0, seed=0):
+    """Random divergence-free vorticity with a peaked spectrum → decaying turbulence."""
+    rng = np.random.default_rng(seed)
+    k1 = np.fft.fftfreq(n, d=L / n) * 2 * np.pi
+    kx = k1[:, None]; ky = k1[None, :]; k = np.sqrt(kx ** 2 + ky ** 2)
+    amp = k / (1.0 + (k / k0) ** 4)
+    w = np.real(np.fft.ifft2(amp * np.exp(1j * rng.uniform(0, 2 * np.pi, (n, n)))))
+    w -= w.mean(); w /= (w.std() + 1e-12)
+    return np.fft.fft2(w)
+
+
+def advect_sl(c, u, v, dt, L):
+    """Periodic bilinear semi-Lagrangian advection of a passive scalar c by (u,v)."""
+    n = c.shape[0]; dx = L / n
+    ii, jj = np.meshgrid(np.arange(n), np.arange(n), indexing="ij")
+    X = (ii - dt * u / dx) % n; Y = (jj - dt * v / dx) % n
+    x0 = np.floor(X).astype(int) % n; y0 = np.floor(Y).astype(int) % n
+    x1 = (x0 + 1) % n; y1 = (y0 + 1) % n
+    fx = X - np.floor(X); fy = Y - np.floor(Y)
+    return (c[x0, y0] * (1 - fx) * (1 - fy) + c[x1, y0] * fx * (1 - fy)
+            + c[x0, y1] * (1 - fx) * fy + c[x1, y1] * fx * fy)
+
+
 def double_shear_layer(n, L=2 * np.pi, delta=0.05, amp=0.05):
     """Classic doubly-periodic shear-layer initial condition (rolls into billows)."""
     x = np.linspace(0, L, n, endpoint=False)
