@@ -218,23 +218,35 @@ class Result:
         import matplotlib.pyplot as plt
         Lx, Ly, vmax = self.hints["Lx"], self.hints["Ly"], self.hints["vmax"]
         hull = self.hints.get("hull")
+        # size markers to the particle spacing so the water reads as a continuous
+        # body, not sparse dots (the dp→px→points² conversion for this figure)
+        dp = self.hints.get("dp", 0.04); DPI = 110
+        px_per_unit = 6.4 * DPI / Lx
+        diam_pt = dp * px_per_unit / (DPI / 72.0)
+        PSIZE = float(np.clip((diam_pt * 1.35) ** 2, 5.0, 44.0))
         out = []
         for fi, d in enumerate(self.raw):
-            fig = plt.figure(figsize=(6.4, 6.4 * Ly / Lx), dpi=110)
+            fig = plt.figure(figsize=(6.4, 6.4 * Ly / Lx), dpi=DPI)
             ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(render.INK)
             fig.patch.set_facecolor(render.INK)
             sp = np.clip(d[:, 2] / vmax, 0, 1)
             if foam:
                 # deep water + whitewater on the fast (breaking/spray) particles
-                ax.scatter(d[:, 0], d[:, 1], c="#173a6b", s=7, edgecolors="none")
+                ax.scatter(d[:, 0], d[:, 1], c="#173a6b", s=PSIZE, edgecolors="none")
                 fast = sp > 0.45
                 if fast.any():
-                    ax.scatter(d[fast, 0], d[fast, 1], c="white", s=4.5,
+                    ax.scatter(d[fast, 0], d[fast, 1], c="white", s=PSIZE * 0.7,
                                alpha=np.clip(sp[fast], 0.3, 0.95), edgecolors="none")
             else:
-                ax.scatter(d[:, 0], d[:, 1], c=sp, cmap=cm, s=6, edgecolors="none")
+                # keep RESTING water clearly visible: floor the shade so v=0 is a
+                # legible blue, not the near-black bottom of the colormap (otherwise
+                # still water vanishes and only moving water shows — looks like it
+                # "appears from nothing"). Brightness still rises with speed.
+                shade = 0.34 + 0.66 * sp
+                ax.scatter(d[:, 0], d[:, 1], c=shade, cmap=cm, vmin=0.0, vmax=1.0,
+                           s=PSIZE, edgecolors="none")
             if hull is not None:
-                hp = hull[fi]; ax.scatter(hp[:, 0], hp[:, 1], c="#c79a5b", s=9, edgecolors="none")
+                hp = hull[fi]; ax.scatter(hp[:, 0], hp[:, 1], c="#c79a5b", s=PSIZE, edgecolors="none")
             ax.set_xlim(0, Lx); ax.set_ylim(0, Ly); ax.axis("off")
             fig.canvas.draw(); w, hh = fig.canvas.get_width_height()
             rgb = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(hh, w, 4)[..., :3].copy()
@@ -432,7 +444,7 @@ def _solve_dam(p, pr, tmp):
     subprocess.run(args, check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3) for i in idx]
-    hints = {"Lx": Lx, "Ly": Ly, "vmax": 1.2 * np.sqrt(2 * g * max(H, Ly * 0.5))}
+    hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": 1.2 * np.sqrt(2 * g * max(H, Ly * 0.5))}
     if sc == "ship":
         hints["hull"] = [np.fromfile(Path(tmp) / f"hull_{i:05d}.bin", dtype=np.float32).reshape(-1, 2)
                          for i in idx]
