@@ -571,7 +571,7 @@ def _solve_quantum(p, pr, tmp):
         info = f"harmonic well  {n}×{n} · norm conserved to {max(abs(x - 1) for x in norm):.0e}"
     else:                            # open: the absorbing border removes escaping probability
         info = f"{scene}  {n}×{n} · absorbing boundary"
-    return Result("quantum", prob, info, hints={"phase": phase})
+    return Result("quantum", prob, info, hints={"phase": phase, "norm": norm, "scene": scene})
 
 
 EXHIBITS = {

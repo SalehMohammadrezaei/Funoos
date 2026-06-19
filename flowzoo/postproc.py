@@ -214,10 +214,33 @@ def _porous(result):
     return [("Permeability (Darcy)", _rgb(fig, plt))]
 
 
+def _quantum(result):
+    norm = result.hints.get("norm")
+    if not norm:
+        return []
+    t = np.linspace(0, 1, len(norm))
+    closed = result.hints.get("scene") == "harmonic"
+    fig, ax, plt = _new_ax("time (normalised)", "total probability  ∫|ψ|²",
+                           "Probability conservation")
+    ax.plot(t, norm, color=_CYAN, lw=2.2)
+    ax.axhline(1.0, color=_MUTED, lw=0.8, ls="--")
+    if closed:
+        ax.set_ylim(0.999, 1.001)
+        ax.text(0.5, 0.5, f"closed system — unitary\ndrift {max(abs(x-1) for x in norm):.0e}",
+                transform=ax.transAxes, color=_GOOD, fontsize=10, ha="center", fontweight="bold")
+    else:
+        ax.set_ylim(0, 1.05)
+        ax.text(0.97, 0.9, "open system: probability\nleaves through the absorber",
+                transform=ax.transAxes, color=_MUTED, fontsize=9, ha="right", va="top")
+    return [("Probability conservation", _rgb(fig, plt))]
+
+
 def plots(result):
     """Return [(title, rgb ndarray), …] of diagnostics for this result."""
     try:
         k = result.kind
+        if k == "quantum":
+            return _quantum(result)
         if k == "lbm":
             return _porous(result) if result.hints.get("permeability") is not None else _wind_tunnel(result)
         if k == "spectral":
