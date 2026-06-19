@@ -58,12 +58,22 @@ int main(int argc,char**argv){
                 x.push_back(px); y.push_back(py); vx.push_back(0); vy.push_back(vyi);
                 (void)surf; rho.push_back(rho0); p.push_back(0); }   // start at rest, p=0
     };
+    // a round droplet (disk) — used by the drop scene so it actually looks like a drop
+    auto add_disk=[&](double cx,double cy,double R,double vyi){
+        for(double px=cx-R; px<=cx+R+1e-9; px+=dp)
+            for(double py=cy-R; py<=cy+R+1e-9; py+=dp){
+                double ddx=px-cx, ddy=py-cy;
+                if(ddx*ddx+ddy*ddy<=R*R){ x.push_back(px); y.push_back(py);
+                    vx.push_back(0); vy.push_back(vyi); rho.push_back(rho0); p.push_back(0); }
+            }
+    };
     // --- scene initial conditions ---
     if(sc=="dam"){ add_block(0,A.a,0,A.H,A.H); }
     else if(sc=="drop"){ double Hp=0.30*A.Ly; add_block(0,A.Lx,0,Hp,Hp);
-        double bw=A.a, bh=0.55*A.H, cx=A.Lx*0.5, by=A.dh*A.Ly;   // release height = dh
-        if(by+bh>A.Ly) by=A.Ly-bh;
-        add_block(cx-bw/2,cx+bw/2,by,by+bh,by+bh); }
+        double R=0.36*A.a, cx=A.Lx*0.5, cy=A.dh*A.Ly;       // release height = dh (disk centre)
+        if(cy+R>A.Ly-2*dp) cy=A.Ly-2*dp-R;                  // keep clear of the ceiling
+        if(cy-R<Hp+4*dp)   cy=Hp+4*dp+R;                    // and well above the pool
+        add_disk(cx,cy,R,0.0); }
     else if(sc=="slosh"){ double Hs=0.42*A.Ly; add_block(0,A.Lx,0,Hs,Hs); }
     else if(sc=="waves"||sc=="ship"){ double Ho=0.40*A.Ly; add_block(0,A.Lx,0,Ho,Ho); }
     // pour starts from an empty glass and fills via continuous emission

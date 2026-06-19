@@ -33,12 +33,19 @@ def _bin(d, name):
 
 
 def _ensure(b):
-    if Path(b).exists():
+    b = Path(b)
+    frozen = sys.platform.startswith("win") or getattr(sys, "frozen", False)
+    if frozen:
+        if not b.exists():
+            raise FileNotFoundError(f"solver not found: {b}. Build it first "
+                                    f"(see docs/windows_build.md).")
         return
-    if sys.platform.startswith("win") or getattr(sys, "frozen", False):
-        raise FileNotFoundError(f"solver not found: {b}. Build it first "
-                                f"(see docs/windows_build.md).")
-    subprocess.run(["make", "-C", str(Path(b).parent)], check=True, env=_ENV)
+    # dev (source) build: (re)compile if the binary is missing OR the source is newer,
+    # so running the app always picks up edited solver code — no stale binaries.
+    src = b.with_suffix(".cpp")
+    stale = b.exists() and src.exists() and src.stat().st_mtime > b.stat().st_mtime
+    if not b.exists() or stale:
+        subprocess.run(["make", "-C", str(b.parent)], check=True, env=_ENV)
 
 
 def _read_vel(d, i, nx, ny):
