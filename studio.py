@@ -132,55 +132,37 @@ class App:
         self.pages[name].pack(fill="both", expand=True)
         self.cur = name
         if name == "gallery":
-            self._select_scene(self.scene_key)
+            self.gdetail.pack_forget(); self.gbrowse.pack(fill="both", expand=True)
+            self._detail_on = False
         if name == "studio":
             self._build_params()
             self.preset_seed = {}                  # consumed on this build; don't re-impose on re-flow
 
     # ─────────────────────────  intro  ─────────────────────────
     def _intro(self):
+        self.iframes = []          # (no hero clip on the landing page)
         pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["intro"] = pg
         col = ctk.CTkFrame(pg, fg_color=BG); col.place(relx=0.5, rely=0.5, anchor="center")
-        # animated hero clip — the lantern's light
-        hero = ctk.CTkFrame(col, fg_color=CARD, corner_radius=22, border_width=1, border_color=LINE)
-        hero.pack(pady=(0, 14))
-        self.intro_demo = tk.Label(hero, bg=INKCV, bd=0); self.intro_demo.pack(padx=10, pady=10)
-        self.iframes = load_gif(ROOT / "results" / "gallery" / "spec_kh.gif", maxw=560) \
-            or load_gif(ROOT / engine.META["Wind Tunnel"]["demo"], maxw=560)
-        self.iidx = 0
-        if not self.iframes:
-            self.intro_demo.config(text="  Funoos  ", fg=MUTED, font=(F, 24), width=40, height=4)
-        # FUNOOS wordmark — FUN (blue) · OOS (navy), echoing the logo
-        t = ctk.CTkFrame(col, fg_color=BG); t.pack(pady=(2, 0))
-        ctk.CTkLabel(t, text="FUN", font=T_DISPLAY, text_color=CYAN).pack(side="left")
-        ctk.CTkLabel(t, text="OOS", font=T_DISPLAY, text_color=FG).pack(side="left")
-        ctk.CTkLabel(col, text="Where imagination becomes vision.", font=(F, 16, "bold"),
-                     text_color=GOLD).pack(pady=(4, 10))
-        # the couplet — Bidel Dehlavi (فانوس = the lantern of imagination)
-        couplet = ctk.CTkFrame(col, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
-        couplet.pack(pady=(0, 12))
-        ctk.CTkLabel(couplet, text="نگه شد شمعِ فانوسِ خیال از چشم‌پوشیدن",
-                     font=(F, 13), text_color=READ).pack(padx=26, pady=(14, 0))
-        ctk.CTkLabel(couplet, text="فنا، مشکل که از عاشق برد ذوقِ تماشا را",
-                     font=(F, 13), text_color=READ).pack(padx=26, pady=(2, 8))
-        ctk.CTkLabel(couplet, text="“When the eyes close, vision itself becomes the candle inside\n"
-                     "imagination’s lantern — even annihilation can hardly take from the\n"
-                     "lover the desire to visualize.”",
-                     font=(F, 11), text_color=MUTED, justify="center").pack(padx=26, pady=(0, 2))
-        ctk.CTkLabel(couplet, text="— Bidel Dehlavi", font=(F, 10, "bold"),
-                     text_color=DIM).pack(padx=26, pady=(0, 12))
-        ctk.CTkLabel(col, text="A visual exhibition of worlds in motion — flows illuminated through simulation.",
-                     font=(F, 12), text_color=MUTED).pack(pady=(0, 12))
-        chips = ctk.CTkFrame(col, fg_color=BG); chips.pack(pady=(0, 18))
+        # FUNOOS wordmark — big; FUN (blue) · OOS (navy), echoing the logo
+        t = ctk.CTkFrame(col, fg_color=BG); t.pack()
+        ctk.CTkLabel(t, text="FUN", font=(F, 104, "bold"), text_color=CYAN).pack(side="left")
+        ctk.CTkLabel(t, text="OOS", font=(F, 104, "bold"), text_color=FG).pack(side="left")
+        ctk.CTkLabel(col, text="Where imagination becomes vision.", font=(F, 26, "bold"),
+                     text_color=CYAN).pack(pady=(6, 18))
+        ctk.CTkLabel(col, text="A visual exhibition of worlds in motion —\nflows illuminated through simulation.",
+                     font=(F, 17), text_color=READ, justify="center").pack(pady=(0, 26))
+        chips = ctk.CTkFrame(col, fg_color=BG); chips.pack(pady=(0, 30))
         for c in ["Lattice-Boltzmann", "Navier–Stokes", "Compressible Euler", "SPH", "Spectral"]:
-            ctk.CTkLabel(chips, text=f"  {c}  ", font=T_SMALL, text_color=READ, fg_color=CARD2,
-                         corner_radius=20, height=30).pack(side="left", padx=4)
-        cta = ctk.CTkButton(col, text="Enter the gallery   →", font=(F, 15, "bold"), width=260, height=50,
-                            corner_radius=25, fg_color=LIME, hover_color="#CDEA4D", text_color=ON_LIME,
-                            command=lambda: self.show("gallery")); cta.pack()
-        ctk.CTkFrame(col, fg_color=LINE, height=1, width=320).pack(pady=(26, 12))
-        ctk.CTkLabel(col, text="created by   Saleh Mohammadrezaei   ·   salehmrezaee@gmail.com",
-                     font=T_SMALL, text_color=MUTED).pack()
+            ctk.CTkLabel(chips, text=f"  {c}  ", font=(F, 13), text_color=READ, fg_color=CARD2,
+                         corner_radius=20, height=34).pack(side="left", padx=5)
+        ctk.CTkButton(col, text="Enter the gallery   →", font=(F, 17, "bold"), width=300, height=58,
+                      corner_radius=29, fg_color=LIME, hover_color="#CDEA4D", text_color=ON_LIME,
+                      command=lambda: self.show("gallery")).pack()
+        ctk.CTkFrame(col, fg_color=LINE, height=1, width=360).pack(pady=(40, 16))
+        kicker(col, "created by", MUTED).pack()
+        ctk.CTkLabel(col, text="Saleh Mohammadrezaei", font=(F, 24, "bold"),
+                     text_color=FG).pack(pady=(6, 2))
+        ctk.CTkLabel(col, text="salehmrezaee@gmail.com", font=(F, 15), text_color=CYAN).pack()
 
     # ─────────────────────────  gallery  ─────────────────────────
     def _topbar(self, pg, back_label, back_cmd, title):
@@ -193,36 +175,75 @@ class App:
 
     def _gallery(self):
         pg = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0); self.pages["gallery"] = pg
-        bar = self._topbar(pg, "‹ Home", lambda: self.show("intro"), "")
+        self.gbrowse = ctk.CTkFrame(pg, fg_color=BG)
+        self.gdetail = ctk.CTkFrame(pg, fg_color=BG)
+        self._detail_on = False; self._thumbs = {}
+        self._build_browse()
+        self._build_detail()
+
+    # ---- browse: a card grid of every scene, grouped by method ----
+    def _build_browse(self):
+        bar = self._topbar(self.gbrowse, "‹ Home", lambda: self.show("intro"), "")
         ctk.CTkLabel(bar, text="The Gallery", font=T_H2, text_color=FG).pack(side="left", padx=4)
-        ctk.CTkLabel(bar, text="   browse by method, then scene", font=T_SMALL,
+        ctk.CTkLabel(bar, text="   sixteen scenes · five solvers", font=T_SMALL,
                      text_color=MUTED).pack(side="left", padx=2)
+        scroll = ctk.CTkScrollableFrame(self.gbrowse, fg_color=BG)
+        scroll.pack(fill="both", expand=True, padx=26, pady=(4, 16))
+        NCOL = 3
+        for mi, (method, scenes) in enumerate(catalog.by_method().items()):
+            head = ctk.CTkFrame(scroll, fg_color=BG); head.pack(fill="x", pady=(20 if mi else 8, 8))
+            ctk.CTkFrame(head, fg_color=CYAN, width=4, height=24, corner_radius=2).pack(side="left", padx=(2, 11))
+            ctk.CTkLabel(head, text=method, font=(F, 17, "bold"), text_color=FG).pack(side="left")
+            ctk.CTkLabel(head, text=f"    {len(scenes)} scene{'s' if len(scenes) > 1 else ''}",
+                         font=T_SMALL, text_color=DIM).pack(side="left")
+            grid = ctk.CTkFrame(scroll, fg_color=BG); grid.pack(fill="x")
+            for c in range(NCOL):
+                grid.grid_columnconfigure(c, weight=1, uniform="scenecol")
+            for i, s in enumerate(scenes):
+                self._scene_card(grid, s, i // NCOL, i % NCOL)
 
-        body = ctk.CTkFrame(pg, fg_color=BG); body.pack(fill="both", expand=True, padx=20, pady=18)
+    def _scene_card(self, parent, s, r, c):
+        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=16, border_width=1, border_color=LINE)
+        card.grid(row=r, column=c, padx=9, pady=9, sticky="nsew")
+        th = tk.Label(card, bg=INKCV, bd=0); th.pack(padx=10, pady=(10, 8))
+        img = self._thumb(s["key"])
+        if img:
+            th.config(image=img); self._thumbs[s["key"]] = img
+        else:
+            th.config(text="rendering…", fg=MUTED, font=(F, 10), width=42, height=9)
+        ctk.CTkLabel(card, text=s["name"], font=(F, 15, "bold"), text_color=FG, anchor="w").pack(fill="x", padx=15)
+        snip = s["blurb"][:92].rsplit(" ", 1)[0] + "…"
+        ctk.CTkLabel(card, text=snip, font=T_SMALL, text_color=MUTED, anchor="w",
+                     justify="left", wraplength=296).pack(fill="x", padx=15, pady=(3, 14))
+        bind_click(card, lambda k=s["key"]: self._open_detail(k))
 
-        # left: method → scene navigation
-        nav = ctk.CTkScrollableFrame(body, fg_color=SURF, width=296, corner_radius=18)
-        nav.pack(side="left", fill="y")
-        self.scene_cards = {}
-        for method, scenes in catalog.by_method().items():
-            kicker(nav, method, GOLD).pack(fill="x", padx=16, pady=(16, 4))
-            for s in scenes:
-                card = ctk.CTkFrame(nav, fg_color=CARD, corner_radius=12, border_width=1, border_color=CARD)
-                card.pack(fill="x", padx=8, pady=3)
-                ctk.CTkLabel(card, text=s["name"], font=(F, 12, "bold"), text_color=FG,
-                             anchor="w").pack(fill="x", padx=13, pady=8)
-                bind_click(card, lambda k=s["key"]: self._select_scene(k))
-                self._bind_hover(card, s["key"])
-                self.scene_cards[s["key"]] = card
+        def on(_=None): card.configure(border_color=CYAN, fg_color=CARD2)
+        def off(_=None): card.configure(border_color=LINE, fg_color=CARD)
+        for w in [card] + list(card.winfo_children()):
+            w.bind("<Enter>", on); w.bind("<Leave>", off)
 
-        # right: scene detail
-        det = ctk.CTkFrame(body, fg_color=BG); det.pack(side="left", fill="both", expand=True, padx=(18, 0))
+    def _thumb(self, key, w=300, h=165):
+        try:
+            im = Image.open(ROOT / "results" / "gallery" / (key + ".gif"))
+            n = getattr(im, "n_frames", 1); im.seek(int(0.7 * max(0, n - 1)))   # a developed frame
+            fr = im.convert("RGB")
+            fr = fr.crop((0, 0, int(fr.width * 0.80), fr.height))               # drop the side colorbar
+            sc = max(w / fr.width, h / fr.height)
+            fr = fr.resize((max(1, int(fr.width * sc)), max(1, int(fr.height * sc))))
+            x = (fr.width - w) // 2; y = (fr.height - h) // 2
+            return ImageTk.PhotoImage(fr.crop((x, y, x + w, y + h)))
+        except Exception:
+            return None
+
+    # ---- detail: one scene, full write-up + animated clip ----
+    def _build_detail(self):
+        self._topbar(self.gdetail, "‹ Gallery", lambda: self.show("gallery"), "")
+        det = ctk.CTkFrame(self.gdetail, fg_color=BG); det.pack(fill="both", expand=True, padx=24, pady=16)
         self.g_method = kicker(det, "", GOLD); self.g_method.pack(fill="x")
         self.g_title = ctk.CTkLabel(det, text="", font=T_H1, text_color=FG, anchor="w")
-        self.g_title.pack(fill="x", pady=(2, 6)); rule(det).pack(anchor="w", pady=(0, 8))
-
+        self.g_title.pack(fill="x", pady=(2, 6)); rule(det).pack(anchor="w", pady=(0, 10))
         split = ctk.CTkFrame(det, fg_color=BG); split.pack(fill="both", expand=True)
-        media = ctk.CTkFrame(split, fg_color=BG, width=580); media.pack(side="right", fill="y", padx=(18, 0))
+        media = ctk.CTkFrame(split, fg_color=BG, width=600); media.pack(side="right", fill="y", padx=(20, 0))
         media.pack_propagate(False)
         mc = ctk.CTkFrame(media, fg_color=BG); mc.pack(expand=True)
         demo_card = ctk.CTkFrame(mc, fg_color=CARD, corner_radius=18, border_width=1, border_color=LINE)
@@ -230,36 +251,21 @@ class App:
         self.g_demo = tk.Label(demo_card, bg=INKCV, bd=0); self.g_demo.pack(padx=12, pady=12)
         self.g_caption = ctk.CTkLabel(mc, text="", font=T_CAP, text_color=DIM); self.g_caption.pack(pady=(8, 0))
         ctk.CTkButton(mc, text="Open in Studio   →", font=(F, 15, "bold"), height=52, corner_radius=16,
-                      fg_color=CYAN, hover_color=CYAN_D, text_color=ONACC,
+                      fg_color=LIME, hover_color="#CDEA4D", text_color=ON_LIME,
                       command=self._open_in_studio).pack(fill="x", pady=(14, 0))
         self.read = ctk.CTkScrollableFrame(split, fg_color=SURF, corner_radius=18)
         self.read.pack(side="left", fill="both", expand=True)
-
-    def _bind_hover(self, card, key):
-        # cards lift (pale-blue fill + accent border) as the pointer floats over them
-        def on(_=None):
-            if key != self.scene_key:
-                card.configure(fg_color=CARD2, border_color=CYAN)
-
-        def off(_=None):
-            if key != self.scene_key:
-                card.configure(fg_color=CARD, border_color=CARD)
-        for w in [card] + list(card.winfo_children()):
-            w.bind("<Enter>", on); w.bind("<Leave>", off)
 
     def _section(self, header, body, color=CYAN):
         kicker(self.read, header, color).pack(fill="x", pady=(16, 4), padx=16)
         ctk.CTkLabel(self.read, text=body, font=T_BODY, text_color=READ, justify="left",
                      anchor="w", wraplength=600).pack(fill="x", padx=16)
 
-    def _select_scene(self, key):
+    def _open_detail(self, key):
         s = catalog.scene(key)
         if not s:
             return
         self.scene_key = key; self.sel = s["exhibit"]
-        for k, c in self.scene_cards.items():
-            on = k == key
-            c.configure(fg_color=CARD2 if on else CARD, border_color=CYAN if on else CARD)
         m = engine.META.get(s["exhibit"], {}); d = content.DETAIL.get(s["exhibit"], {})
         self.g_method.configure(text="  ".join(s["method"].upper()))
         self.g_title.configure(text=s["name"])
@@ -270,8 +276,8 @@ class App:
         kicker(self.read, "governing equation", CYAN).pack(fill="x", pady=(18, 6), padx=16)
         try:
             im = Image.open(ROOT / "docs" / "eq" / (slug(s["exhibit"]) + ".png"))
-            w = min(600, im.width); h = int(im.height * w / im.width)
-            self._eqimg = ctk.CTkImage(light_image=im, dark_image=im, size=(w, h))
+            eh = 40; ew = int(im.width * eh / im.height)                # size to ~heading height
+            self._eqimg = ctk.CTkImage(light_image=im, dark_image=im, size=(ew, eh))
             ctk.CTkLabel(self.read, image=self._eqimg, text="").pack(anchor="w", padx=16)
         except Exception:
             pass
@@ -280,16 +286,15 @@ class App:
                          justify="left", anchor="w", wraplength=600).pack(fill="x", padx=16, pady=(8, 0))
         self._section("how it's solved", m.get("numerics", ""))
         self._section("validation", "✓  " + m.get("validation", ""), color=GOOD)
-        ctk.CTkLabel(self.read, text="", font=T_CAP).pack(pady=4)        # bottom breathing room
-
+        ctk.CTkLabel(self.read, text="", font=T_CAP).pack(pady=4)
         self.g_caption.configure(text=f"{s['exhibit']} · {m.get('method', '')}")
-        self.gframes = load_gif(ROOT / "results" / "gallery" / (key + ".gif"), maxw=540)
-        if not self.gframes:                                            # fall back to stock demo
-            self.gframes = load_gif(ROOT / m.get("demo", ""), maxw=540)
+        self.gframes = load_gif(ROOT / "results" / "gallery" / (key + ".gif"), maxw=560) \
+            or load_gif(ROOT / m.get("demo", ""), maxw=560)
         self.gidx = 0
         if not self.gframes:
             self.g_demo.config(image="", text="\n  clip rendering —\n  run  render_gallery.py\n",
                                fg=MUTED, font=(F, 11), width=58, height=14)
+        self.gbrowse.pack_forget(); self.gdetail.pack(fill="both", expand=True); self._detail_on = True
 
     def _open_in_studio(self):
         s = catalog.scene(self.scene_key)
@@ -300,7 +305,7 @@ class App:
         self.show("studio")
 
     def _tick_gallery(self):
-        if self.cur == "gallery" and self.gframes:
+        if self.cur == "gallery" and self._detail_on and self.gframes:
             self.g_demo.config(image=self.gframes[self.gidx % len(self.gframes)]); self.gidx += 1
         self.root.after(45, self._tick_gallery)
 
