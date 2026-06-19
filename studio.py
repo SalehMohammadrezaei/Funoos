@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
 sys.path.insert(0, str(ROOT))
-from flowzoo import engine, render, content
+from flowzoo import engine, render, content, postproc
 
 try:
     import tkinter as tk
@@ -116,6 +116,7 @@ class App:
         self.result = None; self.view = tk.StringVar(); self.cmap = tk.StringVar()
         self.viewbtns = {}; self.widgets = {}; self.cur = ""; self.viewcache = {}
         self.iframes, self.iidx = [], 0
+        self.diag_on = False; self._scrub_guard = False; self._plotimgs = []
         self.pages = {}
         self._intro(); self._gallery(); self._studio()
         self.show("intro")
@@ -280,9 +281,6 @@ class App:
         self.pscroll.pack(fill="both", expand=True, padx=8, pady=8)
 
         bot = ctk.CTkFrame(side, fg_color=SURF); bot.pack(fill="x", padx=18, pady=(0, 16))
-        ctk.CTkLabel(bot, text="Playback FPS", text_color=MUTED, font=T_CAP, anchor="w").pack(fill="x")
-        ctk.CTkSlider(bot, from_=8, to=40, variable=self.fps, progress_color=CYAN, button_color=CYAN,
-                      button_hover_color=CYAN_D).pack(fill="x", pady=(2, 10))
         self.run_btn = ctk.CTkButton(bot, text="▶   Run simulation", font=(F, 14, "bold"), height=50,
                                      corner_radius=14, fg_color=CYAN, hover_color=CYAN_D, text_color=ONACC,
                                      command=self.run); self.run_btn.pack(fill="x")
@@ -297,11 +295,102 @@ class App:
 
         prev = ctk.CTkFrame(body, fg_color=BG); prev.pack(side="left", fill="both", expand=True, padx=(20, 0))
         self.viewbar = ctk.CTkFrame(prev, fg_color=BG); self.viewbar.pack(fill="x", pady=(0, 12))
-        framecard = ctk.CTkFrame(prev, fg_color=CARD, corner_radius=18, border_width=1, border_color=LINE)
-        framecard.pack(fill="both", expand=True)
-        self.canvas = tk.Label(framecard, bg=INKCV, fg=MUTED, font=(F, 15),
+        # stage holds either the animation canvas or the diagnostics panel
+        self.stage = ctk.CTkFrame(prev, fg_color=BG); self.stage.pack(fill="both", expand=True)
+        self.framecard = ctk.CTkFrame(self.stage, fg_color=CARD, corner_radius=18, border_width=1, border_color=LINE)
+        self.framecard.pack(fill="both", expand=True)
+        self.canvas = tk.Label(self.framecard, bg=INKCV, fg=MUTED, font=(F, 15),
                                text="Set parameters   ›   Run ▶\nthen switch views live")
         self.canvas.pack(fill="both", expand=True, padx=12, pady=12)
+        self.plotscroll = ctk.CTkScrollableFrame(self.stage, fg_color=SURF, corner_radius=18)  # diagnostics (hidden until requested)
+        self._build_transport(prev)
+
+    def _build_transport(self, parent):
+        tb = ctk.CTkFrame(parent, fg_color=SURF, corner_radius=14, height=58); tb.pack(fill="x", pady=(12, 0))
+        tb.pack_propagate(False)
+
+        def btn(txt, cmd, w=40):
+            return ctk.CTkButton(tb, text=txt, width=w, height=34, corner_radius=10, fg_color=CARD2,
+                                 hover_color=CYAN, text_color=FG, font=(F, 13, "bold"), command=cmd)
+        btn("⏮", self._to_start).pack(side="left", padx=(12, 3), pady=12)
+        btn("◀", lambda: self._step(-1)).pack(side="left", padx=3)
+        self.tplay = btn("▶", self._toggle_play, 46); self.tplay.pack(side="left", padx=3)
+        btn("▶▶", lambda: self._step(1)).pack(side="left", padx=3)
+        self.scrubvar = tk.DoubleVar(value=0)
+        self.scrub = ctk.CTkSlider(tb, from_=0, to=1, variable=self.scrubvar, progress_color=CYAN,
+                                   button_color=CYAN, button_hover_color=CYAN_D, command=self._on_scrub)
+        self.scrub.pack(side="left", fill="x", expand=True, padx=10)
+        self.fcount = ctk.CTkLabel(tb, text="—", text_color=MUTED, font=T_CAP, width=58); self.fcount.pack(side="left")
+        ctk.CTkLabel(tb, text="speed", text_color=MUTED, font=T_CAP).pack(side="left", padx=(8, 2))
+        btn("–", lambda: self._speed(-3), 30).pack(side="left", padx=2)
+        self.spdlbl = ctk.CTkLabel(tb, text=str(self.fps.get()), text_color=FG, font=T_SMALL, width=26)
+        self.spdlbl.pack(side="left")
+        btn("+", lambda: self._speed(3), 30).pack(side="left", padx=(2, 12))
+
+    def _show_frame(self):
+        if not self.frames:
+            return
+        arr = self.frames[self.pidx % len(self.frames)]
+        cw, ch = max(self.canvas.winfo_width(), 100), max(self.canvas.winfo_height(), 100)
+        img = Image.fromarray(arr); sc = min(cw / img.width, ch / img.height)
+        img = img.resize((max(1, int(img.width * sc)), max(1, int(img.height * sc))))
+        self._photo = ImageTk.PhotoImage(img); self.canvas.config(image=self._photo, text="")
+
+    def _to_start(self):
+        self.playing = False; self.tplay.configure(text="▶"); self.pidx = 0; self._show_frame()
+
+    def _step(self, d):
+        if not self.frames:
+            return
+        self.playing = False; self.tplay.configure(text="▶")
+        self.pidx = (self.pidx + d) % len(self.frames); self._show_frame()
+
+    def _on_scrub(self, _=None):
+        if self._scrub_guard or not self.frames:
+            return
+        self.playing = False; self.tplay.configure(text="▶")
+        self.pidx = int(round(self.scrubvar.get() * (len(self.frames) - 1))); self._show_frame()
+
+    def _speed(self, d):
+        self.fps.set(max(2, min(60, self.fps.get() + d))); self.spdlbl.configure(text=str(self.fps.get()))
+
+    # ---- diagnostics panel ----
+    def _show_anim(self):
+        self.plotscroll.pack_forget(); self.framecard.pack(fill="both", expand=True); self.diag_on = False
+        if hasattr(self, "diagbtn"):
+            self.diagbtn.configure(text="📊  Plots")
+
+    def _toggle_diag(self):
+        if self.diag_on:
+            self._show_anim(); return
+        if not self.result or self.busy:
+            return
+        self.busy = True; self.prog.pack(fill="x", pady=(10, 0)); self.prog.start()
+        self.status.configure(text="⏳ computing diagnostics…", text_color=MUTED)
+        res = self.result
+
+        def work():
+            try:
+                self.q.put(("plots", postproc.plots(res)))
+            except Exception as ex:  # pragma: no cover
+                self.q.put(("error", str(ex)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_plots(self, plots):
+        for w in self.plotscroll.winfo_children():
+            w.destroy()
+        self._plotimgs = []
+        if not plots:
+            ctk.CTkLabel(self.plotscroll, text="No diagnostics available for this case.",
+                         text_color=MUTED, font=T_BODY).pack(pady=30)
+        for title, arr in plots:
+            kicker(self.plotscroll, title, CYAN).pack(fill="x", padx=16, pady=(16, 4))
+            im = Image.fromarray(arr)
+            ci = ctk.CTkImage(light_image=im, dark_image=im, size=(im.width, im.height))
+            self._plotimgs.append(ci)
+            ctk.CTkLabel(self.plotscroll, image=ci, text="").pack(padx=16, pady=(0, 4))
+        self.framecard.pack_forget(); self.plotscroll.pack(fill="both", expand=True)
+        self.diag_on = True; self.diagbtn.configure(text="▶  Animation")
 
     def _pick_exhibit(self, name):
         self.sel = name; self._build_params(); self.result = None; self.viewcache = {}
@@ -425,14 +514,14 @@ class App:
                           height=34, font=T_SMALL, fg_color=CARD, button_color=CARD2,
                           button_hover_color=CYAN, dropdown_fg_color=CARD,
                           command=lambda *_: self._recolor()).pack(side="left")
-        self.playbtn = ctk.CTkButton(self.viewbar, text="⏸  Pause", width=96, height=34, corner_radius=12,
-                                     font=(F, 11, "bold"), fg_color=CARD2, hover_color="#2c3856",
-                                     command=self._toggle_play); self.playbtn.pack(side="right")
+        self.diagbtn = ctk.CTkButton(self.viewbar, text="📊  Plots", width=120, height=34, corner_radius=12,
+                                     font=(F, 11, "bold"), fg_color=CARD2, hover_color=CYAN, text_color=FG,
+                                     command=self._toggle_diag); self.diagbtn.pack(side="right")
 
     def _change_view(self, v):
         self.view.set(v)
         if v in self.viewcache:
-            self.frames = self.viewcache[v]; self.pidx = 0; self.playing = True
+            self.frames = self.viewcache[v]; self.pidx = 0; self.playing = True; self._show_anim()
         elif self.result and not self.busy:          # render this view on demand (e.g. Streamlines)
             self.busy = True; self.run_btn.configure(state="disabled")
             self.prog.pack(fill="x", pady=(10, 0)); self.prog.start()
@@ -448,7 +537,8 @@ class App:
 
     def _toggle_play(self):
         self.playing = not self.playing
-        self.playbtn.configure(text="⏸  Pause" if self.playing else "▶  Play")
+        if hasattr(self, "tplay"):
+            self.tplay.configure(text="⏸" if self.playing else "▶")
 
     def _recolor(self):
         if not self.result or self.busy:
@@ -487,7 +577,9 @@ class App:
                         self.seg.set(view)
                     self.frames = cache[view]
                     self.pidx, self.playing, self.busy = 0, True, False
-                    self.playbtn.configure(text="⏸  Pause")
+                    self._show_anim()
+                    if hasattr(self, "tplay"):
+                        self.tplay.configure(text="⏸")
                     self.status.configure(text=f"✓ {info} — views switch instantly.", text_color=GOOD)
                     self.run_btn.configure(state="normal", text="▶   Run simulation")
                     self.prog.stop(); self.prog.pack_forget()
@@ -498,6 +590,10 @@ class App:
                     self.busy = False; self.run_btn.configure(state="normal", text="▶   Run simulation")
                     self.prog.stop(); self.prog.pack_forget()
                     self.status.configure(text=f"✓ {v} ready.", text_color=GOOD)
+                elif kind == "plots":
+                    self._render_plots(payload)
+                    self.busy = False; self.prog.stop(); self.prog.pack_forget()
+                    self.status.configure(text="✓ diagnostics ready.", text_color=GOOD)
                 elif kind == "error":
                     self.busy = False; self.status.configure(text=f"⚠ {payload}", text_color=WARN)
                     self.run_btn.configure(state="normal", text="▶   Run simulation")
@@ -507,13 +603,14 @@ class App:
         self.root.after(80, self._poll)
 
     def _tick_studio(self):
-        if self.cur == "studio" and self.playing and self.frames:
-            arr = self.frames[self.pidx % len(self.frames)]
-            cw, ch = max(self.canvas.winfo_width(), 100), max(self.canvas.winfo_height(), 100)
-            img = Image.fromarray(arr); sc = min(cw / img.width, ch / img.height)
-            img = img.resize((max(1, int(img.width * sc)), max(1, int(img.height * sc))))
-            self._photo = ImageTk.PhotoImage(img); self.canvas.config(image=self._photo, text="")
-            self.pidx += 1
+        if self.cur == "studio" and self.frames and not self.diag_on:
+            if self.playing:
+                self.pidx = (self.pidx + 1) % len(self.frames)
+                self._show_frame()
+            n = len(self.frames); cur = self.pidx % n
+            self.fcount.configure(text=f"{cur + 1}/{n}")
+            self._scrub_guard = True                       # move the scrubber without firing its command
+            self.scrubvar.set(cur / max(1, n - 1)); self._scrub_guard = False
         self.root.after(int(1000 / max(1, self.fps.get())), self._tick_studio)
 
     def save(self, kind):
