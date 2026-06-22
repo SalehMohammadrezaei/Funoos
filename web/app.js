@@ -29,20 +29,20 @@ async function buildGallery(){
                 el("div", "count", `${g.scenes.length} scene${g.scenes.length > 1 ? "s" : ""}`));
     root.append(head);
     const grid = el("div", "grid");
-    for (const s of g.scenes) grid.append(sceneCard(s));
+    g.scenes.forEach((s, i) => grid.append(sceneCard(s, i === 0)));   // first = wide hero
     root.append(grid);
   }
 }
-function sceneCard(s){
-  const card = el("div", "card");
+function sceneCard(s, feat){
+  const card = el("div", "card" + (feat ? " feat" : ""));
   const clip = el("div", "clip");
   if (s.clip){
     const v = el("video"); v.src = s.clip; v.autoplay = v.loop = v.muted = true;
     v.playsInline = true; clip.append(v);
   }
-  const meta = el("div", "meta");
-  meta.append(el("div", "nm", s.name), el("div", "bl", s.blurb));
-  card.append(clip, meta);
+  const ov = el("div", "overlay");
+  ov.append(el("div", "nm", s.name), el("div", "bl", s.blurb));
+  card.append(clip, ov, el("div", "play", "▶"));
   card.onclick = () => openDetail(s.key);
   return card;
 }

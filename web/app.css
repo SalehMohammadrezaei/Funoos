@@ -93,18 +93,29 @@ h2{font-size:17px;font-weight:700}
 .method-head .bar{width:4px;height:24px;border-radius:3px;background:linear-gradient(var(--blue-br),var(--blue))}
 .method-head .name{font-size:18px;font-weight:700}
 .method-head .count{color:var(--dim);font-size:13px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
-.card{border-radius:var(--r);overflow:hidden;cursor:pointer;border:1px solid var(--line);
-  background:var(--glass);box-shadow:var(--shadow);transition:transform .28s cubic-bezier(.2,.7,.2,1),box-shadow .28s,border-color .28s;will-change:transform}
-.card:hover{transform:translateY(-6px) scale(1.035);border-color:rgba(110,150,255,.6);
-  box-shadow:0 22px 60px rgba(20,60,140,.5)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;grid-auto-flow:dense}
+.card{position:relative;border-radius:var(--r);overflow:hidden;cursor:pointer;border:1px solid var(--line);
+  background:var(--glass);box-shadow:var(--shadow);
+  transition:transform .3s cubic-bezier(.2,.7,.2,1),box-shadow .3s,border-color .3s;will-change:transform}
+.card:hover{transform:translateY(-6px) scale(1.02);border-color:rgba(110,150,255,.65);
+  box-shadow:0 24px 64px rgba(20,60,140,.55)}
+.card.feat{grid-column:span 2}                     /* a wide hero card opens each method */
 .card .clip{position:relative;aspect-ratio:16/9;background:#06101f;overflow:hidden}
-.card .clip video{width:100%;height:100%;object-fit:contain;display:block}
-.card .clip::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 60%,rgba(6,12,28,.85));pointer-events:none}
-.card .meta{padding:13px 16px 16px}
-.card .meta .nm{font-size:15.5px;font-weight:700}
-.card .meta .bl{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.45;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card.feat .clip{aspect-ratio:2.4/1}
+.card .clip video{width:100%;height:100%;object-fit:contain;display:block;
+  transition:transform .4s ease}
+.card:hover .clip video{transform:scale(1.05)}
+.card .overlay{position:absolute;left:0;right:0;bottom:0;padding:14px 16px 13px;pointer-events:none;
+  background:linear-gradient(transparent,rgba(6,12,26,.55) 45%,rgba(6,12,26,.92))}
+.card .overlay .nm{font-size:15px;font-weight:700;color:#fff;letter-spacing:-.01em}
+.card.feat .overlay .nm{font-size:19px}
+.card .overlay .bl{font-size:12px;color:#aebbd6;margin-top:4px;line-height:1.42;max-height:0;opacity:0;
+  overflow:hidden;transition:max-height .3s ease,opacity .3s ease}
+.card:hover .overlay .bl{max-height:46px;opacity:1}
+.card .play{position:absolute;top:12px;right:12px;width:38px;height:38px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;opacity:0;transform:scale(.8);
+  background:rgba(12,24,46,.55);border:1px solid var(--glass-hi);backdrop-filter:blur(8px);transition:.25s}
+.card:hover .play{opacity:1;transform:scale(1)}
 
 /* ───── detail ───── */
 #detail .body{display:grid;grid-template-columns:1.05fr .95fr;gap:26px;padding:6px 30px 36px;height:calc(100% - 70px)}
