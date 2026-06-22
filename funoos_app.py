@@ -63,8 +63,10 @@ def _stats(res, exhibit):
     meth = engine.META.get(exhibit, {}).get("method", "").split("·")[0].strip()
     out = []
     if res.kind == "porous":
-        out.append({"l": "permeability k", "v": f"{h.get('permeability', 0):.2f}", "u": "cells²", "accent": True})
-        out.append({"l": "porosity φ", "v": f"{h.get('porosity', 0):.2f}"})
+        k_val = h.get("permeability", 0); phi = h.get("porosity", 0)
+        out.append({"l": "permeability k", "v": f"{k_val:.2f}", "u": "cells²", "accent": True,
+                    "frac": float(min(1.0, k_val / 20.0))})
+        out.append({"l": "porosity φ", "v": f"{phi:.2f}", "frac": float(min(1.0, max(0.0, phi)))})
     out.append({"l": "frames", "v": str(len(res.raw))})
     out.append({"l": "views", "v": str(len(res.views))})
     out.append({"l": "method", "v": meth})

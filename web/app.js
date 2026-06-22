@@ -20,6 +20,12 @@ function revealAll(root) {
   root.querySelectorAll(".reveal").forEach((e, i) => { e.classList.remove("in"); setTimeout(() => e.classList.add("in"), 80 + i * 90); });
 }
 
+/* cursor spotlight — glows through the glass */
+window.addEventListener("pointermove", e => {
+  const r = document.documentElement.style;
+  r.setProperty("--mx", e.clientX + "px"); r.setProperty("--my", e.clientY + "px");
+});
+
 /* boot */
 function boot() { buildGallery(); show("intro"); }
 if (window.pywebview && window.pywebview.api) boot();
@@ -37,39 +43,51 @@ function runCounters() {
 }
 
 /* ───────── gallery: each method is a row that is itself a coverflow ───────── */
+const SHORT = {
+  "Lattice–Boltzmann": "LBM", "Incompressible Navier–Stokes": "Navier–Stokes",
+  "Compressible Euler": "Euler", "Smoothed-Particle Hydrodynamics": "SPH",
+  "Pseudo-spectral": "Spectral", "Reaction–Diffusion": "Reaction"
+};
+const ACC = {
+  "Lattice–Boltzmann": "#5b86f0", "Incompressible Navier–Stokes": "#e0a23a",
+  "Compressible Euler": "#e35d6a", "Smoothed-Particle Hydrodynamics": "#56c5e8",
+  "Pseudo-spectral": "#9b8cff", "Reaction–Diffusion": "#9be25a"
+};
 const _rows = [];
-// pause whole rows that scroll off-screen vertically
-const _rowio = new IntersectionObserver(es => es.forEach(e => {
-  e.target._on = e.isIntersecting; layoutRow(e.target);
-}), { root: null, threshold: 0.05 });
+const _rowio = new IntersectionObserver(es => es.forEach(e => { e.target._on = e.isIntersecting; layoutRow(e.target); }),
+  { root: null, threshold: 0.04 });
 
 async function buildGallery() {
   const groups = await api().catalog();
   const root = $("#gallery-rows");
   root.querySelectorAll(".row").forEach(r => r.remove()); _rows.length = 0;
   for (const g of groups) {
-    const row = el("div", "row");
+    const row = el("div", "row"); row.style.setProperty("--acc", ACC[g.method] || "#5b86f0");
     const rhead = el("div", "rhead");
     rhead.append(el("div", "bar"), el("div", "name", g.method),
       el("div", "count", `${g.scenes.length} scene${g.scenes.length > 1 ? "s" : ""}`));
     row.append(rhead);
-    const car = el("div", "rcar"); car._idx = 0; car._on = true;
+    const car = el("div", "rcar"); car._idx = 0; car._on = true; car._n = g.scenes.length; car._short = SHORT[g.method] || g.method;
     g.scenes.forEach((s, k) => car.append(coverCard(s, car, k)));
-    const la = el("button", "arrow left", "‹");
-    const ra = el("button", "arrow right", "›");
-    la.onclick = () => { car._idx = Math.max(0, car._idx - 1); layoutRow(car); };
-    ra.onclick = () => { car._idx = Math.min(g.scenes.length - 1, car._idx + 1); layoutRow(car); };
+    const la = el("button", "arrow left", "‹"); const ra = el("button", "arrow right", "›");
+    la.onclick = () => goRow(car, car._idx - 1); ra.onclick = () => goRow(car, car._idx + 1);
     car.append(la, ra);
+    attachRowDrag(car);
     row.append(car); root.append(row);
     _rows.push(car); _rowio.observe(car); layoutRow(car);
   }
 }
 function coverCard(s, car, k) {
   const c = el("div", "ccard");
-  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; c.append(v); }
-  c.append(el("div", "cov"), el("div", "play", "▶"), el("div", "nm", s.name));
-  c.onclick = () => { if (k === car._idx) openDetail(s.key); else { car._idx = k; layoutRow(car); } };
+  const frame = el("div", "frame");
+  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; frame.append(v); }
+  c.append(frame, el("div", "cov"), el("div", "chip", car._short), el("div", "play", "▶"), el("div", "nm", s.name));
+  c._key = s.key;
+  c.onclick = () => { if (car._suppress) return; if (k === car._idx) morphToDetail(c, s.key); else goRow(car, k); };
   return c;
+}
+function goRow(car, idx) {
+  car._idx = Math.max(0, Math.min(car._n - 1, idx)); layoutRow(car);
 }
 function layoutRow(car) {
   const cards = [...car.querySelectorAll(".ccard")];
@@ -82,12 +100,55 @@ function layoutRow(car) {
     c.style.pointerEvents = ad <= 2 ? "auto" : "none";
     c.classList.toggle("center", d === 0);
     const v = c.querySelector("video");
-    if (v) { if (car._on && ad <= 2) v.play().catch(() => {}); else v.pause(); }
+    if (v) { v.style.transform = `translateX(${(-d * 14).toFixed(1)}px) scale(1.08)`; if (car._on && ad <= 2) v.play().catch(() => {}); else v.pause(); }
   });
 }
+function attachRowDrag(car) {
+  let x0 = 0, drag = false;
+  car.addEventListener("pointerdown", e => { if (e.target.closest(".arrow")) return; drag = true; x0 = e.clientX; car._hover = true; });
+  window.addEventListener("pointerup", e => {
+    if (!drag) return; drag = false; const dx = e.clientX - x0;
+    if (Math.abs(dx) > 45) { goRow(car, car._idx - Math.sign(dx)); car._suppress = true; setTimeout(() => car._suppress = false, 80); }
+  });
+  car.addEventListener("mouseenter", () => car._hover = true);
+  car.addEventListener("mouseleave", () => car._hover = false);
+  let lock = false;
+  car.addEventListener("wheel", e => {
+    const dom = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.abs(dom) < 6 || lock) return;
+    e.preventDefault(); lock = true; setTimeout(() => lock = false, 360);
+    goRow(car, car._idx + (dom > 0 ? 1 : -1));
+  }, { passive: false });
+}
+// gentle auto-advance: on-screen, un-hovered rows drift forward (wrap), staggered
+setInterval(() => {
+  if (CUR !== "gallery") return;
+  _rows.forEach((car, i) => {
+    if (car._on && !car._hover && performance.now() % (4200 + i * 700) < 1050)
+      goRow2(car, (car._idx + 1) % car._n);
+  });
+}, 1000);
+function goRow2(car, idx) { car._idx = idx; layoutRow(car); }   // wrap-capable variant for auto-advance
 window.addEventListener("resize", () => { if (CUR === "gallery") _rows.forEach(layoutRow); });
 
 /* ───────── detail ───────── */
+// premium card→detail morph: a clone of the card glides to the detail hero area
+function morphToDetail(card, key) {
+  const r = card.getBoundingClientRect(), v0 = card.querySelector("video");
+  const clone = el("div");
+  clone.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;`
+    + `z-index:200;border-radius:18px;overflow:hidden;background:#06101f;box-shadow:0 40px 95px rgba(0,0,0,.6);`
+    + `transition:left .5s cubic-bezier(.5,0,.18,1),top .5s cubic-bezier(.5,0,.18,1),width .5s cubic-bezier(.5,0,.18,1),height .5s cubic-bezier(.5,0,.18,1)`;
+  if (v0) { const v = el("video"); v.src = v0.currentSrc || v0.src; v.loop = v.muted = v.autoplay = true; v.playsInline = true; v.style.cssText = "width:100%;height:100%;object-fit:contain"; clone.append(v); v.play().catch(() => {}); }
+  document.body.append(clone);
+  openDetail(key);
+  requestAnimationFrame(() => {
+    const tw = Math.min((window.innerWidth - 74) * 0.5, 660), th = tw / 1.55;
+    clone.style.left = (74 + 30) + "px"; clone.style.top = ((window.innerHeight - th) / 2 + 8) + "px";
+    clone.style.width = tw + "px"; clone.style.height = th + "px";
+  });
+  setTimeout(() => clone.remove(), 540);
+}
 async function openDetail(key) {
   const d = await api().scene_detail(key);
   $("#d-method").textContent = d.method; $("#d-title").textContent = d.name; $("#d-video").src = d.clip;
@@ -97,8 +158,23 @@ async function openDetail(key) {
   if (d.terms) t.append(el("div", "terms", d.terms));
   t.append(section("how it's solved", d.numerics));
   const v = section("validation", "✓  " + d.validation); v.querySelector(".kicker").style.color = "#a9e6a0"; v.querySelector(".body").classList.add("ok"); t.append(v);
+  buildRelated(t, key);
+  [...t.children].forEach((c, i) => { c.classList.add("reveal"); setTimeout(() => c.classList.add("in"), 60 + i * 70); });
   $("#d-open").onclick = () => openStudio(d);
   show("detail");
+}
+function buildRelated(t, key) {
+  let group = null;
+  for (const g of GAL) if (g.scenes.some(s => s.key === key)) group = g;
+  if (!group || group.scenes.length < 2) return;
+  const sec = el("div", "section"); sec.append(el("div", "kicker", "MORE IN THIS METHOD"));
+  const rail = el("div", "related");
+  for (const s of group.scenes) {
+    if (s.key === key) continue;
+    const m = el("div", "rel"); if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = v.autoplay = true; v.playsInline = true; m.append(v); }
+    m.append(el("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); rail.append(m);
+  }
+  sec.append(rail); t.append(sec);
 }
 function section(head, body) { const s = el("div", "section"); s.append(el("div", "kicker", head.toUpperCase()), el("div", "read body", body)); return s; }
 
@@ -153,10 +229,28 @@ function renderKPIs(stats) {
   const k = $("#s-kpis"); k.innerHTML = "";
   if (!stats.length) { k.innerHTML = '<div class="muted" style="font-size:12px">No readouts.</div>'; return; }
   for (const s of stats) {
-    const t = el("div", "kpi" + (s.accent ? " accent" : ""));
-    t.append(el("div", "l", s.l), el("div", "v", s.v + (s.u ? ` <small>${s.u}</small>` : "")));
-    k.append(t);
+    if (s.frac != null) {
+      const t = el("div", "kpi gauge" + (s.accent ? " accent" : ""));
+      const dial = el("div", "dial", kpiGauge(s.frac, s.accent));
+      dial.append(el("div", "dval", `${s.v}${s.u ? `<small>${s.u}</small>` : ""}`));
+      t.append(dial, el("div", "l", s.l)); k.append(t);
+    } else {
+      const t = el("div", "kpi" + (s.accent ? " accent" : ""));
+      t.append(el("div", "l", s.l), el("div", "v", s.v + (s.u ? ` <small>${s.u}</small>` : "")));
+      k.append(t);
+    }
   }
+}
+// 270° speedometer-style SVG dial filled to `frac`
+function kpiGauge(frac, accent) {
+  const R = 33, C = 2 * Math.PI * R, span = 0.75, dash = C * span;
+  const val = (dash * Math.max(0, Math.min(1, frac))).toFixed(1), Cf = C.toFixed(1);
+  const col = accent ? "#e1fc66" : "#6f90e8";
+  return `<svg width="84" height="84" viewBox="0 0 84 84">
+    <g transform="rotate(135 42 42)">
+      <circle cx="42" cy="42" r="${R}" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${dash.toFixed(1)} ${Cf}"/>
+      <circle cx="42" cy="42" r="${R}" fill="none" stroke="${col}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${val} ${Cf}"/>
+    </g></svg>`;
 }
 function buildViewbar(r) {
   const seg = $("#s-views"); seg.innerHTML = "";
