@@ -24,6 +24,22 @@ SCENES = [
      "blurb": "Because lattice-Boltzmann treats any obstacle as just a set of solid cells, you can "
               "drop the pixels of your own name into the tunnel and watch the wake braid around "
               "every letter — no mesh generation at all."},
+    {"method": "Lattice–Boltzmann", "exhibit": "Wind Tunnel", "key": "lbm_f1",
+     "name": "F1 Car Aerodynamics", "preset": {"obstacle": "F1 car", "reynolds": 320, "speed": 0.06},
+     "blurb": "A Formula-1 silhouette in the tunnel — nose into the wind. The flow accelerates over "
+              "the body, separates off the wheels and rear wing, and trails a broad, unsteady wake. "
+              "Because the obstacle is just solid cells, the whole open-wheel shape drops straight in "
+              "with no mesh — the essence of automotive aero on a lattice."},
+    {"method": "Lattice–Boltzmann", "exhibit": "Wind Tunnel", "key": "lbm_cyclist",
+     "name": "Cyclist in the Wind", "preset": {"obstacle": "Cyclist", "reynolds": 320, "speed": 0.07},
+     "blurb": "A rider in an aero tuck. Most of a cyclist's effort goes into pushing air aside, so "
+              "the tunnel shows exactly where it hurts: a high-pressure front and a wide, turbulent "
+              "wake of shed vortices dragging along behind."},
+    {"method": "Lattice–Boltzmann", "exhibit": "Wind Tunnel", "key": "lbm_peloton",
+     "name": "Drafting (Two Riders)", "preset": {"obstacle": "Peloton (drafting)", "reynolds": 500, "speed": 0.09},
+     "blurb": "Two riders, nose to tail. The second sits inside the leader's wake, where the flow is "
+              "slow and sheltered — you can see the low-speed pocket that makes drafting save roughly "
+              "a third of a rider's effort. The peloton, explained by the wake."},
     {"method": "Lattice–Boltzmann", "exhibit": "Porous Flow", "key": "porous_phi60",
      "name": "Flow Through Porous Rock", "preset": {"porosity": 0.60, "grain": 0.035},
      "blurb": "Fluid driven through a packed bed of grains, winding along tortuous pore paths. "
@@ -48,6 +64,19 @@ SCENES = [
      "blurb": "A narrow, intense, flickering source — the lantern's own flame. The same buoyant "
               "plume physics dialed to a candle: a slender tongue of fire that wanders and pulses "
               "as shed vortices tug at it. ❖ the heart of Funoos (فانوس, the lantern)."},
+    {"method": "Incompressible Navier–Stokes", "exhibit": "Rayleigh-Benard", "key": "ns_rb",
+     "name": "Rayleigh–Bénard Convection", "preset": {"buoyancy": 0.006, "viscosity": 0.0006},
+     "cmap": "Ember (fire)",
+     "blurb": "A shallow layer heated from below and cooled from above. Past a critical temperature "
+              "difference it overturns: warm fluid rises, cool fluid sinks, and the motion locks into "
+              "a train of counter-rotating convection cells. Pattern formation from pure instability — "
+              "the same overturning that drives weather, oceans and the mantle."},
+    {"method": "Incompressible Navier–Stokes", "exhibit": "Chimney Plume", "key": "ns_chimney",
+     "name": "Chimney Plume in Wind", "preset": {"buoyancy": 0.005, "wind": 0.1, "source": 0.6, "confinement": 6},
+     "cmap": "Smoke (mono)",
+     "blurb": "A buoyant plume leaving a stack into a steady crosswind. Buoyancy lifts it while the "
+              "wind pushes it sideways, so it bends over into the classic slanted smokestack trail. "
+              "The buoyancy-versus-wind balance sets the plume rise that governs how pollution disperses."},
     # ───────── Compressible Euler (HLLC) ─────────
     {"method": "Compressible Euler", "exhibit": "Detonation", "key": "euler_blast",
      "name": "Open-Air Blast", "preset": {"scene": "Open air", "pressure": 14},

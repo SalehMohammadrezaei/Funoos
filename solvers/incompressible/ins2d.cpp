@@ -7,6 +7,8 @@
 //
 //   --mode smoke : inject a hot, dyed source at the bottom -> rising plume
 //   --mode rt    : heavy fluid over light + gravity -> Rayleigh-Taylor fingers
+//   --mode rb    : hot plate below, cold plate above -> Rayleigh-Benard convection
+//   --mode wind  : a chimney source in a steady crosswind -> a bent-over plume
 //
 // Outputs float32 scalar frames (the dye for smoke, density for RT), Ny x Nx.
 //
@@ -26,7 +28,7 @@
 
 struct Args {
     int nx=240, ny=360, steps=4000, save_every=20, iters=60;
-    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0, flicker=0.0;
+    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0, flicker=0.0, wind=0.0;
     std::string mode="smoke", out="frames";
 };
 static Args parse(int c, char** v){
@@ -39,6 +41,7 @@ static Args parse(int c, char** v){
         else if(k=="--grav")a.grav=atof(x.c_str()); else if(k=="--conf")a.conf=atof(x.c_str());
         else if(k=="--srcw")a.srcw=atof(x.c_str()); else if(k=="--pert")a.pert=atof(x.c_str());
         else if(k=="--atwood")a.atwood=atof(x.c_str()); else if(k=="--flicker")a.flicker=atof(x.c_str());
+        else if(k=="--wind")a.wind=atof(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a;
 }
@@ -48,6 +51,11 @@ int main(int argc,char**argv){
     const int nx=a.nx, ny=a.ny, N=nx*ny;
     auto IX=[&](int i,int j){ return i + nx*j; };
     const bool smoke = (a.mode=="smoke");
+    const bool rt    = (a.mode=="rt");
+    const bool rb    = (a.mode=="rb");          // Rayleigh-Benard convection
+    const bool wind  = (a.mode=="wind");        // chimney plume in a crosswind
+    const bool hassrc   = smoke || wind;        // a continuous dyed/hot source
+    const bool open_top = smoke || wind;        // open (zero-gradient) top boundary
 
     std::vector<double> u(N,0), v(N,0), u0(N,0), v0(N,0);
     std::vector<double> s(N,0), s0(N,0), p(N,0), div(N,0);
@@ -68,15 +76,21 @@ int main(int argc,char**argv){
             d[IX(i,j)]=sample(d0,x,y);
         }
     };
-    // free-slip side/floor walls; open top for smoke, closed for RT
+    // walls: free-slip sides/floor; open top for smoke/wind, closed for RT/RB.
+    // wind: left is a velocity inlet (u=U, v=0, clean air), right an outflow.
     auto set_bc=[&](std::vector<double>&q,int kind){ // kind: 0 scalar,1 u,2 v
         for(int j=0;j<ny;j++){
-            q[IX(0,j)]   = (kind==1)?0.0:q[IX(1,j)];
-            q[IX(nx-1,j)]= (kind==1)?0.0:q[IX(nx-2,j)];
+            if(wind){
+                q[IX(0,j)]    = (kind==1)? a.wind : 0.0;   // inlet: u=U, v=0, s=0
+                q[IX(nx-1,j)] = q[IX(nx-2,j)];             // outflow (zero-gradient)
+            } else {
+                q[IX(0,j)]    = (kind==1)?0.0:q[IX(1,j)];
+                q[IX(nx-1,j)] = (kind==1)?0.0:q[IX(nx-2,j)];
+            }
         }
         for(int i=0;i<nx;i++){
             q[IX(i,0)]    = (kind==2)?0.0:q[IX(i,1)];
-            if(smoke && kind!=2) q[IX(i,ny-1)] = q[IX(i,ny-2)];        // open top
+            if(open_top && kind!=2) q[IX(i,ny-1)] = q[IX(i,ny-2)];    // open top
             else q[IX(i,ny-1)] = (kind==2)?0.0:q[IX(i,ny-2)];
         }
     };
@@ -108,7 +122,7 @@ int main(int argc,char**argv){
     };
 
     // --- initial condition ---
-    if(!smoke){ // Rayleigh-Taylor: heavy (s=1) on top, light (s=0) below, wavy interface
+    if(rt){ // Rayleigh-Taylor: heavy (s=1) on top, light (s=0) below, wavy interface
         for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){
             double yi=0.5*ny + 0.04*ny*a.pert*sin(2*M_PI*i/(double)nx*3)
                               + 0.015*ny*a.pert*sin(2*M_PI*i/(double)nx*7);
@@ -116,15 +130,24 @@ int main(int argc,char**argv){
             // s in [0.5(1-A), 0.5(1+A)], so the buoyant forcing scales with A
             s[IX(i,j)] = 0.5 + 0.5*a.atwood*tanh((j-yi)/2.0);
         }
+    } else if(rb){ // Rayleigh-Benard: hot plate below (s=1), cold above (s=0), seeded
+        for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){
+            double base = 1.0 - (double)j/(ny-1);            // linear conduction profile
+            double seed = 0.05*a.pert*sin(2*M_PI*(double)i/nx*6.0)*sin(M_PI*(double)j/(ny-1));
+            s[IX(i,j)] = base + seed;
+        }
+    } else if(wind){ // start with the crosswind already blowing across the box
+        for(int k=0;k<N;k++){ u[k]=a.wind; s[k]=0.0; }
     }
 
     std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
     int nf=0;
-    int sx=nx/2, sw=std::max(6,(int)(nx/12*a.srcw)), sh=std::max(5,ny/26);
+    int sx = wind ? nx/4 : nx/2;                 // chimney sits upwind so the plume can bend across
+    int sw=std::max(6,(int)(nx/12*a.srcw)), sh=std::max(5,ny/26);
 
     for(int step=0; step<=a.steps; step++){
-        // forces: buoyancy + (smoke) continuous source + vorticity confinement
-        if(smoke){
+        // forces: buoyancy + (smoke/wind) continuous source + vorticity confinement
+        if(hassrc){
             // flicker: a wobbling, pulsing source so the plume dances like a flame
             double ph=step*0.06;
             int off=(int)(a.flicker*sw*0.8*(sin(ph)+0.4*sin(2.3*ph+1.0)));
@@ -138,8 +161,9 @@ int main(int argc,char**argv){
         }
         #pragma omp parallel for schedule(static)
         for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
-            if(smoke) v[IX(i,j)] += a.dt*a.buoy*s[IX(i,j)];      // hot rises
-            else      v[IX(i,j)] -= a.dt*a.grav*s[IX(i,j)];      // heavy sinks
+            if(hassrc)   v[IX(i,j)] += a.dt*a.buoy*s[IX(i,j)];        // hot rises
+            else if(rb)  v[IX(i,j)] += a.dt*a.buoy*(s[IX(i,j)]-0.5);  // warm rises, cool sinks
+            else         v[IX(i,j)] -= a.dt*a.grav*s[IX(i,j)];        // RT: heavy sinks
         }
         // vorticity confinement
         if(a.conf>0){
@@ -163,6 +187,7 @@ int main(int argc,char**argv){
         project();
         // advect scalar
         s0=s; advect(s,s0); set_bc(s,0);
+        if(rb){ for(int i=0;i<nx;i++){ s[IX(i,0)]=1.0; s[IX(i,ny-1)]=0.0; } }  // fixed hot/cold plates
         // light viscous smoothing of velocity (stability)
         if(a.visc>0){
             u0=u; v0=v;

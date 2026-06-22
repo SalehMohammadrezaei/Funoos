@@ -79,6 +79,59 @@ def text(nx, ny, string, font_frac=0.55, x_frac=0.5, max_w_frac=0.9,
     return (arr[::-1] > 127).astype(np.uint8)  # flip so text is upright in +y-up
 
 
+def f1_car(nx, ny, cx, cy, length):
+    """A Formula-1 car silhouette in side profile, nose into the wind (pointing −x).
+
+    A bluff but streamlined body: tapered nose + front wing, a roll-hoop/airbox,
+    a tall rear wing, and two wheels — the classic open-wheel aero shape.
+    """
+    img = Image.new("L", (nx, ny), 0); d = ImageDraw.Draw(img)
+    L = float(length)
+    def X(f): return cx + f * L
+    def Y(f): return cy + f * L            # +Y is downward in PIL; flipped at the end → ground side
+    d.polygon([(X(-0.50), Y(0.02)), (X(-0.40), Y(-0.04)), (X(0.30), Y(-0.05)),
+               (X(0.46), Y(0.00)), (X(0.46), Y(0.10)), (X(-0.46), Y(0.10))], fill=255)   # body/floor
+    d.polygon([(X(-0.50), Y(0.02)), (X(-0.30), Y(-0.02)), (X(-0.30), Y(0.07))], fill=255)  # nose cone
+    d.rectangle([X(-0.56), Y(0.07), X(-0.42), Y(0.13)], fill=255)                          # front wing
+    d.polygon([(X(-0.02), Y(-0.05)), (X(0.05), Y(-0.14)), (X(0.13), Y(-0.14)),
+               (X(0.16), Y(-0.05))], fill=255)                                             # roll hoop / airbox
+    d.rectangle([X(0.40), Y(-0.17), X(0.50), Y(-0.05)], fill=255)                          # rear wing post
+    d.rectangle([X(0.34), Y(-0.18), X(0.54), Y(-0.12)], fill=255)                          # rear wing plane
+    rw = 0.10 * L
+    for fx in (-0.34, 0.30):                                                               # front & rear wheels
+        d.ellipse([X(fx) - rw, Y(0.09) - rw, X(fx) + rw, Y(0.09) + rw], fill=255)
+    arr = np.asarray(img)
+    return (arr[::-1] > 127).astype(np.uint8)
+
+
+def cyclist(nx, ny, cx, cy, size, riders=1, gap=1.05):
+    """One or more cyclists in an aero tuck, facing the wind (−x).
+
+    With riders=2 the second sits in the leader's slipstream — a drafting pair,
+    so the sheltered low-speed pocket between them is visible.
+    """
+    img = Image.new("L", (nx, ny), 0); d = ImageDraw.Draw(img)
+    S = float(size)
+    rw = 0.17 * S; lw = max(2, int(0.05 * S))
+    def draw_one(ox):
+        def X(f): return cx + ox + f * S
+        def Y(f): return cy + f * S
+        for fx in (-0.34, 0.32):                                # two wheels (solid discs)
+            d.ellipse([X(fx) - rw, Y(0.30) - rw, X(fx) + rw, Y(0.30) + rw], fill=255)
+        d.line([X(-0.34), Y(0.30), X(-0.10), Y(0.30)], fill=255, width=lw)       # frame
+        d.line([X(0.32), Y(0.30), X(-0.10), Y(0.30)], fill=255, width=lw)
+        d.polygon([(X(0.10), Y(0.04)), (X(-0.22), Y(-0.10)), (X(-0.30), Y(-0.02)),
+                   (X(-0.06), Y(0.30)), (X(0.16), Y(0.30))], fill=255)            # tuck: head/shoulders into wind (−x)
+        hr = 0.12 * S
+        d.ellipse([X(-0.28) - hr, Y(-0.16) - hr, X(-0.28) + hr, Y(-0.16) + hr], fill=255)  # head/helmet (forward, −x)
+    total = riders
+    start = -0.5 * (total - 1) * gap
+    for k in range(total):
+        draw_one((start + k * gap) * S)
+    arr = np.asarray(img)
+    return (arr[::-1] > 127).astype(np.uint8)
+
+
 def porous(nx, ny, solid_frac=0.4, grain=12, seed=0):
     """Random grain pack (periodic) filling to a target solid fraction — a porous sample."""
     rng = np.random.default_rng(seed)

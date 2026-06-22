@@ -327,3 +327,104 @@ DETAIL = {
 "• Kozeny–Carman: k ≈ φ³d²/[180(1−φ)²] links k to porosity and grain size d"),
 },
 }
+
+
+# Detail text for the two newest exhibits (physics + symbol-by-symbol terms).
+DETAIL["Rayleigh-Benard"] = {
+"physics": (
+"Heat a thin layer of fluid from below and cool it from above. At small temperature "
+"differences the heat simply conducts upward and nothing moves. But warm fluid is "
+"lighter, and once the temperature difference passes a critical threshold the layer "
+"can no longer sit still: buoyancy wins over the viscous and diffusive damping, and "
+"the fluid overturns.\n\n"
+"The overturning is not chaotic at onset — it self-organises into a regular array of "
+"counter-rotating rolls, warm fluid rising on one side of each cell and cool fluid "
+"sinking on the other. Push the forcing higher (a larger Rayleigh number) and the "
+"tidy rolls give way to unsteady, plume-shedding convection. Rayleigh–Bénard is the "
+"canonical example of pattern formation from instability, and the same buoyant engine "
+"drives the atmosphere, the oceans, a pot of boiling water and the Earth's mantle."),
+"terms": (
+"• ∂t T + u·∇T = κ∇²T — temperature is carried by the flow and diffuses with κ\n"
+"• α g T ŷ — Boussinesq buoyancy: warm fluid (high T) feels an upward force\n"
+"• ν∇²u — viscous damping; with κ it resists the overturning\n"
+"• Rayleigh number Ra = αgΔT d³/(νκ) — forcing ÷ damping; convection begins past Ra≈1708\n"
+"• fixed-temperature plates top & bottom set ΔT across the layer depth d"),
+}
+DETAIL["Chimney Plume"] = {
+"physics": (
+"A buoyant plume leaves a stack into a steady horizontal wind. Right at the source "
+"buoyancy dominates and the hot, dyed fluid shoots almost straight up. But the "
+"crosswind never stops pushing, so a little higher the plume bends over and trails "
+"away downwind in the familiar slanted smokestack shape.\n\n"
+"How high it climbs before levelling off — the 'plume rise' — is a tug-of-war between "
+"the buoyancy lifting it and the wind's momentum sweeping it sideways. Strengthen the "
+"wind and the plume bends sooner and stays lower; increase the buoyancy and it punches "
+"higher first. That balance is exactly what engineers estimate when they size a "
+"smokestack and predict how far a pollutant travels before it reaches the ground."),
+"terms": (
+"• (u·∇)u — advection: the mean wind carries the plume downstream\n"
+"• f_b = αg T ŷ — Boussinesq buoyancy from the hot, dyed source lifts the plume\n"
+"• ν∇²u — viscous diffusion; ∇·u = 0 — incompressibility (the pressure projection)\n"
+"• velocity inlet (the wind) on the left, open outflow on the right, open top\n"
+"• plume rise ∝ buoyancy ÷ wind — the trade-off that sets the bent-over trajectory"),
+}
+
+# Initial & boundary conditions per exhibit — shown as a "Setup" block on each scene.
+SETUP = {
+"Wind Tunnel": {
+  "ic": "Fluid at rest; a uniform inflow is ramped up to the chosen speed.",
+  "bc": "Velocity inlet on the left, zero-gradient outflow on the right, periodic top and "
+        "bottom walls, and no-slip half-way bounce-back on the obstacle (any shape, vehicle "
+        "or text) — so no mesh is ever generated."},
+"Rising Smoke": {
+  "ic": "Quiescent ambient fluid with no dye; the source switches on at t = 0.",
+  "bc": "No-slip floor carrying a hot, dyed source patch; free-slip side walls; open "
+        "(zero-gradient) top so the plume can leave the domain."},
+"Mushroom Clouds": {
+  "ic": "Heavy fluid resting on light fluid, separated by a small multi-mode interface "
+        "ripple; everything at rest.",
+  "bc": "Closed, no-penetration top and bottom; free-slip side walls — a sealed box."},
+"Rayleigh-Benard": {
+  "ic": "A linear hot-bottom-to-cold-top temperature profile at rest, plus a tiny "
+        "perturbation that breaks the symmetry and selects the cell size.",
+  "bc": "Fixed hot plate below and cold plate above (Dirichlet temperature); insulating, "
+        "no-penetration side walls."},
+"Chimney Plume": {
+  "ic": "A uniform crosswind already blowing across a box of clean air.",
+  "bc": "Velocity inlet (the wind) on the left, zero-gradient outflow on the right, no-slip "
+        "floor with a hot dyed stack source, open top."},
+"Detonation": {
+  "ic": "Ambient gas at rest with a small high-pressure, high-density charge; the 'city' "
+        "scene also places two solid towers on the ground.",
+  "bc": "Non-reflecting (transmissive) outflow at the domain edges; solid reflecting walls "
+        "on the towers, which the blast diffracts around and reflects off."},
+"Shockwave Strike": {
+  "ic": "A planar incident shock travelling into still gas, set just upstream of a lighter "
+        "(or heavier) gas bubble at rest; the twin-bubble variant seeds two.",
+  "bc": "Supersonic inflow behind the shock, transmissive outflow elsewhere; the bubble is "
+        "a density contrast, not a wall, so the shock passes through and deforms it."},
+"The Big Splash": {
+  "ic": "A body of water at rest under gravity — a tall column (dam break), a falling blob "
+        "(droplet), a filled tank (slosh), a partly-filled glass (pour) or a wave train.",
+  "bc": "Solid no-slip tank walls enforced by dynamic boundary particles; a free surface "
+        "open to the air; the ship scene adds a buoyant rigid body coupled to the fluid."},
+"Cloud Billows": {
+  "ic": "Two opposing shear layers with a seeded perturbation (Kelvin–Helmholtz), or a "
+        "random divergence-free field (decaying turbulence).",
+  "bc": "Periodic in both directions — the natural setting for the pseudo-spectral (FFT) solver."},
+"Porous Flow": {
+  "ic": "Fluid at rest inside a random grain pack.",
+  "bc": "Periodic in x and y with a constant body force driving the flow; no-slip bounce-back "
+        "on every grain surface."},
+"Turing Patterns": {
+  "ic": "A uniform field (u = 1, v = 0) with a few small seeded patches of v to nucleate the pattern.",
+  "bc": "Periodic in both directions; the feed and kill rates select the regime "
+        "(spots, stripes, labyrinth or mitosis)."},
+"Ink in Motion": {
+  "ic": "A smooth random vorticity field stirring blobs of passive dye.",
+  "bc": "Periodic in both directions (pseudo-spectral); the dye is advected by, but does not "
+        "alter, the flow."},
+"Quantum Ripples": {
+  "ic": "A localized Gaussian wave packet with an initial momentum.",
+  "bc": "An absorbing boundary (or a harmonic well for the closed, norm-conserving case)."},
+}

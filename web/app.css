@@ -237,3 +237,10 @@ input[type=range]{accent-color:var(--blue-br)}
   font-family:var(--display);font-weight:800;font-size:17px;color:#fff}
 .kpi .dial .dval small{font-size:9px;color:var(--blue-lt);font-weight:700}
 .kpi.gauge .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+
+/* ── detail: initial & boundary conditions ── */
+.setup{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.setup .sline{display:grid;grid-template-columns:84px 1fr;gap:12px;align-items:start;
+  font-size:13px;color:var(--read);line-height:1.5}
+.setup .sline b{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--blue-lt);
+  padding-top:3px;font-weight:700}

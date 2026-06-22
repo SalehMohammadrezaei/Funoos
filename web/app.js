@@ -154,6 +154,13 @@ async function openDetail(key) {
   t.append(section("this scene", d.blurb), section("the physics", d.physics));
   if (d.eq) { const k = el("div", "section"); k.append(el("div", "kicker", "GOVERNING EQUATION")); const b = el("div", "eqbox"); const im = el("img"); im.src = d.eq; b.append(im); k.append(b); t.append(k); }
   if (d.terms) t.append(el("div", "terms", d.terms));
+  if (d.ic || d.bc) {                                   // initial & boundary conditions
+    const sec = el("div", "section"); sec.append(el("div", "kicker", "SETUP — INITIAL & BOUNDARY CONDITIONS"));
+    const box = el("div", "setup");
+    if (d.ic) box.append(el("div", "sline", `<b>Initial</b>${d.ic}`));
+    if (d.bc) box.append(el("div", "sline", `<b>Boundary</b>${d.bc}`));
+    sec.append(box); t.append(sec);
+  }
   t.append(section("how it's solved", d.numerics));
   const v = section("validation", "✓  " + d.validation); v.querySelector(".kicker").style.color = "#a9e6a0"; v.querySelector(".body").classList.add("ok"); t.append(v);
   buildRelated(t, key);

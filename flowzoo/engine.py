@@ -359,6 +359,15 @@ def _solve_windtunnel(p, pr, tmp):
     elif obs == "Airfoil":
         mask = geometry.airfoil(nx, ny, cx, cy, chord=D * 2.6, aoa_deg=float(p["angle"]))
         probe = cx + int(3 * D)
+    elif obs == "F1 car":
+        L = ny * 1.05; cx = int(nx * 0.30)
+        mask = geometry.f1_car(nx, ny, cx, cy, L); D = 0.30 * L; probe = cx + int(2.4 * L)
+    elif obs == "Cyclist":
+        S = ny * 0.46; cx = int(nx * 0.25)
+        mask = geometry.cyclist(nx, ny, cx, cy, S, riders=1); D = 0.5 * S; probe = cx + int(3 * S)
+    elif obs == "Peloton (drafting)":
+        S = ny * 0.50; cx = int(nx * 0.30)
+        mask = geometry.cyclist(nx, ny, cx, cy, S, riders=2, gap=1.1); D = 0.5 * S; probe = cx + int(3 * S)
     else:                                                   # Cylinder
         mask = geometry.cylinder(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
     tau = 0.5 + 3 * (U * D / Re)
@@ -408,7 +417,13 @@ def _solve_porous(p, pr, tmp):
 
 
 def _solve_ns(mode, p, pr, tmp):
-    s = _res(p); nx, ny = int(280 * s), int(440 * s); steps = int(4800 * _durv(p))
+    s = _res(p); steps = int(4800 * _durv(p))
+    if mode in ("smoke", "rt"):
+        nx, ny = int(280 * s), int(440 * s)         # tall box for rising plumes / fingers
+    elif mode == "rb":
+        nx, ny = int(480 * s), int(230 * s)         # wide, shallow cell for convection rolls
+    else:                                           # wind
+        nx, ny = int(480 * s), int(300 * s)         # wide box so the plume bends across it
     _ensure(_bin("incompressible", "ins2d"))
     args = [str(_bin("incompressible", "ins2d")), "--mode", mode, "--nx", str(nx),
             "--ny", str(ny), "--steps", str(steps), "--save_every", str(max(1, steps // 110)),
@@ -417,10 +432,18 @@ def _solve_ns(mode, p, pr, tmp):
         args += ["--buoy", str(p["buoyancy"]), "--conf", str(p["confinement"]), "--srcw", str(p["source"]),
                  "--flicker", str(p.get("flicker", 0.0))]
         hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
-    else:
+    elif mode == "rt":
         args += ["--grav", str(p["gravity"]), "--pert", str(p["perturbation"]), "--conf", "0",
                  "--iters", "80", "--atwood", str(p.get("atwood", 1.0))]
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "density ρ"}
+    elif mode == "rb":
+        args += ["--buoy", str(p["buoyancy"]), "--conf", "0", "--iters", "80",
+                 "--pert", str(p.get("perturbation", 1.0))]
+        hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "temperature T"}
+    else:                                           # wind — chimney plume in a crosswind
+        args += ["--buoy", str(p["buoyancy"]), "--wind", str(p["wind"]),
+                 "--conf", str(p["confinement"]), "--srcw", str(p["source"])]
+        hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
     pr(f"Navier–Stokes ({mode}) {nx}×{ny}, {steps} steps…")
     subprocess.run(args, check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
@@ -591,9 +614,10 @@ def _solve_quantum(p, pr, tmp):
 EXHIBITS = {
     "Wind Tunnel": {
         "params": [{"name": "obstacle", "label": "Obstacle", "type": "choice", "group": "Geometry",
-                    "choices": ["Cylinder", "Square", "Diamond", "Airfoil", "Your text"],
+                    "choices": ["Cylinder", "Square", "Diamond", "Airfoil",
+                                "F1 car", "Cyclist", "Peloton (drafting)", "Your text"],
                     "default": "Cylinder",
-                    "help": "What to drop into the stream — a shape, or your own text."},
+                    "help": "What to drop into the stream — a shape, a vehicle, or your own text."},
                    _when({"name": "text", "label": "Your text", "type": "str", "default": "Funoos",
                           "group": "Geometry", "help": "The word to drop into the stream. Short words read best."},
                          "obstacle", ["Your text"]),
@@ -628,6 +652,30 @@ EXHIBITS = {
                       "Amplitude of the initial interface ripple that seeds the fingers."),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("rt", p, pr, t)},
+    "Rayleigh-Benard": {
+        "params": [_f("buoyancy", "Buoyancy (Rayleigh)", 6e-3, 2e-3, 1.2e-2, "Physics",
+                      "How hard the temperature difference pushes the fluid — effectively the "
+                      "Rayleigh number. Higher → convection sets in faster and rolls break into "
+                      "more vigorous, plume-like turbulence."),
+                   _f("viscosity", "Viscosity (sim units)", 6e-4, 2e-4, 1.5e-3, "Physics",
+                      "Damps the motion. Lower viscosity → a higher Rayleigh number → tighter, "
+                      "more chaotic convection cells."),
+                   _f("perturbation", "Seed ripple (×)", 1.0, 0.2, 3.0, "Physics",
+                      "Amplitude of the tiny temperature perturbation that breaks the symmetry "
+                      "and selects the cell wavelength."),
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_ns("rb", p, pr, t)},
+    "Chimney Plume": {
+        "params": [_f("buoyancy", "Buoyancy", 5e-3, 2e-3, 1e-2, "Physics", _H["buoy"]),
+                   _f("wind", "Crosswind speed", 0.10, 0.0, 0.30, "Physics",
+                      "Speed of the horizontal wind blowing across the stack. Stronger wind bends "
+                      "the plume over closer to the ground (a smaller plume rise)."),
+                   _f("confinement", "Vorticity confinement", 6, 0, 20, "Physics", _H["conf"]),
+                   _f("source", "Stack width (×)", 0.6, 0.3, 3.0, "Geometry",
+                      "Width of the chimney source at the floor."),
+                   _f("viscosity", "Viscosity", 8e-5, 0, 5e-4, "Physics", _H["visc"]),
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_ns("wind", p, pr, t)},
     "Detonation": {
         "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
                     "choices": ["Open air", "Shock hits a city"], "default": "Open air",
@@ -811,6 +859,36 @@ META = {
         "validation": "Reproduces the characteristic spike-and-bubble mushroom roll-up; the "
                        "finger growth scales with gravity and is damped by viscosity as theory predicts.",
         "demo": "results/rayleigh_taylor.gif"},
+    "Rayleigh-Benard": {"method": "Incompressible Navier–Stokes · projection",
+        "blurb": "Heat a shallow layer of fluid from below and cool it from above and, once the "
+                 "temperature difference is large enough, pure conduction can no longer carry the "
+                 "heat: the layer overturns. Warm fluid rises in plumes, cool fluid sinks, and the "
+                 "motion organises into a regular train of counter-rotating convection cells — "
+                 "Rayleigh–Bénard convection. It is the textbook example of pattern formation from "
+                 "instability, and the same engine of buoyant overturning drives the atmosphere, "
+                 "the oceans, boiling pots and the Earth's mantle.",
+        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\!\cdot\!\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}+\alpha g\,T\,\hat{\mathbf{y}},\quad \partial_t T+\mathbf{u}\!\cdot\!\nabla T=\kappa\nabla^2T,\quad \nabla\!\cdot\!\mathbf{u}=0$",
+        "numerics": "The incompressible projection solver coupled to a transported temperature "
+                    "field under the Boussinesq approximation (buoyancy ∝ T). The bottom and top "
+                    "rows are held at fixed hot and cold temperatures (Dirichlet plates), the side "
+                    "walls are insulating, and a tiny initial perturbation seeds the cells. The "
+                    "ratio of buoyant forcing to viscous and diffusive damping is the Rayleigh number.",
+        "validation": "Below a critical Rayleigh number the layer stays still (pure conduction); "
+                       "above it, steady counter-rotating rolls appear and, at higher Ra, break into "
+                       "unsteady plumes — the classic convection-onset behaviour."},
+    "Chimney Plume": {"method": "Incompressible Navier–Stokes · projection",
+        "blurb": "A buoyant plume leaves a stack into a steady crosswind. Near the source buoyancy "
+                 "lifts it almost vertically, but the horizontal wind keeps pushing, so the plume "
+                 "bends over into the familiar slanted chimney trail before levelling off downwind. "
+                 "The balance between buoyancy and wind sets the 'plume rise' — the same physics "
+                 "engineers use to size smokestacks and predict how pollutants disperse.",
+        "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\!\cdot\!\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}+\mathbf{f}_b,\quad \nabla\!\cdot\!\mathbf{u}=0$",
+        "numerics": "The projection solver with a hot, dyed source at the floor and a velocity "
+                    "inlet on the left that drives a uniform crosswind (zero-gradient outflow on the "
+                    "right, open top). Boussinesq buoyancy lifts the dyed fluid while the mean wind "
+                    "advects it downstream, so the steady plume trajectory emerges from the force balance.",
+        "validation": "The plume rises then bends over, and its rise height falls as the crosswind "
+                       "strengthens — the expected buoyancy-versus-momentum trade-off of plume-rise theory."},
     "Detonation": {"method": "Compressible Euler · finite-volume HLLC",
         "blurb": "A small region of very high pressure is released into ambient gas. It "
                  "bursts outward as a near-circular shock wave — a thin front across which "

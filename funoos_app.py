@@ -97,9 +97,11 @@ class Api:
         if not s:
             return {}
         ex = s["exhibit"]; m = engine.META.get(ex, {}); d = content.DETAIL.get(ex, {})
+        setup = content.SETUP.get(ex, {})
         return {"name": s["name"], "method": s["method"], "exhibit": ex,
                 "blurb": s["blurb"], "physics": d.get("physics", m.get("blurb", "")),
                 "terms": d.get("terms", ""), "numerics": m.get("numerics", ""),
+                "ic": setup.get("ic", ""), "bc": setup.get("bc", ""),
                 "validation": m.get("validation", ""), "eq": _eq_b64(ex),
                 "clip": "results/gallery/" + key + ".mp4", "preset": s["preset"],
                 "cmap": s.get("cmap"), "params": _param_spec(ex), "method_label": m.get("method", "")}
