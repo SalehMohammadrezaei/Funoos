@@ -1,130 +1,99 @@
-# 🦓 Funoos
+# 🏮 Funoos
 
-**A zoo of fluid phenomena — each one solved from scratch with a different numerical method, validated against a textbook benchmark, and rendered as a cinematic animation.**
+### *Where imagination becomes vision.*
 
-Most CFD portfolios show one solver run one way. Funoos shows fluids from **five** angles — kinetic (lattice Boltzmann), continuum (projection-method Navier–Stokes), compressible (finite-volume shock capturing), meshfree (SPH), and spectral (FFT). Every exhibit is checked against an analytical or experimental benchmark, and every one is built to be *watched*.
+**A visual exhibition of worlds in motion — six numerical methods, each written from scratch, each validated against a textbook benchmark, each rendered to be watched.**
+
+Funoos (فانوس — *the lantern of imagination*) shows physics from many angles: kinetic (lattice Boltzmann), continuum (projection Navier–Stokes), compressible (finite-volume shock capturing), meshfree (SPH), spectral (FFT), and pattern-forming (reaction–diffusion). **24 scenes across 6 methods**, browsable in a dark, glassmorphic desktop app — and every solver is checked against an analytical or experimental result.
 
 <p align="center">
-  <img src="results/flow_around_flowzoo.gif" alt="Flow shedding vortices off the word Funoos" width="92%">
+  <img src="results/gallery/lbm_name.gif" alt="Flow shedding vortices off the word Funoos" width="92%">
 </p>
-<p align="center"><em>The signature exhibit: type your name and watch the flow shed vortices off the letters (lattice Boltzmann).</em></p>
+<p align="center"><em>The signature scene: type your name and watch the flow braid vortices off the letters (lattice Boltzmann).</em></p>
 
 ---
 
-## The exhibits
+## The methods & scenes
 
-### 🌀 Kármán vortex street · *Lattice Boltzmann (D2Q9)*
-<img src="results/vortex_street.gif" width="70%">
-Flow past a cylinder sheds the classic alternating wake. **Validated:** Strouhal number **St = 0.20** at Re ≈ 160 (textbook ≈ 0.2).
+| Method | Scenes |
+|---|---|
+| **Lattice–Boltzmann** (D2Q9, BGK) | Kármán vortex street · airfoil · **flow around your name** · **flow through porous rock** (measures permeability) |
+| **Incompressible Navier–Stokes** (projection) | rising smoke · Rayleigh–Taylor fingers · **candle flame** |
+| **Compressible Euler** (finite-volume HLLC) | open-air blast · **shockwave hits a city** (towers crumble) · shock–bubble · twin-bubble |
+| **Smoothed-Particle Hydrodynamics** | dam break · droplet crown · sloshing · pouring · ocean swell · **floating ship** (rigid-body FSI) |
+| **Pseudo-spectral** (FFT) | Kelvin–Helmholtz billows · decaying 2-D turbulence · **chaotic dye mixing** |
+| **Reaction–Diffusion** (Gray–Scott) | Turing patterns: spots · stripes · labyrinth · **mitosis** |
 
-### 🔥 Rising smoke plume · *Incompressible Navier–Stokes*
-<img src="results/smoke_plume.gif" width="40%">
-A buoyant, dyed source rises into a swirling turbulent plume. Projection method + Boussinesq buoyancy + vorticity confinement.
-
-### 🍄 Rayleigh–Taylor instability · *Incompressible Navier–Stokes*
-<img src="results/rayleigh_taylor.gif" width="34%">
-Heavy fluid over light under gravity, rolling into mushroom-cap plumes.
-
-### 💥 Explosion / blast wave · *Compressible Euler (HLLC)*
-<img src="results/explosion.gif" width="48%">
-A high-pressure region bursts into an expanding circular shock (schlieren view).
-
-### 🫧 Shock–bubble interaction · *Compressible Euler (HLLC)*
-<img src="results/shock_bubble.gif" width="70%">
-A planar shock sweeps over a light-gas bubble and rolls it into a vortex pair.
-
-### 🌊 Dam break splash · *Smoothed-Particle Hydrodynamics*
-<img src="results/dam_break.gif" width="70%">
-A water column collapses and surges across a tank — a meshfree, Lagrangian free-surface flow.
-
-### 🌪️ Kelvin–Helmholtz billows · *Pseudo-spectral (FFT)*
-<img src="results/turbulence.gif" width="40%">
-A shear layer rolls up into billows cascading toward 2D turbulence.
+<p align="center">
+  <img src="results/gallery/spec_kh.gif" width="30%">
+  <img src="results/gallery/ns_flame.gif" width="20%">
+  <img src="results/gallery/euler_city.gif" width="33%">
+</p>
+<p align="center">
+  <img src="results/gallery/porous_phi60.gif" width="28%">
+  <img src="results/gallery/rd_mitosis.gif" width="28%">
+  <img src="results/gallery/sph_drop.gif" width="33%">
+</p>
 
 ---
 
-## Validation (every exhibit is checked)
+## Validation — every method is checked
 
-| Exhibit | Method | Benchmark | Result |
+| Scene | Method | Benchmark | Result |
 |---|---|---|---|
-| Vortex street | LBM D2Q9 | Strouhal number (Re≈160) | **St = 0.20** ✓ |
-| Sod shock tube | Compressible HLLC | exact Riemann solution | **mean abs error 0.002** ✓ |
+| Vortex street | LBM D2Q9 | Strouhal number (Re ≈ 160) | **St ≈ 0.20** ✓ (live in the player) |
+| Sod shock tube | Compressible HLLC | exact Riemann solution | **mean abs error ≈ 0.002** ✓ |
 | Kelvin–Helmholtz | Pseudo-spectral | inviscid energy conservation | **drift ≈ 1.5×10⁻⁷** ✓ |
-| Dam break | SPH | dry-bed front speed vs 2√(gH) | front ≈ 0.7× Ritter limit (in the physical range) |
+| Porous flow | Pore-scale LBM | Darcy / Kozeny–Carman | **k = ν⟨u⟩/g**, monotonic in porosity ✓ |
+| Turing patterns | Gray–Scott | Pearson's regimes | reproduces spots/stripes/maze/mitosis ✓ |
+| Dam break | SPH | dry-bed front vs 2√(gH) | front in the physical (Ritter) range ✓ |
 
-<p align="center"><img src="results/shock_tube_validation.png" width="62%"></p>
-<p align="center"><em>The HLLC solver vs. the exact Sod Riemann solution.</em></p>
+These run in `tests/smoke_test.py` (CI): spectral energy, Sod shock, reaction-diffusion bounds, and porous-permeability monotonicity all assert automatically.
 
-## Why each method
-- **Lattice Boltzmann** — kinetic/mesoscopic; trivially handles arbitrary geometry (any obstacle mask, even text).
-- **Incompressible Navier–Stokes (projection)** — the continuum workhorse: pressure–velocity coupling, buoyancy, scalar transport.
-- **Compressible Euler (finite-volume HLLC)** — hyperbolic conservation laws and shock capturing.
-- **SPH** — meshfree Lagrangian particles, natural for free surfaces and splashing.
-- **Pseudo-spectral (FFT)** — high-accuracy methods for turbulence and instabilities.
+---
+
+## Funoos — the app
+
+A **dark glassmorphic desktop app** (HTML/CSS/JS in a [pywebview](https://pywebview.flowrl.com/) shell, with the Python/C++ solvers as the backend):
+
+- **Home** — the brand, the methods, who built it.
+- **Gallery** — an adaptive **bento mosaic** of scenes grouped by method; each opens a detail page with the clip, the **governing equation**, an in-depth write-up, and validation.
+- **Studio** — a **bento dashboard**: tune every parameter (each scene shows only its relevant controls), **Run once**, then switch visualizations live (vorticity / speed / streamlines / schlieren / …), recolor across palettes, scrub/step/speed the playback, read **live KPI tiles** (e.g. permeability, porosity), and open **diagnostic plots** (lift spectrum & Strouhal, energy/enstrophy, blast radius, permeability vs Kozeny–Carman).
+
+```bash
+pip install pywebview imageio-ffmpeg numpy scipy matplotlib pillow
+# build the C++ solvers once (need g++ with OpenMP):
+make -C solvers/lbm && make -C solvers/incompressible && make -C solvers/compressible && make -C solvers/sph
+python funoos_app.py
+```
+
+**Windows `.exe`:** `build_windows.bat` compiles the solvers, bundles the app, and produces `dist\Funoos\Funoos.exe` (needs the WebView2 runtime, preinstalled on Win 10/11). See **[docs/windows_build.md](docs/windows_build.md)**.
+
+The gallery clips ship in `results/gallery/`; regenerate any time with `python render_gallery.py High 1.8`.
+
+### Command-line demos
+Each grid/particle exhibit also has a standalone script that writes a GIF + MP4:
+```bash
+python demos/flow_around_name.py --text "YourName"     # the signature scene
+python demos/vortex_street.py   # ... and smoke_plume, rayleigh_taylor, explosion,
+python demos/shock_tube.py      #     shock_bubble, dam_break, turbulence (--quick for fast)
+```
 
 ## Stack
-**C++** (OpenMP) for the four grid/particle solver cores — fast enough on a CPU to run high resolution, which is what makes the output beautiful — and **Python** (NumPy / SciPy / Pillow / Matplotlib + ffmpeg) for the spectral solver, geometry, text→mask, validation, and a shared cinematic rendering pipeline so the whole gallery looks like one product.
-
-## Run it
-```bash
-# build the C++ solvers (need g++ with OpenMP)
-make -C solvers/lbm && make -C solvers/incompressible
-make -C solvers/compressible && make -C solvers/sph
-
-# then any exhibit (each writes a GIF + MP4 into results/):
-python demos/flow_around_name.py --text "YourName"   # signature
-python demos/vortex_street.py
-python demos/smoke_plume.py
-python demos/rayleigh_taylor.py
-python demos/shock_tube.py          # the Sod validation figure
-python demos/explosion.py
-python demos/shock_bubble.py
-python demos/dam_break.py
-python demos/turbulence.py
-# add --quick to any demo for a fast, low-res smoke test
-```
-
-## 🎛️ Funoos Studio (interactive app)
-A multi-page desktop app containing every solver:
-- **Intro** → what Funoos is and who built it.
-- **Gallery** → browse exhibits; each shows its method, **governing equation**,
-  a plain-English description, and a looping **demo clip**.
-- **Studio** → tune *every* parameter — each with a **"?"** explaining what it
-  does (Reynolds, viscosity, buoyancy, gravity, confinement, dam width/height,
-  particle count, blast pressure, …), set **resolution** and a **free-form
-  duration**, then **Run** once. Afterwards, **switch visualization live**
-  (vorticity / speed / **streamlines** / density / schlieren) and **recolor**
-  (10 palettes) **without re-running**, with **play/pause** and a **colorbar
-  legend** showing the value scale. Export **GIF/MP4**.
-```bash
-pip install customtkinter pillow
-python studio.py
-```
-**Windows users:** either run it under WSL (the window opens via WSLg), or build
-a native `.exe` + installer with the included `build_windows.bat` and
-`installer.iss`. Full step-by-step: **[docs/windows_build.md](docs/windows_build.md)**.
-
-## Performance
-The four grid/particle solvers are **parallelized with OpenMP**; the spectral
-solver uses multithreaded FFTs. On the LBM core the throughput scales near-
-linearly across a handful of cores (≈56 → 211 MLUPS from 1 → 4 threads). Because
-the 2D grids are modest, **~4–16 threads is the sweet spot** — set it explicitly
-for best results:
-```bash
-OMP_NUM_THREADS=8 python demos/vortex_street.py
-```
-Each exhibit's solve runs in roughly **30 s – 2 min on a normal multi-core
-laptop** (no GPU required); GIF encoding is often the slower step.
+**C++ + OpenMP** for the four grid/particle solver cores (fast enough on a CPU to run the high resolution that makes the output beautiful) · **Python** (NumPy/SciPy/Pillow/Matplotlib + ffmpeg via imageio-ffmpeg) for the spectral, reaction–diffusion and quantum solvers, the engine, geometry, text→mask, validation, post-processing diagnostics, and a shared cinematic rendering pipeline · **HTML/CSS/JS** UI in pywebview.
 
 ## Repository layout
 ```
-studio.py     modern CustomTkinter app (intro · gallery · studio)
-solvers/      C++ solver cores: lbm/ incompressible/ compressible/ sph/
-flowzoo/      Python: spectral solver, engine, geometry, text→mask, validate, render
-demos/        one runnable script per exhibit
-results/      the gallery animations (GIF + MP4) and validation figures
-docs/         method notes & validation write-ups
+funoos_app.py     pywebview app (backend bridge to the solvers)
+index.html, web/  the dark glassmorphic UI (CSS + JS, no external libraries)
+solvers/          C++ solver cores: lbm/ incompressible/ compressible/ sph/
+flowzoo/          engine · catalog · spectral · reaction · quantum · geometry · postproc · render · validate
+demos/            one runnable script per grid/particle exhibit
+results/gallery/  the gallery clips (GIF + full-res MP4), one per scene
+docs/             method notes, equation images, Windows build guide
+tests/            smoke + validation suite
+studio.py         legacy CustomTkinter desktop app (superseded by funoos_app.py)
 ```
 
 ## License
-MIT — see [LICENSE](LICENSE). Built by Saleh Rezaee.
+MIT — see [LICENSE](LICENSE). Built by **Saleh Mohammadrezaei** · salehmrezaee@gmail.com
