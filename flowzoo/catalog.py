@@ -72,7 +72,7 @@ SCENES = [
               "a train of counter-rotating convection cells. Pattern formation from pure instability — "
               "the same overturning that drives weather, oceans and the mantle."},
     {"method": "Incompressible Navier–Stokes", "exhibit": "Chimney Plume", "key": "ns_chimney",
-     "name": "Chimney Plume in Wind", "preset": {"buoyancy": 0.005, "wind": 0.1, "source": 0.6, "confinement": 6},
+     "name": "Chimney Plume in Wind", "preset": {"buoyancy": 0.0048, "wind": 0.14, "source": 0.55, "confinement": 6},
      "cmap": "Smoke (mono)",
      "blurb": "A buoyant plume leaving a stack into a steady crosswind. Buoyancy lifts it while the "
               "wind pushes it sideways, so it bends over into the classic slanted smokestack trail. "

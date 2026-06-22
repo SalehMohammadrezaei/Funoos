@@ -106,7 +106,8 @@ class Result:
             if view == "Dye":
                 v0, v1 = self.hints["vlim"]
                 return [render.add_colorbar(
-                    render.field_to_rgb(s, cm, v0, v1, upscale=1, gamma=self.hints["gamma"]),
+                    render.field_to_rgb(s, cm, v0, v1, upscale=1, gamma=self.hints["gamma"],
+                                        mask=self.mask, mask_color="#6e6358"),
                     cm, v0, v1, self.hints.get("label", "")) for s in self.raw]
             return self._render_vel(self.hints["vel"], view, cm, None)
         if self.kind == "particles":
@@ -361,13 +362,13 @@ def _solve_windtunnel(p, pr, tmp):
         probe = cx + int(3 * D)
     elif obs == "F1 car":
         L = ny * 1.05; cx = int(nx * 0.30)
-        mask = geometry.f1_car(nx, ny, cx, cy, L); D = 0.30 * L; probe = cx + int(2.4 * L)
+        mask = geometry.f1_car(nx, ny, cx, L); D = 0.34 * L; probe = cx + int(2.4 * L)
     elif obs == "Cyclist":
-        S = ny * 0.46; cx = int(nx * 0.25)
-        mask = geometry.cyclist(nx, ny, cx, cy, S, riders=1); D = 0.5 * S; probe = cx + int(3 * S)
+        S = ny * 0.42; cx = int(nx * 0.24)
+        mask = geometry.cyclist(nx, ny, cx, S, riders=1); D = 0.6 * S; probe = cx + int(3 * S)
     elif obs == "Peloton (drafting)":
-        S = ny * 0.50; cx = int(nx * 0.30)
-        mask = geometry.cyclist(nx, ny, cx, cy, S, riders=2, gap=1.1); D = 0.5 * S; probe = cx + int(3 * S)
+        S = ny * 0.38; cx = int(nx * 0.28)
+        mask = geometry.cyclist(nx, ny, cx, S, riders=2, gap=1.0); D = 0.6 * S; probe = cx + int(3 * S)
     else:                                                   # Cylinder
         mask = geometry.cylinder(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
     tau = 0.5 + 3 * (U * D / Re)
@@ -453,7 +454,13 @@ def _solve_ns(mode, p, pr, tmp):
         b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
         return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
     hints["vel"] = [_rv(i) for i in idx]                     # for Speed/Vorticity/Streamlines
-    return Result("ns", raw, f"{mode}  {nx}×{ny}", hints=hints)
+    mask = None
+    if mode == "wind":                                       # draw the solid chimney stack
+        stack_h = int(0.32 * ny); sxx = nx // 4
+        sw = max(6, int(nx / 12 * float(p["source"]))); hw = max(2, sw // 2)
+        mask = np.zeros((ny, nx), np.uint8)
+        mask[0:stack_h, max(0, sxx - hw):min(nx, sxx + hw + 1)] = 1
+    return Result("ns", raw, f"{mode}  {nx}×{ny}", hints=hints, mask=mask)
 
 
 def _solve_euler(mode, p, pr, tmp):

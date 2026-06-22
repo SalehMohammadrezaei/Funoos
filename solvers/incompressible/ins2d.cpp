@@ -144,6 +144,13 @@ int main(int argc,char**argv){
     int nf=0;
     int sx = wind ? nx/4 : nx/2;                 // chimney sits upwind so the plume can bend across
     int sw=std::max(6,(int)(nx/12*a.srcw)), sh=std::max(5,ny/26);
+    int stack_h  = wind ? (int)(0.32*ny) : 0;    // chimney height; the plume leaves its top
+    int stack_hw = std::max(2, sw/2);            // chimney half-width (solid)
+    int sj = wind ? stack_h : 1;                 // source sits at the stack mouth, not on the floor
+    // zero the velocity inside the solid chimney so the wind flows around it
+    auto solidify=[&](){ if(!wind) return;
+        for(int j=0;j<stack_h;j++) for(int i=std::max(0,sx-stack_hw);i<=std::min(nx-1,sx+stack_hw);i++){
+            u[IX(i,j)]=0; v[IX(i,j)]=0; } };
 
     for(int step=0; step<=a.steps; step++){
         // forces: buoyancy + (smoke/wind) continuous source + vorticity confinement
@@ -153,9 +160,9 @@ int main(int argc,char**argv){
             int off=(int)(a.flicker*sw*0.8*(sin(ph)+0.4*sin(2.3*ph+1.0)));
             double str=1.0 + a.flicker*0.5*sin(1.7*ph);
             int sxx=std::min(nx-2-sw, std::max(1+sw, sx+off));
-            for(int j=1;j<1+sh;j++)for(int i=sxx-sw;i<=sxx+sw;i++){
+            for(int j=sj;j<sj+sh;j++)for(int i=sxx-sw;i<=sxx+sw;i++){
                 double r=double(i-sxx)/sw; double g=exp(-3*r*r);
-                s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g*str);
+                s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.55*g*str);
                 v[IX(i,j)] += 0.02*g*str;
             }
         }
@@ -180,11 +187,11 @@ int main(int argc,char**argv){
                 v[IX(i,j)] += a.dt*a.conf*1e-2*(-gx*w[IX(i,j)]);
             }
         }
-        set_bc(u,1); set_bc(v,2);
+        set_bc(u,1); set_bc(v,2); solidify();
 
         // advect velocity
         u0=u; v0=v; advect(u,u0); advect(v,v0); set_bc(u,1); set_bc(v,2);
-        project();
+        project(); solidify();
         // advect scalar
         s0=s; advect(s,s0); set_bc(s,0);
         if(rb){ for(int i=0;i<nx;i++){ s[IX(i,0)]=1.0; s[IX(i,ny-1)]=0.0; } }  // fixed hot/cold plates

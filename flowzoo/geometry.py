@@ -79,57 +79,60 @@ def text(nx, ny, string, font_frac=0.55, x_frac=0.5, max_w_frac=0.9,
     return (arr[::-1] > 127).astype(np.uint8)  # flip so text is upright in +y-up
 
 
-def f1_car(nx, ny, cx, cy, length):
-    """A Formula-1 car silhouette in side profile, nose into the wind (pointing −x).
+def f1_car(nx, ny, cx, length, clearance=4):
+    """A realistic Formula-1 side profile sitting on the ground, nose into the wind (−x).
 
-    A bluff but streamlined body: tapered nose + front wing, a roll-hoop/airbox,
-    a tall rear wing, and two wheels — the classic open-wheel aero shape.
+    Traced outline: low front wing + endplate, a raised nose, cockpit with halo,
+    the airbox peak above the driver, a sloping engine cover, a tall rear wing,
+    the diffuser, and two ground-contact wheels — the classic open-wheel shape.
     """
     img = Image.new("L", (nx, ny), 0); d = ImageDraw.Draw(img)
-    L = float(length)
-    def X(f): return cx + f * L
-    def Y(f): return cy + f * L            # +Y is downward in PIL; flipped at the end → ground side
-    d.polygon([(X(-0.50), Y(0.02)), (X(-0.40), Y(-0.04)), (X(0.30), Y(-0.05)),
-               (X(0.46), Y(0.00)), (X(0.46), Y(0.10)), (X(-0.46), Y(0.10))], fill=255)   # body/floor
-    d.polygon([(X(-0.50), Y(0.02)), (X(-0.30), Y(-0.02)), (X(-0.30), Y(0.07))], fill=255)  # nose cone
-    d.rectangle([X(-0.56), Y(0.07), X(-0.42), Y(0.13)], fill=255)                          # front wing
-    d.polygon([(X(-0.02), Y(-0.05)), (X(0.05), Y(-0.14)), (X(0.13), Y(-0.14)),
-               (X(0.16), Y(-0.05))], fill=255)                                             # roll hoop / airbox
-    d.rectangle([X(0.40), Y(-0.17), X(0.50), Y(-0.05)], fill=255)                          # rear wing post
-    d.rectangle([X(0.34), Y(-0.18), X(0.54), Y(-0.12)], fill=255)                          # rear wing plane
-    rw = 0.10 * L
-    for fx in (-0.34, 0.30):                                                               # front & rear wheels
-        d.ellipse([X(fx) - rw, Y(0.09) - rw, X(fx) + rw, Y(0.09) + rw], fill=255)
-    arr = np.asarray(img)
-    return (arr[::-1] > 127).astype(np.uint8)
+    L = float(length); B = ny - 1 - clearance         # ground line; v = height above it
+    def P(u, v): return (cx + u * L, B - v * L)
+    outline = [(-0.50, 0.085), (-0.50, 0.125), (-0.42, 0.125), (-0.40, 0.135),
+               (-0.36, 0.20), (-0.16, 0.225), (-0.06, 0.215),
+               (-0.02, 0.255), (0.02, 0.255), (0.03, 0.215),
+               (0.05, 0.305), (0.115, 0.305), (0.14, 0.245),
+               (0.30, 0.185), (0.37, 0.185),
+               (0.40, 0.345), (0.53, 0.345), (0.53, 0.305), (0.435, 0.305),
+               (0.435, 0.20), (0.52, 0.20), (0.52, 0.10),
+               (0.36, 0.085), (-0.40, 0.085)]
+    d.polygon([P(u, v) for u, v in outline], fill=255)
+    d.rectangle([P(-0.56, 0.10)[0], P(-0.56, 0.10)[1], P(-0.42, 0.05)[0], P(-0.42, 0.05)[1]], fill=255)  # front-wing endplate
+    rw = 0.135 * L
+    for u in (-0.29, 0.30):                            # wheels touching the road
+        x0, y0 = P(u, 0.0); d.ellipse([x0 - rw, y0 - rw, x0 + rw, y0 + rw], fill=255)
+    return (np.asarray(img)[::-1] > 127).astype(np.uint8)
 
 
-def cyclist(nx, ny, cx, cy, size, riders=1, gap=1.05):
-    """One or more cyclists in an aero tuck, facing the wind (−x).
+def cyclist(nx, ny, cx, size, riders=1, gap=1.0, clearance=4):
+    """A realistic road cyclist (spoked wheels, diamond frame, rider in a racing tuck)
+    sitting on the road, facing the wind (−x).
 
-    With riders=2 the second sits in the leader's slipstream — a drafting pair,
-    so the sheltered low-speed pocket between them is visible.
+    With riders=2 the second sits in the leader's slipstream — a drafting pair, so the
+    sheltered low-speed pocket behind the leader is visible.
     """
     img = Image.new("L", (nx, ny), 0); d = ImageDraw.Draw(img)
-    S = float(size)
-    rw = 0.17 * S; lw = max(2, int(0.05 * S))
+    S = float(size); B = ny - 1 - clearance
+    rw = 0.30 * S; lw = max(2, int(0.045 * S))
     def draw_one(ox):
-        def X(f): return cx + ox + f * S
-        def Y(f): return cy + f * S
-        for fx in (-0.34, 0.32):                                # two wheels (solid discs)
-            d.ellipse([X(fx) - rw, Y(0.30) - rw, X(fx) + rw, Y(0.30) + rw], fill=255)
-        d.line([X(-0.34), Y(0.30), X(-0.10), Y(0.30)], fill=255, width=lw)       # frame
-        d.line([X(0.32), Y(0.30), X(-0.10), Y(0.30)], fill=255, width=lw)
-        d.polygon([(X(0.10), Y(0.04)), (X(-0.22), Y(-0.10)), (X(-0.30), Y(-0.02)),
-                   (X(-0.06), Y(0.30)), (X(0.16), Y(0.30))], fill=255)            # tuck: head/shoulders into wind (−x)
-        hr = 0.12 * S
-        d.ellipse([X(-0.28) - hr, Y(-0.16) - hr, X(-0.28) + hr, Y(-0.16) + hr], fill=255)  # head/helmet (forward, −x)
-    total = riders
-    start = -0.5 * (total - 1) * gap
-    for k in range(total):
+        def P(u, v): return (cx + ox + u * S, B - v * S)
+        for u in (-0.42, 0.42):                        # spoked wheels (rim rings)
+            x0, y0 = P(u, 0.30); d.ellipse([x0 - rw, y0 - rw, x0 + rw, y0 + rw], outline=255, width=max(3, int(0.08 * S)))
+        bb, seat, hbar, fw, rwc = P(0.0, 0.30), P(0.14, 0.66), P(-0.40, 0.62), P(-0.42, 0.30), P(0.42, 0.30)
+        for a, b in [(bb, seat), (bb, fw), (bb, rwc), (seat, rwc), (seat, hbar), (fw, hbar)]:  # frame + fork + bars
+            d.line([a, b], fill=255, width=lw)
+        hip, sh = P(0.10, 0.66), P(-0.18, 0.74)
+        d.line([hip, sh], fill=255, width=int(lw * 2.2))                          # torso (leaning forward)
+        d.line([sh, hbar], fill=255, width=lw)                                    # arm to the bars
+        knee = P(-0.02, 0.40)
+        d.line([hip, knee], fill=255, width=int(lw * 1.6)); d.line([knee, bb], fill=255, width=int(lw * 1.6))  # leg
+        hr = 0.11 * S; hx, hy = P(-0.26, 0.78)
+        d.ellipse([hx - hr, hy - hr, hx + hr, hy + hr], fill=255)                 # helmet (forward, −x)
+    start = -0.5 * (riders - 1) * gap
+    for k in range(riders):
         draw_one((start + k * gap) * S)
-    arr = np.asarray(img)
-    return (arr[::-1] > 127).astype(np.uint8)
+    return (np.asarray(img)[::-1] > 127).astype(np.uint8)
 
 
 def porous(nx, ny, solid_frac=0.4, grain=12, seed=0):
