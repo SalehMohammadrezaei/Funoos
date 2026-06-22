@@ -8,98 +8,118 @@
 </head>
 <body>
 <div id="bg"></div>
+<canvas id="heroCanvas"></canvas>
 <div id="app">
 
-  <!-- ───────── intro ───────── -->
-  <section class="view active" id="intro">
-    <div class="wrap">
-      <div class="wordmark"><span class="fun">FUN</span><span class="oos">OOS</span></div>
-      <div class="tagline">Where imagination becomes vision.</div>
-      <div class="subtitle">A visual exhibition of worlds in motion —<br>flows illuminated through simulation.</div>
-      <div class="introchips">
-        <span class="chip">Lattice-Boltzmann</span><span class="chip">Navier–Stokes</span>
-        <span class="chip">Compressible Euler</span><span class="chip">SPH</span><span class="chip">Spectral</span>
-      </div>
-      <button class="btn btn-primary cta" onclick="show('gallery')">Enter the gallery →</button>
-      <div class="credit">
-        <div class="kicker">created by</div>
-        <div class="name">Saleh Mohammadrezaei</div>
-        <div class="mail">salehmrezaee@gmail.com</div>
-      </div>
-    </div>
-  </section>
+  <!-- persistent rail -->
+  <nav id="rail">
+    <div class="logo">F</div>
+    <button class="railbtn" data-view="intro" onclick="show('intro')">⌂<span class="lbl">Home</span></button>
+    <button class="railbtn" data-view="gallery" onclick="show('gallery')">▦<span class="lbl">Gallery</span></button>
+    <button class="railbtn" data-view="studio" onclick="show('studio')">⚙<span class="lbl">Studio</span></button>
+    <div class="railspace"></div>
+  </nav>
 
-  <!-- ───────── gallery ───────── -->
-  <section class="view" id="gallery">
-    <div class="topbar">
-      <span class="back" onclick="show('intro')">‹ Home</span>
-      <span class="brand"><b>FUN</b>OOS</span>
-      <span class="muted" style="font-size:13px">· the gallery — sixteen scenes, five solvers</span>
-    </div>
-    <div class="body scroll" id="gallery-grid"></div>
-  </section>
+  <div id="content">
 
-  <!-- ───────── detail ───────── -->
-  <section class="view" id="detail">
-    <div class="topbar">
-      <span class="back" onclick="show('gallery')">‹ Gallery</span>
-      <span class="brand"><b>FUN</b>OOS</span>
-    </div>
-    <div class="body">
-      <div class="media">
-        <div class="kicker" id="d-method"></div>
-        <h1 id="d-title" style="margin:6px 0 14px"></h1>
-        <video id="d-video" autoplay loop muted playsinline></video>
-        <button class="btn btn-blue" style="margin-top:16px;padding:15px 26px;width:100%"
-                id="d-open">Open in Studio →</button>
-      </div>
-      <div class="scroll" id="d-text" style="padding-right:8px"></div>
-    </div>
-  </section>
-
-  <!-- ───────── studio ───────── -->
-  <section class="view" id="studio">
-    <div class="topbar">
-      <span class="back" onclick="show('gallery')">‹ Gallery</span>
-      <span class="brand"><b>FUN</b>OOS</span>
-      <span class="muted" id="s-name" style="font-size:13px"></span>
-    </div>
-    <div class="body">
-      <div class="glass panel">
-        <div class="kicker">parameters</div>
-        <div class="params" id="s-params"></div>
-        <button class="btn btn-primary runbtn" id="s-run" onclick="runSim()">▶  Run simulation</button>
-        <div class="status" id="s-status">Ready.</div>
-      </div>
-      <div class="stage">
-        <div class="viewbar">
-          <div class="seg" id="s-views"></div>
-          <select id="s-cmap" onchange="recolor()"></select>
-          <span class="spacer"></span>
-          <button class="btn btn-ghost" style="padding:9px 16px" id="s-plots" onclick="togglePlots()">📊 Plots</button>
+    <!-- ───────── intro ───────── -->
+    <section class="view active" id="intro">
+      <div class="wrap">
+        <div class="wordmark reveal"><span class="fun">FUN</span><span class="oos">OOS</span></div>
+        <div class="tagline reveal">Where imagination becomes vision.</div>
+        <div class="subtitle reveal">A visual exhibition of worlds in motion —<br>flows illuminated through simulation.</div>
+        <div class="statrow reveal">
+          <div class="stat"><div class="n" data-count="6">0</div><div class="l">methods</div></div>
+          <div class="stat"><div class="n" data-count="24">0</div><div class="l">scenes</div></div>
+          <div class="stat"><div class="n" data-count="5">0</div><div class="l">solvers, from scratch</div></div>
         </div>
-        <div class="screen glass">
-          <video id="s-video" loop playsinline></video>
-          <div class="spin" id="s-spin"></div>
-          <div class="hint" id="s-hint">Set parameters&nbsp;›&nbsp;Run ▶<br>then switch views live</div>
-          <div class="plots scroll" id="s-plotpanel"></div>
+        <div class="introchips reveal">
+          <span class="chip">Lattice-Boltzmann</span><span class="chip">Navier–Stokes</span>
+          <span class="chip">Compressible Euler</span><span class="chip">SPH</span>
+          <span class="chip">Spectral</span><span class="chip">Reaction–Diffusion</span>
         </div>
-        <div class="glass transport" id="s-transport" style="display:none">
-          <button onclick="vSeek(0)">⏮</button>
-          <button onclick="vStep(-1)">◀</button>
-          <button id="s-play" onclick="vToggle()">▶</button>
-          <button onclick="vStep(1)">▶▶</button>
-          <input type="range" class="scrub" id="s-scrub" min="0" max="1000" value="0" oninput="vScrub()">
-          <span class="tlabel" id="s-time">0:00</span>
-          <span class="muted" style="font-size:12px">speed</span>
-          <button onclick="vSpeed(-1)">–</button><span class="tlabel" id="s-rate" style="min-width:34px">1×</span>
-          <button onclick="vSpeed(1)">+</button>
+        <button class="btn btn-primary cta reveal" onclick="show('gallery')">Enter the gallery →</button>
+        <div class="credit reveal">
+          <div class="kicker">created by</div>
+          <div class="name">Saleh Mohammadrezaei</div>
+          <div class="mail">salehmrezaee@gmail.com</div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
+    <!-- ───────── gallery ───────── -->
+    <section class="view" id="gallery">
+      <div class="body scroll" id="gallery-scroll">
+        <div class="gtitle"><h1>The Gallery</h1><span class="sub">— browse by method, then scene</span></div>
+        <div id="gallery-grid"></div>
+      </div>
+    </section>
+
+    <!-- ───────── detail ───────── -->
+    <section class="view" id="detail">
+      <div class="topbar">
+        <span class="back" onclick="show('gallery')">‹ Gallery</span>
+        <span class="brand"><b>FUN</b>OOS</span>
+      </div>
+      <div class="body">
+        <div class="media">
+          <div class="kicker" id="d-method"></div>
+          <h1 id="d-title" style="margin:6px 0 14px"></h1>
+          <video id="d-video" autoplay loop muted playsinline></video>
+          <button class="btn btn-blue" style="margin-top:16px;padding:15px 26px;width:100%" id="d-open">Open in Studio →</button>
+        </div>
+        <div class="scroll" id="d-text" style="padding-right:8px"></div>
+      </div>
+    </section>
+
+    <!-- ───────── studio (bento dashboard) ───────── -->
+    <section class="view" id="studio">
+      <div class="dash">
+        <div class="glass tile t-params">
+          <div class="kicker" id="s-name">parameters</div>
+          <div class="params" id="s-params"></div>
+          <button class="btn btn-primary runbtn" id="s-run" onclick="runSim()">▶  Run simulation</button>
+          <div class="status" id="s-status">Ready.</div>
+        </div>
+
+        <div class="tile t-stage">
+          <div class="viewbar">
+            <div class="seg" id="s-views"></div>
+            <select id="s-cmap" onchange="recolor()"></select>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost" style="padding:9px 16px" id="s-plots" onclick="togglePlots()">📊 Plots</button>
+          </div>
+          <div class="screen glass">
+            <video id="s-video" loop playsinline></video>
+            <div class="hint" id="s-hint">Pick a scene from the Gallery, set parameters,<br>then Run ▶ — switch views live.</div>
+            <div class="skel" id="s-skel"><div class="msg" id="s-skelmsg">simulating…</div></div>
+            <div class="plots scroll" id="s-plotpanel"></div>
+          </div>
+        </div>
+
+        <div class="glass tile t-kpis">
+          <div class="kicker">readouts</div>
+          <div class="kpis" id="s-kpis"><div class="muted" style="font-size:12px">Run a simulation to see live readouts.</div></div>
+        </div>
+
+        <div class="glass tile t-transport">
+          <div class="transport">
+            <button onclick="vSeek(0)">⏮</button>
+            <button onclick="vStep(-1)">◀</button>
+            <button id="s-play" onclick="vToggle()">▶</button>
+            <button onclick="vStep(1)">▶▶</button>
+            <input type="range" class="scrub" id="s-scrub" min="0" max="1000" value="0" oninput="vScrub()">
+            <span class="tlabel" id="s-time">0:00 / 0:00</span>
+            <span class="muted" style="font-size:12px">speed</span>
+            <button onclick="vSpeed(-1)">–</button><span class="tlabel" id="s-rate" style="min-width:34px">1×</span><button onclick="vSpeed(1)">+</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
 </div>
+<div id="toasts"></div>
 <script src="web/app.js"></script>
 </body>
 </html>

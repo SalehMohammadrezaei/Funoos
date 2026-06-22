@@ -57,6 +57,20 @@ def _eq_b64(exhibit):
     return None
 
 
+def _stats(res, exhibit):
+    """Live KPI readouts for the Studio dashboard tiles."""
+    h = res.hints
+    meth = engine.META.get(exhibit, {}).get("method", "").split("·")[0].strip()
+    out = []
+    if res.kind == "porous":
+        out.append({"l": "permeability k", "v": f"{h.get('permeability', 0):.2f}", "u": "cells²", "accent": True})
+        out.append({"l": "porosity φ", "v": f"{h.get('porosity', 0):.2f}"})
+    out.append({"l": "frames", "v": str(len(res.raw))})
+    out.append({"l": "views", "v": str(len(res.views))})
+    out.append({"l": "method", "v": meth})
+    return out
+
+
 class Api:
     def __init__(self):
         self._runs = {}          # run_id -> {result, views, info}
@@ -105,7 +119,7 @@ class Api:
         self._runs[rid] = {"result": res, "info": res.info}
         return {"run_id": rid, "video": vid, "views": list(res.views),
                 "view": view, "info": res.info, "cmaps": list(render.COLORMAPS),
-                "defcmap": cm}
+                "defcmap": cm, "stats": _stats(res, exhibit)}
 
     def render_view(self, run_id, view, cmap=None, fps=26):
         r = self._runs.get(run_id)
