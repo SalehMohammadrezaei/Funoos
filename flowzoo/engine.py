@@ -424,7 +424,7 @@ def _solve_ns(mode, p, pr, tmp):
     elif mode == "rb":
         nx, ny = int(480 * s), int(230 * s)         # wide, shallow cell for convection rolls
     else:                                           # wind
-        nx, ny = int(480 * s), int(300 * s)         # wide box so the plume bends across it
+        nx, ny = int(540 * s), int(420 * s)         # tall, wide box: open top, the plume rises & blows across
     _ensure(_bin("incompressible", "ins2d"))
     args = [str(_bin("incompressible", "ins2d")), "--mode", mode, "--nx", str(nx),
             "--ny", str(ny), "--steps", str(steps), "--save_every", str(max(1, steps // 110)),

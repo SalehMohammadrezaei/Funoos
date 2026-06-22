@@ -15,10 +15,12 @@ function show(v) {
   $("#heroCanvas").style.opacity = v === "intro" ? 0.5 : 0.1;
   if (v !== "studio") { const sv = $("#s-video"); if (sv) sv.pause(); }
   if (v === "intro") { revealAll($("#intro")); runCounters(); }
-  if (v === "gallery") {                       // always return to the top, each row on its first scene
-    const r = $("#gallery-rows"); if (r) r.scrollTop = 0;
-    _rows.forEach(c => { c._idx = 0; layoutRow(c); });
-  }
+  if (v === "gallery") resetGallery();          // always open on the first scene of each row, scrolled to top
+}
+function resetGallery() {
+  _rows.forEach(c => { c._idx = 0; c._suppress = false; layoutRow(c); });
+  const r = $("#gallery-rows");
+  if (r) { r.scrollTop = 0; requestAnimationFrame(() => { r.scrollTop = 0; }); }   // also after layout settles
 }
 function revealAll(root) {
   root.querySelectorAll(".reveal").forEach((e, i) => { e.classList.remove("in"); setTimeout(() => e.classList.add("in"), 80 + i * 90); });
