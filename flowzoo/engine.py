@@ -251,7 +251,7 @@ class Result:
         dp = self.hints.get("dp", 0.04); DPI = 110
         px_per_unit = 6.4 * DPI / Lx
         diam_pt = dp * px_per_unit / (DPI / 72.0)
-        PSIZE = float(np.clip((diam_pt * 1.35) ** 2, 5.0, 44.0))
+        PSIZE = float(np.clip((diam_pt * 1.35) ** 2, 5.0, 230.0))  # high cap so a fine glass reads as continuous water
         out = []
         for fi, d in enumerate(self.raw):
             fig = plt.figure(figsize=(6.4, 6.4 * Ly / Lx), dpi=DPI)
@@ -475,20 +475,26 @@ def _solve_euler(mode, p, pr, tmp):
 _SPLASH_SCENE = {"Dam break": "dam", "Drop & splash": "drop", "Sloshing tank": "slosh",
                  "Pour into a glass": "pour", "Wavy ocean": "waves", "Ship on waves": "ship"}
 _SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2),
-                "pour": (2.2, 3.4), "waves": (6.0, 2.4), "ship": (6.0, 2.4)}
+                "pour": (0.13, 0.20), "waves": (6.0, 2.4), "ship": (6.0, 2.4)}   # pour = a real glass
 
 
 def _solve_dam(p, pr, tmp):
     sc = _SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam")
     Lx, Ly = _SPLASH_TANK[sc]
     a = float(p.get("dropsize", 0.4)) if sc == "drop" else float(p["width"])
-    H = float(p["height"])
-    npart = max(500.0, float(p["particles"]))
-    dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08))
     g = float(p["gravity"])
+    npart = max(500.0, float(p["particles"]))
+    if sc == "pour":                          # a glass: scale sound speed to the glass, resolve its width
+        H = Ly; dp = Lx / 44.0; tend = 3.0 * _durv(p)
+    else:
+        H = float(p["height"]); dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08))
+        tend = 2.0 * _durv(p)
+    c0 = 10.0 * (g * max(H, Ly * 0.5)) ** 0.5         # solver's sound speed (for frame cadence)
+    steps_est = tend / (0.08 * 1.3 * dp / c0)
+    save_every = max(20, int(steps_est // 120))       # ~120 frames whatever the scene scale
     args = [str(_bin("sph", "sph2d")), "--scene", sc, "--a", str(a), "--H", str(H),
             "--Lx", str(Lx), "--Ly", str(Ly), "--dp", str(dp), "--g", str(g),
-            "--tend", str(2.0 * _durv(p)), "--save_every", "60", "--out", tmp]
+            "--tend", str(tend), "--save_every", str(save_every), "--out", tmp]
     if sc == "drop":
         args += ["--dh", str(p.get("dropheight", 0.70))]
     elif sc == "slosh":
@@ -504,7 +510,11 @@ def _solve_dam(p, pr, tmp):
     subprocess.run(args, check=True, env=_ENV)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3) for i in idx]
-    hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": 1.2 * np.sqrt(2 * g * max(H, Ly * 0.5))}
+    if sc == "pour":          # colour by the pour/impact speed, not a dam-height scale
+        vmax = 1.3 * max(float(p.get("pourv", 1.4)), float(np.sqrt(2 * g * Ly)))
+    else:
+        vmax = 1.2 * float(np.sqrt(2 * g * max(H, Ly * 0.5)))
+    hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": vmax}
     if sc == "ship":
         hints["hull"] = [np.fromfile(Path(tmp) / f"hull_{i:05d}.bin", dtype=np.float32).reshape(-1, 2)
                          for i in idx]
@@ -689,7 +699,7 @@ EXHIBITS = {
                    _when(_f("spout", "Spout width (frac.)", 0.045, 0.02, 0.12, "Geometry",
                             "Width of the pour stream as a fraction of the tank width."),
                          "scene", ["Pour into a glass"]),
-                   _when(_f("pourv", "Pour speed (m/s)", 2.2, 0.5, 5.0, "Physics",
+                   _when(_f("pourv", "Pour speed (m/s)", 1.4, 0.4, 3.0, "Physics",
                             "Speed the water leaves the spout. Faster → more splashing on impact."),
                          "scene", ["Pour into a glass"]),
                    # --- wavy ocean / ship ---
