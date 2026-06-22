@@ -47,11 +47,19 @@
       </div>
     </section>
 
-    <!-- ───────── gallery ───────── -->
+    <!-- ───────── gallery (coverflow carousel) ───────── -->
     <section class="view" id="gallery">
-      <div class="body scroll" id="gallery-scroll">
-        <div class="gtitle"><h1>The Gallery</h1><span class="sub">— browse by method, then scene</span></div>
-        <div id="gallery-grid"></div>
+      <div class="gal-head">
+        <div class="kicker">gallery</div>
+        <h1>Worlds in Motion</h1>
+        <div class="gal-sub">Twenty-four simulations across six numerical methods — slide through each.</div>
+        <div class="pills" id="gal-pills"></div>
+      </div>
+      <div class="carousel" id="gal-carousel"></div>
+      <div class="carousel-nav">
+        <button id="gal-prev" aria-label="previous">←</button>
+        <div class="dots" id="gal-dots"></div>
+        <button id="gal-next" aria-label="next">→</button>
       </div>
     </section>
 

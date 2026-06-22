@@ -15,6 +15,7 @@ function show(v) {
   $("#heroCanvas").style.opacity = v === "intro" ? 0.5 : 0.1;
   if (v !== "studio") { const sv = $("#s-video"); if (sv) sv.pause(); }
   if (v === "intro") { revealAll($("#intro")); runCounters(); }
+  if (v === "gallery" && GAL.length) galLayout();
 }
 function revealAll(root) {
   root.querySelectorAll(".reveal").forEach((e, i) => { e.classList.remove("in"); setTimeout(() => e.classList.add("in"), 80 + i * 90); });
@@ -36,49 +37,55 @@ function runCounters() {
   });
 }
 
-/* ───────── gallery ───────── */
-const _io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); _io.unobserve(e.target); } }),
-  { root: null, threshold: 0.12 });
+/* ───────── gallery: coverflow carousel ───────── */
+const SHORT = {
+  "Lattice–Boltzmann": "LBM", "Incompressible Navier–Stokes": "Navier–Stokes",
+  "Compressible Euler": "Euler", "Smoothed-Particle Hydrodynamics": "SPH",
+  "Pseudo-spectral": "Spectral", "Reaction–Diffusion": "Reaction"
+};
+let GAL = [], GMETHOD = 0, GINDEX = 0;
 async function buildGallery() {
-  const groups = await api().catalog();
-  const root = $("#gallery-grid"); root.innerHTML = "";
-  for (const g of groups) {
-    const head = el("div", "method-head reveal");
-    head.append(el("div", "bar"), el("div", "name", g.method),
-      el("div", "count", `${g.scenes.length} scene${g.scenes.length > 1 ? "s" : ""}`));
-    root.append(head); _io.observe(head);
-    const grid = el("div", "grid");
-    g.scenes.forEach((s, i) => grid.append(sceneCard(s, i === 0)));
-    root.append(grid);
-  }
+  GAL = await api().catalog();
+  const pills = $("#gal-pills"); pills.innerHTML = "";
+  GAL.forEach((g, i) => { const b = el("button", "pill" + (i ? "" : " on"), SHORT[g.method] || g.method); b.onclick = () => selectMethod(i); pills.append(b); });
+  $("#gal-prev").onclick = galPrev; $("#gal-next").onclick = galNext;
+  selectMethod(0);
 }
-function sceneCard(s, feat) {
-  const card = el("div", "card reveal" + (feat ? " s-lg" : ""));
-  const clip = el("div", "clip");
-  if (s.clip) {
-    const v = el("video"); v.src = s.clip; v.autoplay = v.loop = v.muted = true; v.playsInline = true;
-    v.addEventListener("loadedmetadata", () => {           // bento sizing from the clip's shape
-      if (card.classList.contains("s-lg") || !v.videoHeight) return;
-      const a = v.videoWidth / v.videoHeight;
-      if (a <= 0.95) card.classList.add("s-tall");          // vertical scene → tall tile
-      else if (a >= 1.85) card.classList.add("s-wide");     // wide scene → wide tile
-    });
-    clip.append(v);
-  }
-  const ov = el("div", "overlay");
-  ov.append(el("div", "nm", s.name), el("div", "bl", s.blurb));
-  card.append(clip, ov, el("div", "play", "▶"));
-  card.onclick = () => openDetail(s.key);
-  attachTilt(card); _io.observe(card);
-  return card;
-}
-function attachTilt(card) {
-  card.addEventListener("pointermove", e => {
-    const r = card.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
-    card.style.transform = `translateY(-6px) rotateX(${(-py * 6).toFixed(2)}deg) rotateY(${(px * 7).toFixed(2)}deg) scale(1.02)`;
+function selectMethod(i) {
+  GMETHOD = i; GINDEX = 0;
+  document.querySelectorAll(".pill").forEach((p, k) => p.classList.toggle("on", k === i));
+  const car = $("#gal-carousel"); car.innerHTML = "";
+  GAL[i].scenes.forEach((s, k) => {
+    const c = el("div", "ccard");
+    if (s.clip) { const v = el("video"); v.src = s.clip; v.autoplay = v.loop = v.muted = true; v.playsInline = true; c.append(v); }
+    c.append(el("div", "cov"), el("div", "play", "▶"), el("div", "nm", s.name));
+    c.onclick = () => { if (k === GINDEX) openDetail(s.key); else { GINDEX = k; galLayout(); } };
+    car.append(c);
   });
-  card.addEventListener("pointerleave", () => { card.style.transform = ""; });
+  const dots = $("#gal-dots"); dots.innerHTML = "";
+  GAL[i].scenes.forEach((s, k) => { const o = el("div", "dot"); o.onclick = () => { GINDEX = k; galLayout(); }; dots.append(o); });
+  galLayout();
 }
+function galLayout() {
+  const cards = $("#gal-carousel").children;
+  const off = Math.min(380, window.innerWidth * 0.27);
+  for (let k = 0; k < cards.length; k++) {
+    const c = cards[k], d = k - GINDEX, ad = Math.abs(d);
+    c.style.transform = `translate(-50%,-50%) translateX(${d * off}px) translateZ(${d === 0 ? 0 : -220}px) rotateY(${d * -9}deg) scale(${d === 0 ? 1 : 0.8})`;
+    c.style.opacity = ad <= 2 ? (d === 0 ? 1 : 0.5) : 0;
+    c.style.zIndex = String(30 - ad);
+    c.style.pointerEvents = ad <= 2 ? "auto" : "none";
+    c.classList.toggle("center", d === 0);
+  }
+  document.querySelectorAll("#gal-dots .dot").forEach((o, k) => o.classList.toggle("on", k === GINDEX));
+}
+function galPrev() { if (GINDEX > 0) { GINDEX--; galLayout(); } }
+function galNext() { if (GINDEX < GAL[GMETHOD].scenes.length - 1) { GINDEX++; galLayout(); } }
+window.addEventListener("resize", () => { if (CUR === "gallery") galLayout(); });
+window.addEventListener("keydown", e => {
+  if (CUR !== "gallery") return;
+  if (e.key === "ArrowLeft") galPrev(); else if (e.key === "ArrowRight") galNext();
+});
 
 /* ───────── detail ───────── */
 async function openDetail(key) {
