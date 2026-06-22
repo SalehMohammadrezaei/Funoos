@@ -481,7 +481,7 @@ _SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2),
 def _solve_dam(p, pr, tmp):
     sc = _SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam")
     Lx, Ly = _SPLASH_TANK[sc]
-    a = float(p.get("dropsize", 1.0)) if sc == "drop" else float(p["width"])
+    a = float(p.get("dropsize", 0.4)) if sc == "drop" else float(p["width"])
     H = float(p["height"])
     npart = max(500.0, float(p["particles"]))
     dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08))
@@ -593,7 +593,7 @@ EXHIBITS = {
                    _when(_f("angle", "Airfoil angle (°)", 12, 0, 25, "Geometry",
                             "Angle of attack of the airfoil, in degrees."), "obstacle", ["Airfoil"]),
                    _f("reynolds", "Reynolds number", 160, 60, 1200, "Physics", _H["Re"]),
-                   _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"]),
+                   _f("speed", "Inflow speed (lattice)", 0.08, 0.02, 0.15, "Physics", _H["U"]),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_windtunnel(p, pr, t)},
     "Rising Smoke": {
@@ -612,8 +612,8 @@ EXHIBITS = {
                       "A = (ρ_heavy − ρ_light)/(ρ_heavy + ρ_light), the density contrast across "
                       "the interface. It sets how hard the heavy fluid falls: higher A → faster, "
                       "narrower spikes and more vigorous mushroom roll-up."),
-                   _f("gravity", "Gravity", 1.2e-3, 4e-4, 3e-3, "Physics", _H["grav"]),
-                   _f("viscosity", "Viscosity", 1.5e-4, 3e-5, 5e-4, "Physics", _H["visc"]),
+                   _f("gravity", "Gravity (sim units)", 1.2e-3, 4e-4, 3e-3, "Physics", _H["grav"]),
+                   _f("viscosity", "Viscosity (sim units)", 1.5e-4, 3e-5, 5e-4, "Physics", _H["visc"]),
                    _f("perturbation", "Interface ripple (×)", 1.0, 0.2, 3.0, "Physics",
                       "Amplitude of the initial interface ripple that seeds the fingers."),
                    P_RES(), P_DUR()],
@@ -624,8 +624,9 @@ EXHIBITS = {
                     "help": "Open air: a free blast wave expanding into still gas. Shock hits a "
                     "city: a ground burst whose blast diffracts around and reflects off two solid "
                     "towers — watch the Mach stems and shadow zones behind the buildings."},
-                   _f("pressure", "Blast pressure", 10.0, 2.0, 40.0, "Physics",
-                      "Pressure inside the charge. Higher → a stronger, faster shock."),
+                   _f("pressure", "Blast pressure (× ambient)", 10.0, 2.0, 40.0, "Physics",
+                      "Pressure inside the charge, in units of ambient pressure (≈0.1 code). "
+                      "Higher → a stronger, faster shock."),
                    _f("charge", "Charge size (frac.)", 0.06, 0.02, 0.18, "Geometry",
                       "Radius of the high-pressure charge as a fraction of the domain width."),
                    _when(_f("strength", "Structure strength", 1.0, 0.2, 3.0, "Physics",
@@ -670,8 +671,10 @@ EXHIBITS = {
                             "Height of the column — more head → a faster, taller surge."),
                          "scene", ["Dam break"]),
                    # --- drop & splash ---
-                   _when(_f("dropsize", "Drop size (m)", 1.0, 0.4, 1.8, "Geometry",
-                            "Width of the falling block of water."), "scene", ["Drop & splash"]),
+                   _when(_f("dropsize", "Drop diameter (m)", 0.4, 0.2, 0.8, "Geometry",
+                            "Diameter of the falling water blob (a parcel of water, not a "
+                            "capillary droplet — there's no surface tension at this scale)."),
+                         "scene", ["Drop & splash"]),
                    _when(_f("dropheight", "Release height (frac.)", 0.70, 0.45, 0.92, "Geometry",
                             "How high the block starts, as a fraction of tank height. Higher → "
                             "faster impact and a bigger crown."), "scene", ["Drop & splash"]),

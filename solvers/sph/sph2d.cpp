@@ -81,7 +81,7 @@ int main(int argc,char**argv){
     // --- scene initial conditions (fluid) ---
     if(sc=="dam"){ add_block(0,A.a,0,A.H,A.H); }
     else if(sc=="drop"){ double Hp=0.30*A.Ly; add_block(0,A.Lx,0,Hp,Hp);
-        double R=0.36*A.a, cx=A.Lx*0.5, cy=A.dh*A.Ly;       // release height = dh (disk centre)
+        double R=0.5*A.a, cx=A.Lx*0.5, cy=A.dh*A.Ly;        // --a = drop diameter; release height = dh
         if(cy+R>A.Ly-2*dp) cy=A.Ly-2*dp-R;                  // keep clear of the ceiling
         if(cy-R<Hp+4*dp)   cy=Hp+4*dp+R;                    // and well above the pool
         add_disk(cx,cy,R,0.0); }
