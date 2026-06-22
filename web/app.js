@@ -36,43 +36,56 @@ function runCounters() {
   });
 }
 
-/* ───────── gallery: a sliding row per method ───────── */
-// pause clips that scroll out of view (keeps only on-screen rows playing)
-const _vio = new IntersectionObserver(es => es.forEach(e => {
-  if (e.isIntersecting) e.target.play().catch(() => {}); else e.target.pause();
-}), { root: null, threshold: 0.2 });
+/* ───────── gallery: each method is a row that is itself a coverflow ───────── */
+const _rows = [];
+// pause whole rows that scroll off-screen vertically
+const _rowio = new IntersectionObserver(es => es.forEach(e => {
+  e.target._on = e.isIntersecting; layoutRow(e.target);
+}), { root: null, threshold: 0.05 });
 
 async function buildGallery() {
   const groups = await api().catalog();
   const root = $("#gallery-rows");
-  root.querySelectorAll(".row").forEach(r => r.remove());
+  root.querySelectorAll(".row").forEach(r => r.remove()); _rows.length = 0;
   for (const g of groups) {
     const row = el("div", "row");
     const rhead = el("div", "rhead");
     rhead.append(el("div", "bar"), el("div", "name", g.method),
       el("div", "count", `${g.scenes.length} scene${g.scenes.length > 1 ? "s" : ""}`));
     row.append(rhead);
-    const wrap = el("div", "rowwrap");
-    const track = el("div", "track");
-    for (const s of g.scenes) track.append(rowCard(s));
+    const car = el("div", "rcar"); car._idx = 0; car._on = true;
+    g.scenes.forEach((s, k) => car.append(coverCard(s, car, k)));
     const la = el("button", "arrow left", "‹");
     const ra = el("button", "arrow right", "›");
-    la.onclick = () => track.scrollBy({ left: -track.clientWidth * 0.8, behavior: "smooth" });
-    ra.onclick = () => track.scrollBy({ left: track.clientWidth * 0.8, behavior: "smooth" });
-    wrap.append(track, la, ra);
-    row.append(wrap); root.append(row);
+    la.onclick = () => { car._idx = Math.max(0, car._idx - 1); layoutRow(car); };
+    ra.onclick = () => { car._idx = Math.min(g.scenes.length - 1, car._idx + 1); layoutRow(car); };
+    car.append(la, ra);
+    row.append(car); root.append(row);
+    _rows.push(car); _rowio.observe(car); layoutRow(car);
   }
 }
-function rowCard(s) {
-  const c = el("div", "tcard");
-  if (s.clip) {
-    const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; v.preload = "auto";
-    c.append(v); _vio.observe(v);
-  }
+function coverCard(s, car, k) {
+  const c = el("div", "ccard");
+  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; c.append(v); }
   c.append(el("div", "cov"), el("div", "play", "▶"), el("div", "nm", s.name));
-  c.onclick = () => openDetail(s.key);
+  c.onclick = () => { if (k === car._idx) openDetail(s.key); else { car._idx = k; layoutRow(car); } };
   return c;
 }
+function layoutRow(car) {
+  const cards = [...car.querySelectorAll(".ccard")];
+  const off = Math.min(300, window.innerWidth * 0.22);
+  cards.forEach((c, k) => {
+    const d = k - car._idx, ad = Math.abs(d);
+    c.style.transform = `translate(-50%,-50%) translateX(${d * off}px) translateZ(${d ? -200 : 0}px) rotateY(${d * -10}deg) scale(${d ? 0.78 : 1})`;
+    c.style.opacity = ad <= 2 ? (d ? 0.45 : 1) : 0;
+    c.style.zIndex = String(30 - ad);
+    c.style.pointerEvents = ad <= 2 ? "auto" : "none";
+    c.classList.toggle("center", d === 0);
+    const v = c.querySelector("video");
+    if (v) { if (car._on && ad <= 2) v.play().catch(() => {}); else v.pause(); }
+  });
+}
+window.addEventListener("resize", () => { if (CUR === "gallery") _rows.forEach(layoutRow); });
 
 /* ───────── detail ───────── */
 async function openDetail(key) {
