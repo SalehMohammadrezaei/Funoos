@@ -679,9 +679,11 @@ EXHIBITS = {
         "solve": lambda p, pr, t: _solve_ns("rb", p, pr, t)},
     "Chimney Plume": {
         "params": [_f("buoyancy", "Buoyancy", 5e-3, 2e-3, 1e-2, "Physics", _H["buoy"]),
-                   _f("wind", "Crosswind speed", 0.10, 0.0, 0.30, "Physics",
+                   _f("wind", "Crosswind speed", 0.30, 0.0, 0.55, "Physics",
                       "Speed of the horizontal wind blowing across the stack. Stronger wind bends "
-                      "the plume over closer to the ground (a smaller plume rise)."),
+                      "the plume over closer to the ground (a smaller plume rise). Below the plume's "
+                      "own buoyant velocity the plume rises near-vertically; above it, the wind wins "
+                      "and the plume lies over and streams downwind."),
                    _f("confinement", "Vorticity confinement", 6, 0, 20, "Physics", _H["conf"]),
                    _f("source", "Stack width (×)", 0.6, 0.3, 3.0, "Geometry",
                       "Width of the chimney source at the floor."),
