@@ -1,6 +1,6 @@
 /* Funoos — frontend (talks to the Python backend via pywebview.api) */
 "use strict";
-let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS = 26, CUR = "intro";
+let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS = 26, CUR = "intro", GAL = [];
 
 const api = () => window.pywebview.api;
 const $ = s => document.querySelector(s);
@@ -59,6 +59,7 @@ const _rowio = new IntersectionObserver(es => es.forEach(e => { e.target._on = e
 
 async function buildGallery() {
   const groups = await api().catalog();
+  GAL = groups;
   const root = $("#gallery-rows");
   root.querySelectorAll(".row").forEach(r => r.remove()); _rows.length = 0;
   for (const g of groups) {
@@ -110,44 +111,37 @@ function attachRowDrag(car) {
     if (!drag) return; drag = false; const dx = e.clientX - x0;
     if (Math.abs(dx) > 45) { goRow(car, car._idx - Math.sign(dx)); car._suppress = true; setTimeout(() => car._suppress = false, 80); }
   });
-  car.addEventListener("mouseenter", () => car._hover = true);
-  car.addEventListener("mouseleave", () => car._hover = false);
+  // only hijack the wheel for horizontal-intent scrolls; vertical wheel scrolls the page
   let lock = false;
   car.addEventListener("wheel", e => {
-    const dom = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    if (Math.abs(dom) < 6 || lock) return;
-    e.preventDefault(); lock = true; setTimeout(() => lock = false, 360);
-    goRow(car, car._idx + (dom > 0 ? 1 : -1));
+    if (lock || Math.abs(e.deltaX) <= Math.abs(e.deltaY) || Math.abs(e.deltaX) < 6) return;
+    e.preventDefault(); lock = true; setTimeout(() => lock = false, 340);
+    goRow(car, car._idx + (e.deltaX > 0 ? 1 : -1));
   }, { passive: false });
 }
-// gentle auto-advance: on-screen, un-hovered rows drift forward (wrap), staggered
-setInterval(() => {
-  if (CUR !== "gallery") return;
-  _rows.forEach((car, i) => {
-    if (car._on && !car._hover && performance.now() % (4200 + i * 700) < 1050)
-      goRow2(car, (car._idx + 1) % car._n);
-  });
-}, 1000);
-function goRow2(car, idx) { car._idx = idx; layoutRow(car); }   // wrap-capable variant for auto-advance
 window.addEventListener("resize", () => { if (CUR === "gallery") _rows.forEach(layoutRow); });
 
 /* ───────── detail ───────── */
-// premium card→detail morph: a clone of the card glides to the detail hero area
-function morphToDetail(card, key) {
-  const r = card.getBoundingClientRect(), v0 = card.querySelector("video");
+// FLIP morph: navigate first (so the click always works), then glide a clone of the
+// card onto the detail video — it lands exactly on it, so there's no jump.
+async function morphToDetail(card, key) {
+  const r0 = card.getBoundingClientRect(), v0 = card.querySelector("video");
+  await openDetail(key);                       // build + show detail (navigation is guaranteed)
+  const target = $("#d-video"), r1 = target.getBoundingClientRect();
+  if (!v0 || !r1.width) return;                // nothing to animate; detail is already up
   const clone = el("div");
-  clone.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;`
-    + `z-index:200;border-radius:18px;overflow:hidden;background:#06101f;box-shadow:0 40px 95px rgba(0,0,0,.6);`
-    + `transition:left .5s cubic-bezier(.5,0,.18,1),top .5s cubic-bezier(.5,0,.18,1),width .5s cubic-bezier(.5,0,.18,1),height .5s cubic-bezier(.5,0,.18,1)`;
-  if (v0) { const v = el("video"); v.src = v0.currentSrc || v0.src; v.loop = v.muted = v.autoplay = true; v.playsInline = true; v.style.cssText = "width:100%;height:100%;object-fit:contain"; clone.append(v); v.play().catch(() => {}); }
-  document.body.append(clone);
-  openDetail(key);
-  requestAnimationFrame(() => {
-    const tw = Math.min((window.innerWidth - 74) * 0.5, 660), th = tw / 1.55;
-    clone.style.left = (74 + 30) + "px"; clone.style.top = ((window.innerHeight - th) / 2 + 8) + "px";
-    clone.style.width = tw + "px"; clone.style.height = th + "px";
-  });
-  setTimeout(() => clone.remove(), 540);
+  clone.style.cssText = `position:fixed;left:0;top:0;width:${r1.width}px;height:${r1.height}px;transform-origin:top left;`
+    + `border-radius:14px;overflow:hidden;background:#06101f;z-index:200;pointer-events:none;box-shadow:0 40px 95px rgba(0,0,0,.55)`;
+  const v = el("video"); v.src = v0.currentSrc || v0.src; v.loop = v.muted = v.autoplay = true; v.playsInline = true;
+  v.style.cssText = "width:100%;height:100%;object-fit:contain"; clone.append(v);
+  document.body.append(clone); v.play().catch(() => {});
+  const sx = r0.width / r1.width, sy = r0.height / r1.height;
+  const anim = clone.animate(
+    [{ transform: `translate(${r0.left}px,${r0.top}px) scale(${sx},${sy})` },
+     { transform: `translate(${r1.left}px,${r1.top}px) scale(1,1)` }],
+    { duration: 440, easing: "cubic-bezier(.5,0,.18,1)" });
+  anim.onfinish = () => clone.remove();
+  setTimeout(() => clone.remove(), 700);
 }
 async function openDetail(key) {
   const d = await api().scene_detail(key);
