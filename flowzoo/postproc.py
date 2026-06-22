@@ -241,8 +241,10 @@ def plots(result):
         k = result.kind
         if k == "quantum":
             return _quantum(result)
+        if k == "porous":
+            return _porous(result)
         if k == "lbm":
-            return _porous(result) if result.hints.get("permeability") is not None else _wind_tunnel(result)
+            return _wind_tunnel(result)
         if k == "spectral":
             return _ke_enstrophy(result, "2-D turbulence — energy & enstrophy")
         if k == "ns":

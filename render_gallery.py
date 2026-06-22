@@ -48,7 +48,8 @@ for s in catalog.SCENES:
     t0 = time.time()
     try:
         res = engine.solve_exhibit(name, params)
-        frames = res.render(res.views[0], engine.DEFCMAP[res.kind])
+        cmap = s.get("cmap") or engine.DEFCMAP[res.kind]
+        frames = res.render(res.views[0], cmap)
         render.save_gif(_shrink(frames), OUT / f"{key}.gif", fps=26)   # light clip for the gallery
         try:
             render.save_mp4(frames, OUT / f"{key}.mp4", fps=26)        # full-resolution download

@@ -32,20 +32,22 @@ SCENES = [
               "❖ built on the LBM permeability work behind Funoos."},
     # ───────── Navier–Stokes (projection) ─────────
     {"method": "Incompressible Navier–Stokes", "exhibit": "Rising Smoke", "key": "ns_smoke",
-     "name": "Rising Smoke Plume", "preset": {},
-     "blurb": "A continuous hot, dyed source at the floor. Buoyancy drives it upward; shear along "
-              "the edges rolls it into vortices that entrain the surroundings and tangle into a "
-              "turbulent, billowing plume — the canonical buoyancy-driven flow."},
+     "name": "Rising Smoke Plume", "preset": {"source": 1.7, "buoyancy": 0.0022, "confinement": 7},
+     "cmap": "Smoke (mono)",
+     "blurb": "A broad, cool column of smoke rising from a wide source. Buoyancy lifts it; shear "
+              "along the edges rolls it into vortices that entrain the surroundings and tangle "
+              "into a turbulent, billowing plume — the canonical buoyancy-driven flow."},
     {"method": "Incompressible Navier–Stokes", "exhibit": "Mushroom Clouds", "key": "ns_rt",
      "name": "Rayleigh–Taylor Fingers", "preset": {"atwood": 0.7},
      "blurb": "Heavy fluid resting on light fluid in gravity. The interface is unstable: heavy "
               "spikes fall, light bubbles rise, and each finger curls into the iconic mushroom "
               "cap. The Atwood number sets how violently it overturns."},
     {"method": "Incompressible Navier–Stokes", "exhibit": "Rising Smoke", "key": "ns_flame",
-     "name": "Candle Flame", "preset": {"source": 0.5, "buoyancy": 0.0045, "confinement": 13, "flicker": 1.0},
-     "blurb": "A narrow, flickering hot source — the lantern's own flame. The same buoyant "
-              "plume physics, dialed to a candle: a dancing tongue of fire that wanders and "
-              "pulses as shed vortices tug at it. ❖ the heart of Funoos (فانوس, the lantern)."},
+     "name": "Candle Flame", "preset": {"source": 0.32, "buoyancy": 0.006, "confinement": 17, "flicker": 1.0},
+     "cmap": "Ember (fire)",
+     "blurb": "A narrow, intense, flickering source — the lantern's own flame. The same buoyant "
+              "plume physics dialed to a candle: a slender tongue of fire that wanders and pulses "
+              "as shed vortices tug at it. ❖ the heart of Funoos (فانوس, the lantern)."},
     # ───────── Compressible Euler (HLLC) ─────────
     {"method": "Compressible Euler", "exhibit": "Detonation", "key": "euler_blast",
      "name": "Open-Air Blast", "preset": {"scene": "Open air", "pressure": 14},
@@ -131,25 +133,6 @@ SCENES = [
      "name": "Mitosis", "preset": {"pattern": "Mitosis"},
      "blurb": "The most striking regime: blobs that grow, stretch and pinch in two — patterns "
               "that self-replicate like dividing cells, from nothing but chemistry and diffusion."},
-    # ───────── Quantum Mechanics ─────────
-    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_barrier",
-     "name": "Quantum Tunnelling", "preset": {"scene": "Tunnelling barrier"},
-     "blurb": "A wavepacket hits a wall taller than its energy — and part of it leaks straight "
-              "through. Tunnelling is impossible in classical physics yet drives radioactive "
-              "decay, the STM, and flash memory."},
-    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_slit",
-     "name": "Double Slit", "preset": {"scene": "Double slit"},
-     "blurb": "One particle, two slits — and it interferes with itself, building the striped "
-              "probability pattern that is the clearest proof matter behaves as a wave."},
-    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_free",
-     "name": "Free Spreading", "preset": {"scene": "Free spreading"},
-     "blurb": "A Gaussian wavepacket left alone: it glides at its group velocity while inexorably "
-              "spreading — position uncertainty growing exactly as the uncertainty principle says."},
-    {"method": "Quantum Mechanics", "exhibit": "Quantum Ripples", "key": "qm_harmonic",
-     "name": "Harmonic Well", "preset": {"scene": "Harmonic well"},
-     "blurb": "A coherent state trapped in a parabolic well sloshes back and forth without "
-              "spreading — the quantum analogue of a frictionless pendulum, and the closed-system "
-              "check where probability is conserved to round-off."},
 ]
 
 

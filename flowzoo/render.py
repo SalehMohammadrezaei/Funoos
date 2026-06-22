@@ -58,6 +58,10 @@ FLOWZOO_RT = LinearSegmentedColormap.from_list("flowzoo_rt", [
     (0.00, "#0e3d4d"), (0.35, "#2fb6c4"), (0.5, "#e9f6f4"),
     (0.65, "#f2a23c"), (1.00, "#7a1f12"),
 ])
+# Cool monochrome smoke: dark navy -> slate -> ash white (distinct from the warm flame).
+FLOWZOO_SMOKE = LinearSegmentedColormap.from_list("flowzoo_smoke", [
+    (0.00, "#0a0f1e"), (0.40, "#3a4a64"), (0.75, "#8b97ad"), (1.00, "#eef2f8"),
+])
 INK = "#0a0b12"   # canonical background
 SOLID = "#aab4c4"  # solid-phase color (obstacles: cylinder, letters)
 
@@ -65,6 +69,7 @@ SOLID = "#aab4c4"  # solid-phase color (obstacles: cylinder, letters)
 COLORMAPS = {
     "Curl (cyan–amber)": FLOWZOO_CURL,
     "Ember (fire)": FLOWZOO_EMBER,
+    "Smoke (mono)": FLOWZOO_SMOKE,
     "Ocean (water)": FLOWZOO_WATER,
     "Hot / Cold": FLOWZOO_RT,
     "Inferno": "inferno",

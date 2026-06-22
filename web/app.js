@@ -1,6 +1,6 @@
 /* Funoos — frontend logic (talks to the Python backend via pywebview.api) */
 "use strict";
-let API = null, RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, FPS = 26;
+let API = null, RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS = 26;
 
 function api(){ return window.pywebview.api; }
 window.onProgress = m => { const s = document.querySelector("#s-status"); if (s) s.textContent = "⏳ " + m; };
@@ -77,7 +77,7 @@ function section(head, body){
 
 /* ───────── studio ───────── */
 function openStudio(d){
-  CUR_EXH = d.exhibit; SPEC = d.params; PSTATE = {};
+  CUR_EXH = d.exhibit; CUR_CMAP = d.cmap || null; SPEC = d.params; PSTATE = {};
   for (const q of SPEC) PSTATE[q.name] = q.default;
   if (d.preset) for (const k in d.preset) PSTATE[k] = d.preset[k];
   $("#s-name").textContent = "· " + d.name;
@@ -128,7 +128,7 @@ async function runSim(){
   const params = {}; for (const k in PSTATE) params[k] = PSTATE[k];
   const view = (RUN && RUN.view) || null;
   try {
-    const r = await api().run(CUR_EXH, params, view);
+    const r = await api().run(CUR_EXH, params, view, CUR_CMAP);
     RUN = r; FPS = 26;
     buildViewbar(r);
     setVideo(r.video);

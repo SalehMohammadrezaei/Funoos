@@ -15,7 +15,7 @@ import numpy as np
 
 # Pearson-classified presets (Du=0.16, Dv=0.08, dt=1)
 PRESETS = {
-    "Spots":   (0.0350, 0.0650),
+    "Spots":   (0.0300, 0.0620),
     "Stripes": (0.0545, 0.0620),
     "Maze":    (0.0290, 0.0570),
     "Mitosis": (0.0367, 0.0649),

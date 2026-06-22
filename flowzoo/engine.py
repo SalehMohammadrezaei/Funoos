@@ -68,11 +68,12 @@ VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
          "density": ["Schlieren", "Density", "Speed"],
          "ns": ["Dye", "Speed", "Vorticity", "Streamlines"],
          "particles": ["Particles", "Foam & spray", "Speed field"],
+         "porous": ["Speed", "Streamlines", "Vorticity"],
          "field": ["Pattern"],
          "quantum": ["Probability |ψ|²", "Phase"]}
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
            "density": "Ember (fire)", "ns": "Ember (fire)", "particles": "Ocean (water)",
-           "field": "Inferno", "quantum": "Magma"}
+           "porous": "Turbo", "field": "Inferno", "quantum": "Magma"}
 
 
 def _res(p):
@@ -97,7 +98,7 @@ class Result:
         view = view or self.views[0]
         cm = render.COLORMAPS.get(colormap, render.COLORMAPS[DEFCMAP[self.kind]]) \
             if colormap else render.COLORMAPS[DEFCMAP[self.kind]]
-        if self.kind in ("lbm", "spectral"):
+        if self.kind in ("lbm", "spectral", "porous"):
             return self._render_vel(self.raw, view, cm, self.mask)
         if self.kind == "density":
             return self._render_density(view, cm)
@@ -135,18 +136,21 @@ class Result:
                                     cm, 0, pmax, "|ψ|²") for p in self.raw]
 
     def _render_vel(self, vel, view, cm, mask):
+        pct = 80.0 if self.kind == "porous" else 99.5   # porous flow is slow/sparse → brighten
         if view == "Streamlines":
             sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
-            vmax = np.percentile(sp[-1], 99.5) + 1e-12
+            vmax = np.percentile(sp[-1], pct) + 1e-12
             return [render.add_colorbar(
                 render.streamlines_rgb(ux, uy, cmap=cm, mask=mask, vmax=vmax),
                 cm, 0, vmax, "|u|") for ux, uy in vel]
         if view == "Speed":
             sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
-            vmax = np.percentile(sp[-1], 99.5) + 1e-12
+            vmax = np.percentile(sp[-1], pct) + 1e-12
+            g = 0.45 if self.kind == "porous" else 1.0          # brighten the slow pore flow
+            mc = "#0f1830" if self.kind == "porous" else render.SOLID   # dark grains so flow pops
             return [render.add_colorbar(
-                render.field_to_rgb(s, cm, 0, vmax, mask=mask, mask_color=render.SOLID,
-                                    upscale=1), cm, 0, vmax, "|u|") for s in sp]
+                render.field_to_rgb(s, cm, 0, vmax, mask=mask, mask_color=mc,
+                                    upscale=1, gamma=g), cm, 0, vmax, "|u|") for s in sp]
         vt = [render.vorticity(ux, uy) for ux, uy in vel]
         vmax = np.percentile(np.abs(vt[-1]), 99.0) + 1e-12
         return [render.add_colorbar(
@@ -400,7 +404,7 @@ def _solve_porous(p, pr, tmp):
             except ValueError: pass
     poro = meta.get("porosity", phi); perm = meta.get("permeability", 0.0)
     hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force}
-    return Result("lbm", raw, f"porous · φ={poro:.2f} · k={perm:.2e}", mask=mask, hints=hints)
+    return Result("porous", raw, f"porous · φ={poro:.2f} · k={perm:.2e}", mask=mask, hints=hints)
 
 
 def _solve_ns(mode, p, pr, tmp):
@@ -729,22 +733,6 @@ EXHIBITS = {
                     "model — Pearson's classification of reaction–diffusion morphologies."},
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_reaction(p, pr, t)},
-    "Quantum Ripples": {
-        "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
-                    "choices": ["Tunnelling barrier", "Double slit", "Free spreading", "Harmonic well"],
-                    "default": "Tunnelling barrier",
-                    "help": "What the wavepacket meets: a thin barrier (tunnelling), a two-slit "
-                    "wall (interference), open space (spreading), or a parabolic well (sloshing)."},
-                   _when(_f("momentum", "Momentum  k₀", 360, 120, 700, "Physics",
-                            "Initial momentum of the packet — its speed toward the obstacle."),
-                         "scene", ["Tunnelling barrier", "Double slit", "Free spreading"]),
-                   _f("width", "Packet width", 0.06, 0.03, 0.12, "Physics",
-                      "Initial spatial spread of the Gaussian wavepacket (fraction of the box)."),
-                   _when(_f("barrier", "Barrier height  V₀", 320, 80, 800, "Physics",
-                            "Height of the potential wall. Higher → less tunnels through."),
-                         "scene", ["Tunnelling barrier", "Double slit"]),
-                   P_RES(), P_DUR()],
-        "solve": lambda p, pr, t: _solve_quantum(p, pr, t)},
     "Ink in Motion": {
         "params": [_f("bands", "Dye bands", 6, 2, 14, "Geometry",
                       "How many stripes of dye to start with before the turbulence stirs them."),

@@ -86,10 +86,10 @@ class Api:
                 "terms": d.get("terms", ""), "numerics": m.get("numerics", ""),
                 "validation": m.get("validation", ""), "eq": _eq_b64(ex),
                 "clip": "results/gallery/" + key + ".mp4", "preset": s["preset"],
-                "params": _param_spec(ex), "method_label": m.get("method", "")}
+                "cmap": s.get("cmap"), "params": _param_spec(ex), "method_label": m.get("method", "")}
 
     # ---------- run / render ----------
-    def run(self, exhibit, params, view, fps=26):
+    def run(self, exhibit, params, view, cmap=None, fps=26):
         def progress(msg):
             if self._win:
                 try:
@@ -98,7 +98,7 @@ class Api:
                     pass
         res = engine.solve_exhibit(exhibit, params, progress=progress)
         view = view if view in res.views else res.views[0]
-        cm = engine.DEFCMAP[res.kind]
+        cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
         progress(f"rendering {view}…")
         vid = _b64_mp4(res.render(view, cm), fps)
         rid = uuid.uuid4().hex[:8]
