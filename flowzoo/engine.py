@@ -372,6 +372,9 @@ def _solve_windtunnel(p, pr, tmp):
     else:                                                   # Cylinder
         mask = geometry.cylinder(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
     tau = 0.5 + 3 * (U * D / Re)
+    _ys = np.where(mask.any(axis=1))[0]                      # sample the wake at the body's height
+    probe_y = int(round(_ys.mean())) if len(_ys) else ny // 2
+    probe_y = int(np.clip(probe_y, 2, ny - 3))
     geometry.save_mask(mask, Path(tmp) / "m.bin")
     _ensure(_bin("lbm", "lbm2d"))
     steps = int(44000 * _durv(p))
@@ -379,13 +382,14 @@ def _solve_windtunnel(p, pr, tmp):
     subprocess.run([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
                     "--mask", str(Path(tmp) / "m.bin"), "--U", str(U), "--tau", f"{tau:.5f}",
                     "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
-                    "--out", tmp, "--probe_x", str(min(probe, nx - 2)), "--probe_y", str(ny // 2)],
+                    "--out", tmp, "--probe_x", str(min(probe, nx - 2)), "--probe_y", str(probe_y)],
                    check=True, env=_ENV)
     save_every = max(1, steps // 120)
     n = _nframes(tmp); stride = max(1, (n - n // 5) // 90)
     use = range(n // 5, n, stride)
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
-    hints = {"probe_x": min(probe, nx - 2), "probe_y": ny // 2, "D": D, "U": U,
+    hints = {"probe_x": min(probe, nx - 2), "probe_y": probe_y, "D": D, "U": U,
+             "obstacle": obs,                            # so diagnostics can pick the right plot
              "frame_dt_steps": stride * save_every}     # for the lift / Strouhal diagnostic
     return Result("lbm", raw, f"wind tunnel · {obs} · Re={Re:.0f} · {nx}×{ny}",
                   mask=mask, hints=hints)
@@ -454,6 +458,7 @@ def _solve_ns(mode, p, pr, tmp):
         b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
         return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
     hints["vel"] = [_rv(i) for i in idx]                     # for Speed/Vorticity/Streamlines
+    hints["ns_mode"] = mode                                  # so diagnostics can pick the right plot
     mask = None
     if mode == "wind":                                       # draw the solid chimney stack
         stack_h = int(0.32 * ny); sxx = nx // 4

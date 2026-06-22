@@ -136,7 +136,8 @@ class Api:
         r = self._runs.get(run_id)
         if not r:
             return []
-        return [{"title": t, "img": _b64_png(img)} for t, img in postproc.plots(r["result"])]
+        return [{"title": t, "img": _b64_png(img), "explain": ex}
+                for t, img, ex in postproc.plots(r["result"])]
 
 
 def _js(s):

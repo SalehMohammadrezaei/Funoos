@@ -290,7 +290,13 @@ async function togglePlots() {
   try {
     const plots = await api().diagnostics(RUN.run_id); p.innerHTML = "";
     if (!plots.length) p.append(el("div", "muted", "No diagnostics for this case."));
-    for (const pl of plots) { p.append(el("div", "kicker", pl.title)); const i = el("img"); i.src = pl.img; p.append(i); }
+    for (const pl of plots) {
+      const card = el("div", "plot");
+      card.append(el("div", "kicker", pl.title));
+      const i = el("img"); i.src = pl.img; card.append(i);
+      if (pl.explain) card.append(el("div", "explain", pl.explain));
+      p.append(card);
+    }
     p.style.display = "block"; $("#s-status").textContent = "✓ diagnostics ready.";
   } catch (e) { toast("" + e, "err"); }
   $("#s-skel").classList.remove("on");

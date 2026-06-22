@@ -244,3 +244,8 @@ input[type=range]{accent-color:var(--blue-br)}
   font-size:13px;color:var(--read);line-height:1.5}
 .setup .sline b{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--blue-lt);
   padding-top:3px;font-weight:700}
+
+/* ── studio: diagnostic plots + explanations ── */
+.plot{margin-bottom:18px}
+.plot img{width:100%;border-radius:10px;border:1px solid var(--line);display:block;margin-top:6px}
+.plot .explain{margin-top:8px;font-size:12.5px;line-height:1.55;color:var(--read)}
