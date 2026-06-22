@@ -53,9 +53,18 @@ async function buildGallery() {
   }
 }
 function sceneCard(s, feat) {
-  const card = el("div", "card reveal" + (feat ? " feat" : ""));
+  const card = el("div", "card reveal" + (feat ? " s-lg" : ""));
   const clip = el("div", "clip");
-  if (s.clip) { const v = el("video"); v.src = s.clip; v.autoplay = v.loop = v.muted = true; v.playsInline = true; clip.append(v); }
+  if (s.clip) {
+    const v = el("video"); v.src = s.clip; v.autoplay = v.loop = v.muted = true; v.playsInline = true;
+    v.addEventListener("loadedmetadata", () => {           // bento sizing from the clip's shape
+      if (card.classList.contains("s-lg") || !v.videoHeight) return;
+      const a = v.videoWidth / v.videoHeight;
+      if (a <= 0.95) card.classList.add("s-tall");          // vertical scene → tall tile
+      else if (a >= 1.85) card.classList.add("s-wide");     // wide scene → wide tile
+    });
+    clip.append(v);
+  }
   const ov = el("div", "overlay");
   ov.append(el("div", "nm", s.name), el("div", "bl", s.blurb));
   card.append(clip, ov, el("div", "play", "▶"));
