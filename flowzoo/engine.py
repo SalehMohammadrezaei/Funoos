@@ -663,15 +663,15 @@ EXHIBITS = {
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("smoke", p, pr, t)},
     "Candle Flame": {
-        "params": [_f("buoyancy", "Heat-release buoyancy", 0.014, 0.006, 0.025, "Physics",
-                      "How strongly the heat released at the flame sheet lifts the gas. It both "
-                      "shapes the teardrop and drives the buoyant flicker."),
-                   _f("zst", "Stoichiometric mixture  Z_st", 0.12, 0.05, 0.25, "Physics",
+        "params": [_f("buoyancy", "Heat-release buoyancy", 0.020, 0.008, 0.03, "Physics",
+                      "How strongly the heat released at the flame sheet lifts the gas. Stronger "
+                      "buoyancy draws the fuel up faster, keeping the flame slender and steady."),
+                   _f("zst", "Stoichiometric mixture  Z_st", 0.18, 0.08, 0.30, "Physics",
                       "The fuel/air ratio at which the flame burns. The luminous sheet sits on the "
-                      "Z = Z_st surface; a smaller value wraps the flame tighter to the wick."),
-                   _f("source", "Wick width (×)", 1.1, 0.5, 2.0, "Geometry",
-                      "Width of the fuel vapour leaving the wick."),
-                   _f("confinement", "Vorticity confinement", 6, 0, 20, "Physics",
+                      "Z = Z_st surface; a larger value pulls it tighter to the fuel core (a thinner flame)."),
+                   _f("source", "Wick width (×)", 0.45, 0.3, 1.5, "Geometry",
+                      "Width of the fuel vapour leaving the wick. A thin wick gives a slender candle flame."),
+                   _f("confinement", "Vorticity confinement", 4, 0, 20, "Physics",
                       "Sharpens the small eddies that make the flame tip lick and wander."),
                    _f("viscosity", "Viscosity", 2.5e-4, 5e-5, 6e-4, "Physics", _H["visc"]),
                    P_RES(), P_DUR()],

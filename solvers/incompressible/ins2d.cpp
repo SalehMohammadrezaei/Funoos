@@ -176,6 +176,8 @@ int main(int argc,char**argv){
             for(int j=1;j<1+sh;j++)for(int i=sx-ww;i<=sx+ww;i++){
                 double r=double(i-sx)/ww; double g=exp(-3*r*r);
                 s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g);        // mixture fraction Z→1 at the wick
+                v[IX(i,j)] += 0.06*g;                                // launch the fuel upward so it doesn't pool/creep on the floor
+                u[IX(i,j)] *= 0.5;                                   // and damp lateral drift at the wick to keep it anchored
             }
         }
         #pragma omp parallel for schedule(static)
@@ -212,7 +214,11 @@ int main(int argc,char**argv){
             s0=s;
             #pragma omp parallel for schedule(static)
             for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++)
-                s[IX(i,j)] += 0.08*(s0[IX(i-1,j)]+s0[IX(i+1,j)]+s0[IX(i,j-1)]+s0[IX(i,j+1)]-4*s0[IX(i,j)]);
+                s[IX(i,j)] += 0.05*(s0[IX(i-1,j)]+s0[IX(i+1,j)]+s0[IX(i,j-1)]+s0[IX(i,j+1)]-4*s0[IX(i,j)]);
+            // fuel consumption: fuel is burned away as it rises, so it reaches a bounded steady
+            // height instead of accumulating (a widening torch) — this is what fixes the growth.
+            #pragma omp parallel for schedule(static)
+            for(int k=0;k<N;k++) s[k] *= 0.965;
             set_bc(s,0);
         }
         // light viscous smoothing of velocity (stability)

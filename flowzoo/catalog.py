@@ -59,7 +59,7 @@ SCENES = [
               "spikes fall, light bubbles rise, and each finger curls into the iconic mushroom "
               "cap. The Atwood number sets how violently it overturns."},
     {"method": "Incompressible Navier–Stokes", "exhibit": "Candle Flame", "key": "ns_flame",
-     "name": "Candle Flame", "preset": {"buoyancy": 0.014, "zst": 0.12, "source": 1.1, "confinement": 6},
+     "name": "Candle Flame", "preset": {"buoyancy": 0.012, "zst": 0.16, "source": 0.7, "confinement": 4, "viscosity": 6e-4},
      "cmap": "Ember (fire)",
      "blurb": "A true laminar diffusion flame: fuel vapour rises from the wick, air diffuses in from "
               "the sides, and they burn on the thin stoichiometric sheet between them. The heat there "
