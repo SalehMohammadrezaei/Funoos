@@ -262,7 +262,7 @@ int main(int argc,char**argv){
                 std::ofstream hof(hn,std::ios::binary); hof.write((char*)hb.data(),hb.size()*sizeof(float)); }
             double xf=0; for(int i=0;i<N;i++) if(!bnd[i] && y[i]<0.1*A.H && x[i]>xf) xf=x[i];
             front<<t<<","<<xf<<"\n"; nf++;
-            if(step%(A.save_every*20)==0) printf("step %d/%d (%d frames, %d fluid)\n",step,steps,nf,Nw);
+            if(step%(A.save_every*3)==0) printf("step %d/%d (%d frames, %d fluid)\n",step,steps,nf,Nw);
         }
     }
     std::ofstream meta(A.out+"/meta.txt");

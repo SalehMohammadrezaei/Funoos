@@ -179,7 +179,11 @@ h2{font-size:17px;font-weight:700}
 .skel::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 25%,rgba(91,134,240,.18) 50%,transparent 75%);
   background-size:220% 100%;animation:shimmer 1.4s linear infinite}
 @keyframes shimmer{to{background-position:-220% 0}}
-.skel .msg{position:absolute;left:0;right:0;bottom:26px;text-align:center;color:var(--blue-lt);font-size:13px;font-weight:600}
+.skel .msg{position:absolute;left:0;right:0;bottom:36px;text-align:center;color:var(--blue-lt);font-size:13px;font-weight:600}
+.skel .pbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);width:min(62%,340px);height:6px;
+  border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden}
+.skel .pfill{height:100%;width:0;border-radius:4px;background:linear-gradient(90deg,var(--blue-br),var(--lime));
+  transition:width .3s var(--ease)}
 
 /* KPI tiles (the dashboard readouts) */
 .kpis{display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;margin-top:4px}

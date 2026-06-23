@@ -12,6 +12,7 @@ text and ranges); `view` and `colormap` are chosen *after* the run.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,34 @@ SOLVERS = _BASE / "solvers"
 EXE = ".exe" if sys.platform.startswith("win") else ""
 # 2D grids are modest — ~8 threads is the throughput sweet spot (more = overhead).
 _ENV = {**os.environ, "OMP_NUM_THREADS": str(min(8, os.cpu_count() or 4))}
+
+_STEP_RE = re.compile(r"step\s+(\d+)\s*/\s*(\d+)")
+_T_RE = re.compile(r"\bt=([\d.]+)")
+
+
+def _run_solver(args, pr=None, tend=None):
+    """Run a C++ solver, streaming its 'step X/Y' (or 't=…') output back as a live percent."""
+    if pr is None:
+        subprocess.run(args, check=True, env=_ENV); return
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1, env=_ENV)
+    last = -1
+    for line in proc.stdout:
+        pct = None
+        m = _STEP_RE.search(line)
+        if m and int(m.group(2)):
+            pct = int(m.group(1)) / int(m.group(2))
+        elif tend:
+            mt = _T_RE.search(line)
+            if mt:
+                pct = float(mt.group(1)) / tend
+        if pct is not None:
+            p = max(0, min(99, int(pct * 100)))
+            if p != last:
+                last = p; pr(f"simulating… {p}%")
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, args)
 
 
 def _bin(d, name):
@@ -382,11 +411,10 @@ def _solve_windtunnel(p, pr, tmp):
     _ensure(_bin("lbm", "lbm2d"))
     steps = int(44000 * _durv(p))
     pr(f"LBM wind tunnel · {obs} · {nx}×{ny}, Re={Re:.0f}, {steps} steps…")
-    subprocess.run([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
-                    "--mask", str(Path(tmp) / "m.bin"), "--U", str(U), "--tau", f"{tau:.5f}",
-                    "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
-                    "--out", tmp, "--probe_x", str(min(probe, nx - 2)), "--probe_y", str(probe_y)],
-                   check=True, env=_ENV)
+    _run_solver([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
+                 "--mask", str(Path(tmp) / "m.bin"), "--U", str(U), "--tau", f"{tau:.5f}",
+                 "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
+                 "--out", tmp, "--probe_x", str(min(probe, nx - 2)), "--probe_y", str(probe_y)], pr)
     save_every = max(1, steps // 120)
     n = _nframes(tmp); stride = max(1, (n - n // 5) // 90)
     use = range(n // 5, n, stride)
@@ -407,10 +435,10 @@ def _solve_porous(p, pr, tmp):
     tau, force = 0.8, 1.2e-5            # viscous (Stokes regime → Darcy valid), gentle body force
     steps = int(24000 * _durv(p))
     pr(f"LBM porous medium · φ={phi:.2f} · {nx}×{ny}…")
-    subprocess.run([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
-                    "--mask", str(Path(tmp) / "m.bin"), "--periodic", "1", "--force", str(force),
-                    "--tau", str(tau), "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
-                    "--out", tmp], check=True, env=_ENV)
+    _run_solver([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
+                 "--mask", str(Path(tmp) / "m.bin"), "--periodic", "1", "--force", str(force),
+                 "--tau", str(tau), "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
+                 "--out", tmp], pr)
     n = _nframes(tmp); use = range(n // 3, n, max(1, (n - n // 3) // 70))
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
     meta = {}
@@ -459,7 +487,7 @@ def _solve_ns(mode, p, pr, tmp):
                  "--conf", str(p["confinement"]), "--srcw", str(p["source"])]
         hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
     pr(f"Navier–Stokes ({mode}) {nx}×{ny}, {steps} steps…")
-    subprocess.run(args, check=True, env=_ENV)
+    _run_solver(args, pr)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
 
@@ -496,9 +524,9 @@ def _solve_euler(mode, p, pr, tmp):
         hints = {"mode": "bubble", "nx": nx, "ny": ny}
     _ensure(_bin("compressible", "euler2d"))
     pr(f"compressible Euler ({mode}) {nx}×{ny}…")
-    subprocess.run([str(_bin("compressible", "euler2d")), "--mode", mode, "--nx", str(nx),
-                    "--ny", str(ny), "--tend", str(tend), "--cfl", "0.4", "--steps", "200000",
-                    "--save_every", "12", "--out", tmp] + extra, check=True, env=_ENV)
+    _run_solver([str(_bin("compressible", "euler2d")), "--mode", mode, "--nx", str(nx),
+                 "--ny", str(ny), "--tend", str(tend), "--cfl", "0.4", "--steps", "200000",
+                 "--save_every", "12", "--out", tmp] + extra, pr, tend=tend)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
 
@@ -551,7 +579,7 @@ def _solve_dam(p, pr, tmp):
             args += ["--shipsz", str(p.get("shipsz", 1.0))]
     _ensure(_bin("sph", "sph2d"))
     pr(f"SPH · {p.get('scene', 'Dam break')} · dp={dp:.3f}…")
-    subprocess.run(args, check=True, env=_ENV)
+    _run_solver(args, pr)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3) for i in idx]
     if sc == "pour":          # colour by the pour/impact speed, not a dam-height scale
@@ -576,10 +604,12 @@ def _solve_spectral(p, pr, tmp):
         wh = double_shear_layer(n, amp=float(p["perturbation"])); label = "Kelvin–Helmholtz"
     dt = 0.4 * (2 * np.pi / n)
     pr(f"spectral {n}×{n}, ν={nu:.1e}, {steps} steps…")
-    vel = []
+    vel = []; _pp = max(1, steps // 50)
     for st in range(steps + 1):
         if st % max(1, steps // 90) == 0:
             vel.append(sim.velocity(wh))
+        if st % _pp == 0:
+            pr(f"simulating… {int(100 * st / steps)}%")
         wh = sim.step(wh, dt)
     return Result("spectral", vel, f"{label}  {n}×{n}")
 
@@ -594,11 +624,13 @@ def _solve_mixing(p, pr, tmp):
     c = 0.5 * (1 + np.sign(np.sin(float(p.get("bands", 6)) * yy)))
     kap = float(p.get("diffusion", 1e-4))
     pr(f"chaotic mixing {n}×{n}, {steps} steps…")
-    raw = []
+    raw = []; _pp = max(1, steps // 50)
     for st in range(steps + 1):
         u, v = sim.velocity(wh)
         if st % max(1, steps // 100) == 0:
             raw.append(c.copy())
+        if st % _pp == 0:
+            pr(f"simulating… {int(100 * st / steps)}%")
         c = advect_sl(c, u, v, dt, L)
         if kap > 0:                                   # gentle scalar diffusion (spectral)
             c = np.real(np.fft.ifft2(np.exp(-kap * sim.k2 * dt) * np.fft.fft2(c)))
@@ -612,7 +644,8 @@ def _solve_reaction(p, pr, tmp):
     pat = p.get("pattern", "Spots"); F, k = PRESETS.get(pat, (0.035, 0.065))
     steps = int(9000 * _durv(p))
     pr(f"Gray–Scott {n}×{n}, {pat} (F={F:.4f}, k={k:.4f}), {steps} steps…")
-    frames = gray_scott(n=n, F=F, k=k, steps=steps, nframes=110, seed=1)
+    frames = gray_scott(n=n, F=F, k=k, steps=steps, nframes=110, seed=1,
+                        progress=lambda f: pr(f"simulating… {int(100 * f)}%"))
     return Result("field", frames, f"{pat}  {n}×{n}", hints={"label": "V concentration"})
 
 
@@ -624,7 +657,8 @@ def _solve_quantum(p, pr, tmp):
     pr(f"Schrödinger {n}×{n} ({scene}), {steps} steps…")
     prob, phase, V, norm = simulate(n=n, scene=scene, steps=steps, nframes=110,
                                     k0=float(p.get("momentum", 360)), width=float(p.get("width", 0.06)),
-                                    v0=float(p.get("barrier", 320)))
+                                    v0=float(p.get("barrier", 320)),
+                                    progress=lambda f: pr(f"simulating… {int(100 * f)}%"))
     if scene == "harmonic":          # closed system → unitarity check
         info = f"harmonic well  {n}×{n} · norm conserved to {max(abs(x - 1) for x in norm):.0e}"
     else:                            # open: the absorbing border removes escaping probability

@@ -5,7 +5,12 @@ let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS =
 const api = () => window.pywebview.api;
 const $ = s => document.querySelector(s);
 const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
-window.onProgress = m => { const s = $("#s-status"); if (s) s.textContent = "⏳ " + m; const k = $("#s-skelmsg"); if (k) k.textContent = m; };
+window.onProgress = m => {
+  const s = $("#s-status"); if (s) s.textContent = "⏳ " + m;
+  const k = $("#s-skelmsg"); if (k) k.textContent = m;
+  const pm = /(\d+)\s*%/.exec(m), f = $("#s-pfill");           // drive the progress bar from "… N%"
+  if (f && pm) { f.style.width = pm[1] + "%"; f.parentElement.style.opacity = 1; }
+};
 
 function show(v) {
   document.querySelectorAll(".view").forEach(x => x.classList.remove("active"));
@@ -188,6 +193,7 @@ function field(q) {
 async function runSim() {
   const btn = $("#s-run"); btn.disabled = true; btn.textContent = "●  Simulating…";
   $("#s-skel").classList.add("on"); $("#s-hint").style.display = "none"; $("#s-plotpanel").style.display = "none";
+  const pf = $("#s-pfill"); if (pf) { pf.style.width = "0%"; } $("#s-skelmsg").textContent = "simulating…";
   const params = { ...PSTATE }; const view = (RUN && RUN.view) || null;
   try {
     const r = await api().run(CUR_EXH, params, view, CUR_CMAP); RUN = r; FPS = 26;

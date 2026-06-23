@@ -33,7 +33,7 @@ def _lap(a):
 
 
 def gray_scott(n=256, F=0.035, k=0.065, Du=0.16, Dv=0.08, steps=10000,
-               nframes=120, seed=0):
+               nframes=120, seed=0, progress=None):
     rng = np.random.default_rng(seed)
     U = np.ones((n, n)); V = np.zeros((n, n))
     # seed a few noisy blobs of V
@@ -44,7 +44,7 @@ def gray_scott(n=256, F=0.035, k=0.065, Du=0.16, Dv=0.08, steps=10000,
         U[m] = 0.50; V[m] = 0.25
     U += 0.02 * rng.standard_normal((n, n)); V += 0.02 * rng.standard_normal((n, n))
     U = np.clip(U, 0, 1); V = np.clip(V, 0, 1)
-    every = max(1, steps // nframes)
+    every = max(1, steps // nframes); pevery = max(1, steps // 50)
     frames = []
     for s in range(steps + 1):
         uvv = U * V * V
@@ -53,4 +53,6 @@ def gray_scott(n=256, F=0.035, k=0.065, Du=0.16, Dv=0.08, steps=10000,
         np.clip(U, 0, 1, out=U); np.clip(V, 0, 1, out=V)
         if s % every == 0:
             frames.append(V.copy())
+        if progress and s % pevery == 0:
+            progress(s / steps)
     return frames

@@ -284,7 +284,7 @@ int main(int argc,char**argv){
             for(int s=0;s<N;s++){ vb[s]=(float)(mx[s]/r[s]); vb[N+s]=(float)(my[s]/r[s]); }
             char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
             std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
-            nf++; if(step%(a.save_every*10)==0)printf("step %d t=%.4f (%d frames)\n",step,t,nf);
+            nf++; if(step%(a.save_every*3)==0)printf("step %d t=%.4f (%d frames)\n",step,t,nf);
         }
     }
     // always save final density

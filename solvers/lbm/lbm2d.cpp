@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
             std::ofstream of(fn,std::ios::binary);
             of.write((char*)buf.data(), buf.size()*sizeof(float));
             nframes++;
-            if (step % (a.save_every*10)==0)
+            if (step % (a.save_every*3)==0)
                 printf("step %d/%d  (%d frames)\n", step, a.steps, nframes);
         }
     }

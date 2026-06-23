@@ -17,7 +17,7 @@ import numpy as np
 
 
 def simulate(n=256, scene="barrier", k0=0.0, width=0.06, v0=320.0,
-             steps=360, nframes=120, L=1.0):
+             steps=360, nframes=120, L=1.0, progress=None):
     x = np.linspace(-L / 2, L / 2, n, endpoint=False)
     X, Y = np.meshgrid(x, x, indexing="ij")
     dx = L / n
@@ -60,7 +60,7 @@ def simulate(n=256, scene="barrier", k0=0.0, width=0.06, v0=320.0,
     else:
         absorb = None
 
-    every = max(1, steps // nframes)
+    every = max(1, steps // nframes); pevery = max(1, steps // 50)
     prob, phase, norm = [], [], []
     n0 = np.sum(np.abs(psi) ** 2) * dx * dx
     for s in range(steps + 1):
@@ -68,6 +68,8 @@ def simulate(n=256, scene="barrier", k0=0.0, width=0.06, v0=320.0,
             p = np.abs(psi) ** 2
             prob.append(p.copy()); phase.append(np.angle(psi))
             norm.append(float(np.sum(p) * dx * dx) / n0)
+        if progress and s % pevery == 0:
+            progress(s / steps)
         psi = expV * psi
         psi = np.fft.ifft2(expK * np.fft.fft2(psi))
         psi = expV * psi
