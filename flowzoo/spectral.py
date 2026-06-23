@@ -2,8 +2,8 @@
 
 Periodic box, vorticity transport  d(omega)/dt + u.grad(omega) = nu * lap(omega).
 The nonlinear term is evaluated in physical space (pseudo-spectral) with 2/3-
-rule dealiasing; viscosity is treated with an integrating factor; time stepping
-is RK2. Spectral accuracy makes this conserve energy to round-off in the
+rule dealiasing; viscosity is treated explicitly in the right-hand side; time
+stepping is RK4. Spectral accuracy makes this conserve energy to round-off in the
 inviscid limit -- which is exactly how we validate it.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ class Spectral2D:
 
 
 def random_field(n, L=2 * np.pi, k0=14.0, seed=0):
-    """Random divergence-free vorticity with a peaked spectrum → decaying turbulence."""
+    """Random vorticity with a peaked spectrum → decaying turbulence (the derived velocity is solenoidal)."""
     rng = np.random.default_rng(seed)
     k1 = np.fft.fftfreq(n, d=L / n) * 2 * np.pi
     kx = k1[:, None]; ky = k1[None, :]; k = np.sqrt(kx ** 2 + ky ** 2)

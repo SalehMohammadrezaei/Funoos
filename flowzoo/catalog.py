@@ -58,12 +58,13 @@ SCENES = [
      "blurb": "Heavy fluid resting on light fluid in gravity. The interface is unstable: heavy "
               "spikes fall, light bubbles rise, and each finger curls into the iconic mushroom "
               "cap. The Atwood number sets how violently it overturns."},
-    {"method": "Incompressible Navier–Stokes", "exhibit": "Rising Smoke", "key": "ns_flame",
-     "name": "Candle Flame", "preset": {"source": 0.32, "buoyancy": 0.006, "confinement": 17, "flicker": 1.0},
+    {"method": "Incompressible Navier–Stokes", "exhibit": "Candle Flame", "key": "ns_flame",
+     "name": "Candle Flame", "preset": {"buoyancy": 0.014, "zst": 0.12, "source": 1.1, "confinement": 6},
      "cmap": "Ember (fire)",
-     "blurb": "A narrow, intense, flickering source — the lantern's own flame. The same buoyant "
-              "plume physics dialed to a candle: a slender tongue of fire that wanders and pulses "
-              "as shed vortices tug at it. ❖ the heart of Funoos (فانوس, the lantern)."},
+     "blurb": "A true laminar diffusion flame: fuel vapour rises from the wick, air diffuses in from "
+              "the sides, and they burn on the thin stoichiometric sheet between them. The heat there "
+              "makes the gas buoyant, which anchors the teardrop and sheds a vortex that flickers the "
+              "tip. Combustion, not a recoloured plume. ❖ the heart of Funoos (فانوس, the lantern)."},
     {"method": "Incompressible Navier–Stokes", "exhibit": "Rayleigh-Benard", "key": "ns_rb",
      "name": "Rayleigh–Bénard Convection", "preset": {"buoyancy": 0.006, "viscosity": 0.0006},
      "cmap": "Ember (fire)",

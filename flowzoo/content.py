@@ -378,8 +378,8 @@ SETUP = {
         "or text) — so no mesh is ever generated."},
 "Rising Smoke": {
   "ic": "Quiescent ambient fluid with no dye; the source switches on at t = 0.",
-  "bc": "No-slip floor carrying a hot, dyed source patch; free-slip side walls; open "
-        "(zero-gradient) top so the plume can leave the domain."},
+  "bc": "No-penetration (free-slip) floor carrying a hot, dyed source patch; free-slip side "
+        "walls; open (zero-gradient) top so the plume can leave the domain."},
 "Mushroom Clouds": {
   "ic": "Heavy fluid resting on light fluid, separated by a small multi-mode interface "
         "ripple; everything at rest.",
@@ -391,8 +391,8 @@ SETUP = {
         "no-penetration side walls."},
 "Chimney Plume": {
   "ic": "A uniform crosswind already blowing across a box of clean air.",
-  "bc": "Velocity inlet (the wind) on the left, zero-gradient outflow on the right, no-slip "
-        "floor with a hot dyed stack source, open top."},
+  "bc": "Velocity inlet (the wind) on the left, zero-gradient outflow on the right, a "
+        "no-penetration (free-slip) floor with a hot dyed stack source, open top."},
 "Detonation": {
   "ic": "Ambient gas at rest with a small high-pressure, high-density charge; the 'city' "
         "scene also places two solid towers on the ground.",
@@ -401,13 +401,15 @@ SETUP = {
 "Shockwave Strike": {
   "ic": "A planar incident shock travelling into still gas, set just upstream of a lighter "
         "(or heavier) gas bubble at rest; the twin-bubble variant seeds two.",
-  "bc": "Supersonic inflow behind the shock, transmissive outflow elsewhere; the bubble is "
+  "bc": "The incident shock is set as an initial condition (a post-shock slab); all domain "
+        "edges are transmissive (zero-gradient) outflow; the bubble is "
         "a density contrast, not a wall, so the shock passes through and deforms it."},
 "The Big Splash": {
   "ic": "A body of water at rest under gravity — a tall column (dam break), a falling blob "
         "(droplet), a filled tank (slosh), a partly-filled glass (pour) or a wave train.",
-  "bc": "Solid no-slip tank walls enforced by dynamic boundary particles; a free surface "
-        "open to the air; the ship scene adds a buoyant rigid body coupled to the fluid."},
+  "bc": "Free-slip (non-penetration) tank walls enforced by dynamic boundary particles; a free surface "
+        "open to the air; the ship scene adds a rigid body that floats on the surface through a "
+        "contact (penalty) force, heaving and rolling with the waves."},
 "Cloud Billows": {
   "ic": "Two opposing shear layers with a seeded perturbation (Kelvin–Helmholtz), or a "
         "random divergence-free field (decaying turbulence).",
@@ -427,4 +429,33 @@ SETUP = {
 "Quantum Ripples": {
   "ic": "A localized Gaussian wave packet with an initial momentum.",
   "bc": "An absorbing boundary (or a harmonic well for the closed, norm-conserving case)."},
+}
+
+
+# Candle flame — a low-Mach laminar diffusion flame (distinct from the smoke plume).
+DETAIL["Candle Flame"] = {
+"physics": (
+"A candle does not burn like a campfire log; it is a laminar diffusion flame. Heat melts "
+"and vaporises wax at the wick, the fuel vapour rises, and oxygen from the surrounding air "
+"diffuses inward to meet it. Fuel and oxidiser can only react where they coexist in the right "
+"ratio, so the burning is confined to a thin sheet — the stoichiometric surface — that wraps "
+"around the rising fuel like a sock.\n\n"
+"All the heat is released on that sheet. It makes the gas there much lighter, so buoyancy "
+"shoots it upward; the rising column drags in fresh air at the base, which feeds the flame and "
+"anchors it to the wick. That same buoyant acceleration is unstable: a ring of vorticity forms "
+"and sheds periodically, pinching the flame and making the tip flicker at a few cycles a second. "
+"The slender teardrop, the steady anchoring, and the flicker all fall out of this fuel-meets-air-"
+"plus-buoyancy picture — which is why this scene uses a combustion model, not the recoloured "
+"buoyant jet of the smoke plume."),
+"terms": (
+"• Z — mixture fraction: 1 in the fuel from the wick, 0 in the ambient air, conserved as it mixes\n"
+"• Z = Z_st — the stoichiometric surface where fuel and air meet in burning proportion (the sheet)\n"
+"• T(Z) — temperature: peaks on the sheet (fast 'Burke–Schumann' chemistry) and falls either side\n"
+"• f_b = β·T·ŷ — Boussinesq buoyancy: the hot sheet is light and rises\n"
+"• 𝒟∇²Z — diffusion of the mixture, which sets the thickness of the luminous zone"),
+}
+SETUP["Candle Flame"] = {
+  "ic": "Still, cool air everywhere (mixture fraction Z = 0); the wick begins releasing fuel at t = 0.",
+  "bc": "A thin fuel inlet at the wick (Z → 1) on the floor; a no-penetration (free-slip) floor, free-slip side walls that "
+        "let air be entrained, and an open top through which the hot products leave.",
 }

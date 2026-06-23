@@ -121,7 +121,7 @@ def _shedding(result):
                 "Transverse velocity just behind the body. A clean, regular oscillation means the "
                 "wake is shedding vortices alternately from each side (a von Kármán street). The "
                 "swing is the unsteady side-force that shakes chimneys and bridge decks."))
-    n = len(sig)
+    n = len(sig); obs = h.get("obstacle", "Cylinder")
     if n >= 16:
         win = np.hanning(n); sp = np.abs(np.fft.rfft(sig * win)); fr = np.fft.rfftfreq(n, d=1.0)
         k = int(np.argmax(sp[1:]) + 1) if len(sp) > 2 else 0
@@ -129,15 +129,19 @@ def _shedding(result):
         fig, ax, plt = _new_ax("frequency  (cycles / frame)", "amplitude", "Shedding spectrum → Strouhal")
         ax.plot(fr, sp, color=_AMBER, lw=1.8)
         D, U, fdt = h.get("D"), h.get("U"), h.get("frame_dt_steps")
-        st = None
-        if k and D and U and fdt:
-            st = (fpk / fdt) * D / U
+        st = (fpk / fdt) * D / U if (k and D and U and fdt) else None
+        is_cyl = obs == "Cylinder"
+        if st is not None and obs != "Your text":      # D is ill-defined for multi-glyph text
             ax.axvline(fpk, color=_CYAN, lw=1.4, ls="--")
-            ax.text(0.97, 0.92, f"St = f·D/U ≈ {st:.2f}   (expected ≈ 0.2)", transform=ax.transAxes,
-                    color=_GOOD, fontsize=9, ha="right", va="top", fontweight="bold")
-        ex = ("The peak frequency of the shedding, made dimensionless as the Strouhal number "
-              "St = f·D/U. For a cylinder over a wide Reynolds range this sits near 0.2 — "
-              + (f"here ≈ {st:.2f}, matching the textbook value." if st else "the textbook value."))
+            note = f"St = f·D/U ≈ {st:.2f}" + ("   (cylinder: expected ≈ 0.2)" if is_cyl else "")
+            ax.text(0.97, 0.92, note, transform=ax.transAxes, color=_GOOD, fontsize=9,
+                    ha="right", va="top", fontweight="bold")
+        ex = ("The peak shedding frequency, made dimensionless as the Strouhal number St = f·D/U. "
+              + ("For a circular cylinder this sits near 0.2 across a wide Reynolds range"
+                 + (f" — here ≈ {st:.2f}, matching it." if st is not None else ".")
+                 if is_cyl else
+                 "It is a fixed number for each shape (≈0.2 for a cylinder, lower for a square); "
+                 "sharper, bluffer bodies shed at their own characteristic rate."))
         out.append(("Strouhal spectrum", _rgb(fig, plt), ex))
     return out
 
@@ -306,7 +310,7 @@ def _chimney_trajectory(result):
     xs, zs = [], []
     for i in range(sx, nx - 2):
         col = s[:, i]
-        if col.sum() > 0.05 * col.shape[0] * 0.02:
+        if col.sum() > 0.02 * ny:
             zc = float(np.sum(np.arange(ny) * col) / (col.sum() + 1e-9))
             xs.append(i / nx); zs.append(zc / ny)
     fig, ax, plt = _new_ax("downwind distance  x  (fraction)", "plume centre-line height  z  (fraction)",
@@ -323,12 +327,45 @@ def _chimney_trajectory(result):
              "pollutant spreads — it drops as the wind strengthens.")]
 
 
+def _flame(result):
+    raw = result.raw; ny = raw[0].shape[0]
+    tip = []
+    for T in raw:
+        rows = np.where(T.max(axis=1) > 0.3)[0]
+        tip.append((rows.max() if len(rows) else 0) / ny)
+    tip = np.array(tip); t = np.linspace(0, 1, len(tip))
+    out = []
+    fig, ax, plt = _new_ax("time (normalised)", "flame-tip height  (fraction)", "Flame tip — flicker in time")
+    ax.plot(t, tip, color=_AMBER, lw=2.0)
+    out.append(("Flame tip height", _rgb(fig, plt),
+                "Height of the luminous tip over time. After it anchors on the wick the tip "
+                "oscillates rather than sitting still — the periodic pinching of a candle flame, "
+                "driven by a buoyant vortex shed near the base, not by any imposed wobble."))
+    sig = tip - tip.mean(); n = len(sig)
+    if n >= 16:
+        win = np.hanning(n); sp = np.abs(np.fft.rfft(sig * win)); fr = np.fft.rfftfreq(n, d=1.0)
+        k = int(np.argmax(sp[1:]) + 1) if len(sp) > 2 else 0
+        fig, ax, plt = _new_ax("frequency  (cycles / frame)", "amplitude", "Flicker spectrum")
+        ax.plot(fr, sp, color=_CYAN, lw=1.8)
+        if k:
+            ax.axvline(fr[k], color=_AMBER, lw=1.3, ls="--")
+            ax.text(0.97, 0.92, f"flicker peak at {fr[k]:.3f} cyc/frame", transform=ax.transAxes,
+                    color=_GOOD, fontsize=9, ha="right", va="top", fontweight="bold")
+        out.append(("Flicker spectrum", _rgb(fig, plt),
+                    "Frequency content of the tip motion. A clear peak means the flicker is "
+                    "periodic — a real laminar flame flickers at a single dominant frequency "
+                    "(≈10–15 Hz for a candle); here it shows up as one sharp spectral spike."))
+    return out
+
+
 def _ns(result):
     mode = result.hints.get("ns_mode", "smoke")
     if mode == "rb":
         return _rb_convection(result)
     if mode == "wind":
         return _chimney_trajectory(result)
+    if mode == "flame":
+        return _flame(result)
     if mode == "rt":
         return _rt_mixing(result)
     return _plume_rise(result)
@@ -342,6 +379,8 @@ def _blast(result):
     R = []
     for rho in raw:
         gy, gx = np.gradient(rho); sch = np.hypot(gx, gy)
+        if h.get("building"):                       # ignore the static towers' edges (held dense)
+            sch[rho > 2.0] = 0.0
         R.append(rr.flat[int(np.argmax(sch))])
     R = np.array(R) / (np.hypot(nx, ny)); t = np.linspace(0, 1, len(R))
     fig, ax, plt = _new_ax("time (normalised)", "shock-front radius  (fraction)", "Blast-wave expansion")
@@ -397,8 +436,9 @@ def _porous(result):
     ax.set_yscale("log"); _legend(ax)
     return [("Permeability (Darcy)", _rgb(fig, plt),
              "The measured permeability k = ν⟨u⟩/g (how easily fluid passes the rock) plotted against "
-             "the Kozeny–Carman law. k falls steeply as the pores close up — the measured point should "
-             "sit on the reference curve, confirming the pore-scale flow reproduces Darcy behaviour.")]
+             "the Kozeny–Carman trend. k falls steeply as the pores close up — the measured point should "
+             "fall near the reference curve (the grains are randomly sized, so an exact match isn't "
+             "expected), confirming the pore-scale flow reproduces Darcy-type behaviour.")]
 
 
 # ─────────────────────────  pseudo-spectral fields  ─────────────────────────

@@ -191,7 +191,8 @@ int main(int argc,char**argv){
 
         // floating ship: penalty contact pushes fluid away from the hull; the
         // equal-and-opposite reaction (+gravity) drives the rigid body's heave,
-        // surge and roll — buoyancy emerges from the fluid pressure on the hull.
+        // surge and roll — flotation here is from that contact force, not an
+        // integral of the SPH pressure over the hull surface.
         if(ship){
             double ca=cos(th), sa=sin(th), Fbx=0, Fby=0, Tb=0; int Nh=hlx.size();
             double kwt=kw*ramp;

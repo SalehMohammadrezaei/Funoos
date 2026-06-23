@@ -43,7 +43,7 @@ Funoos (فانوس — *the lantern of imagination*) shows physics from many ang
 |---|---|---|---|
 | Vortex street | LBM D2Q9 | Strouhal number (Re ≈ 160) | **St ≈ 0.20** ✓ (live in the player) |
 | Sod shock tube | Compressible HLLC | exact Riemann solution | **mean abs error ≈ 0.002** ✓ |
-| Kelvin–Helmholtz | Pseudo-spectral | inviscid energy conservation | **drift ≈ 1.5×10⁻⁷** ✓ |
+| Kelvin–Helmholtz | Pseudo-spectral | inviscid energy conservation | **drift < 10⁻⁸ (to round-off)** ✓ |
 | Porous flow | Pore-scale LBM | Darcy / Kozeny–Carman | **k = ν⟨u⟩/g**, monotonic in porosity ✓ |
 | Turing patterns | Gray–Scott | Pearson's regimes | reproduces spots/stripes/maze/mitosis ✓ |
 | Dam break | SPH | dry-bed front vs 2√(gH) | front in the physical (Ritter) range ✓ |

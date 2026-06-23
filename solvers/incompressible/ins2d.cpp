@@ -28,7 +28,7 @@
 
 struct Args {
     int nx=240, ny=360, steps=4000, save_every=20, iters=60;
-    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0, flicker=0.0, wind=0.0;
+    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0, flicker=0.0, wind=0.0, zst=0.12;
     std::string mode="smoke", out="frames";
 };
 static Args parse(int c, char** v){
@@ -41,7 +41,7 @@ static Args parse(int c, char** v){
         else if(k=="--grav")a.grav=atof(x.c_str()); else if(k=="--conf")a.conf=atof(x.c_str());
         else if(k=="--srcw")a.srcw=atof(x.c_str()); else if(k=="--pert")a.pert=atof(x.c_str());
         else if(k=="--atwood")a.atwood=atof(x.c_str()); else if(k=="--flicker")a.flicker=atof(x.c_str());
-        else if(k=="--wind")a.wind=atof(x.c_str());
+        else if(k=="--wind")a.wind=atof(x.c_str()); else if(k=="--zst")a.zst=atof(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     return a;
 }
@@ -54,8 +54,13 @@ int main(int argc,char**argv){
     const bool rt    = (a.mode=="rt");
     const bool rb    = (a.mode=="rb");          // Rayleigh-Benard convection
     const bool wind  = (a.mode=="wind");        // chimney plume in a crosswind
+    const bool flame = (a.mode=="flame");       // laminar diffusion flame (Burke-Schumann)
     const bool hassrc   = smoke || wind;        // a continuous dyed/hot source
-    const bool open_top = smoke || wind;        // open (zero-gradient) top boundary
+    const bool open_top = smoke || wind || flame;  // open (zero-gradient) top boundary
+    // Burke-Schumann fast chemistry: temperature peaks at the stoichiometric mixture
+    // fraction Z = zst (the flame sheet) and falls to ambient toward pure fuel or pure air.
+    const double Zst = a.zst;
+    auto Tof=[&](double Z){ double T = (Z<=Zst) ? (Z/Zst) : ((1.0-Z)/(1.0-Zst)); return T<0?0.0:T; };
 
     std::vector<double> u(N,0), v(N,0), u0(N,0), v0(N,0);
     std::vector<double> s(N,0), s0(N,0), p(N,0), div(N,0);
@@ -166,9 +171,17 @@ int main(int argc,char**argv){
                 v[IX(i,j)] += 0.02*g*str;
             }
         }
+        if(flame){                                  // fuel-rich vapour rising off a thin wick
+            int ww=std::max(2, sw/3);
+            for(int j=1;j<1+sh;j++)for(int i=sx-ww;i<=sx+ww;i++){
+                double r=double(i-sx)/ww; double g=exp(-3*r*r);
+                s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g);        // mixture fraction Z→1 at the wick
+            }
+        }
         #pragma omp parallel for schedule(static)
         for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
             if(hassrc)   v[IX(i,j)] += a.dt*a.buoy*s[IX(i,j)];        // hot rises
+            else if(flame) v[IX(i,j)] += a.dt*a.buoy*Tof(s[IX(i,j)]); // heat released at the flame sheet lifts the gas
             else if(rb)  v[IX(i,j)] += a.dt*a.buoy*(s[IX(i,j)]-0.5);  // warm rises, cool sinks
             else         v[IX(i,j)] -= a.dt*a.grav*s[IX(i,j)];        // RT: heavy sinks
         }
@@ -195,6 +208,13 @@ int main(int argc,char**argv){
         // advect scalar
         s0=s; advect(s,s0); set_bc(s,0);
         if(rb){ for(int i=0;i<nx;i++){ s[IX(i,0)]=1.0; s[IX(i,ny-1)]=0.0; } }  // fixed hot/cold plates
+        if(flame){                                  // diffuse the mixture fraction (sets the flame thickness)
+            s0=s;
+            #pragma omp parallel for schedule(static)
+            for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++)
+                s[IX(i,j)] += 0.08*(s0[IX(i-1,j)]+s0[IX(i+1,j)]+s0[IX(i,j-1)]+s0[IX(i,j+1)]-4*s0[IX(i,j)]);
+            set_bc(s,0);
+        }
         // light viscous smoothing of velocity (stability)
         if(a.visc>0){
             u0=u; v0=v;
@@ -209,7 +229,8 @@ int main(int argc,char**argv){
 
         if(step%a.save_every==0){
             std::vector<float> buf(N);
-            for(int k=0;k<N;k++) buf[k]=(float)s[k];
+            // flame renders the luminous temperature field T(Z); other modes render the scalar
+            for(int k=0;k<N;k++) buf[k]=(float)(flame ? Tof(s[k]) : s[k]);
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
             std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
             std::vector<float> vb(2*N);                 // velocity field (for Speed/streamlines)

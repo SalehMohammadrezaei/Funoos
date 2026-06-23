@@ -372,9 +372,12 @@ def _solve_windtunnel(p, pr, tmp):
     else:                                                   # Cylinder
         mask = geometry.cylinder(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
     tau = 0.5 + 3 * (U * D / Re)
+    probe = int(min(probe, 0.85 * nx))                      # keep the probe clear of the outlet sponge (last 12%)
     _ys = np.where(mask.any(axis=1))[0]                      # sample the wake at the body's height
     probe_y = int(round(_ys.mean())) if len(_ys) else ny // 2
     probe_y = int(np.clip(probe_y, 2, ny - 3))
+    if obs in ("F1 car", "Cyclist", "Peloton (drafting)"):  # a real no-slip road under the vehicle
+        mask[0:max(2, ny // 28), :] = 1                     # (otherwise periodic walls let flow wrap under)
     geometry.save_mask(mask, Path(tmp) / "m.bin")
     _ensure(_bin("lbm", "lbm2d"))
     steps = int(44000 * _durv(p))
@@ -427,6 +430,8 @@ def _solve_ns(mode, p, pr, tmp):
         nx, ny = int(280 * s), int(440 * s)         # tall box for rising plumes / fingers
     elif mode == "rb":
         nx, ny = int(480 * s), int(230 * s)         # wide, shallow cell for convection rolls
+    elif mode == "flame":
+        nx, ny = int(190 * s), int(360 * s)         # tall, narrow box for a slender candle flame
     else:                                           # wind
         nx, ny = int(540 * s), int(420 * s)         # tall, wide box: open top, the plume rises & blows across
     _ensure(_bin("incompressible", "ins2d"))
@@ -445,6 +450,10 @@ def _solve_ns(mode, p, pr, tmp):
         args += ["--buoy", str(p["buoyancy"]), "--conf", "0", "--iters", "80",
                  "--pert", str(p.get("perturbation", 1.0))]
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "temperature T"}
+    elif mode == "flame":                           # laminar diffusion flame (Burke–Schumann)
+        args += ["--buoy", str(p["buoyancy"]), "--zst", str(p.get("zst", 0.12)),
+                 "--conf", str(p["confinement"]), "--srcw", str(p["source"]), "--visc", str(p["viscosity"])]
+        hints = {"vlim": (0.0, 1.0), "gamma": 0.6, "label": "flame temperature T"}
     else:                                           # wind — chimney plume in a crosswind
         args += ["--buoy", str(p["buoyancy"]), "--wind", str(p["wind"]),
                  "--conf", str(p["confinement"]), "--srcw", str(p["source"])]
@@ -653,6 +662,20 @@ EXHIBITS = {
                       "Width of the hot source at the floor."),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("smoke", p, pr, t)},
+    "Candle Flame": {
+        "params": [_f("buoyancy", "Heat-release buoyancy", 0.014, 0.006, 0.025, "Physics",
+                      "How strongly the heat released at the flame sheet lifts the gas. It both "
+                      "shapes the teardrop and drives the buoyant flicker."),
+                   _f("zst", "Stoichiometric mixture  Z_st", 0.12, 0.05, 0.25, "Physics",
+                      "The fuel/air ratio at which the flame burns. The luminous sheet sits on the "
+                      "Z = Z_st surface; a smaller value wraps the flame tighter to the wick."),
+                   _f("source", "Wick width (×)", 1.1, 0.5, 2.0, "Geometry",
+                      "Width of the fuel vapour leaving the wick."),
+                   _f("confinement", "Vorticity confinement", 6, 0, 20, "Physics",
+                      "Sharpens the small eddies that make the flame tip lick and wander."),
+                   _f("viscosity", "Viscosity", 2.5e-4, 5e-5, 6e-4, "Physics", _H["visc"]),
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_ns("flame", p, pr, t)},
     "Mushroom Clouds": {
         "params": [_f("atwood", "Atwood number", 0.7, 0.2, 1.0, "Physics",
                       "A = (ρ_heavy − ρ_light)/(ρ_heavy + ρ_light), the density contrast across "
@@ -858,6 +881,24 @@ META = {
                        "tolerance each step; buoyant transport stays stable and the plume "
                        "develops the expected shear roll-up.",
         "demo": "results/smoke_plume.gif"},
+    "Candle Flame": {"method": "Low-Mach laminar diffusion flame · Navier–Stokes + mixture fraction",
+        "blurb": "A real candle is a non-premixed (diffusion) flame: fuel vapour rises from the "
+                 "wick, air is drawn in from the sides, and the two can only burn where they meet "
+                 "in the right proportion. Modelled with fast chemistry, that burning sheet sits on "
+                 "the stoichiometric surface; the heat it releases makes the gas buoyant, which "
+                 "pulls in fresh air and lifts the products — giving the slender teardrop and the "
+                 "characteristic tip flicker. Unlike the smoke plume, the flame here is the result "
+                 "of combustion, not a recoloured buoyant jet.",
+        "eq": r"$\partial_t Z+\mathbf{u}\!\cdot\!\nabla Z=\mathcal{D}\nabla^2 Z,\quad T(Z)=T_{\rm ad}\,\min\!\left(\dfrac{Z}{Z_{st}},\ \dfrac{1-Z}{1-Z_{st}}\right),\quad \mathbf{f}_b=\beta\,T(Z)\,\hat{\mathbf{y}}$",
+        "numerics": "The incompressible projection solver carries a conserved mixture fraction Z "
+                    "(Z = 1 in the fuel leaving the wick, Z = 0 in the surrounding air). In the "
+                    "Burke–Schumann fast-chemistry limit the flame sheet sits exactly on Z = Z_st, "
+                    "where the temperature peaks; T(Z) is a tent function of Z, and that heat drives "
+                    "the Boussinesq buoyancy. The luminous field rendered is T(Z) — the reacting, "
+                    "glowing zone.",
+        "validation": "The flame anchors on the wick and self-organises into a steady teardrop with "
+                       "a buoyancy-driven tip flicker — the hallmark of a laminar diffusion flame — "
+                       "without any artificial forcing; the flicker frequency is reported in the plots."},
     "Mushroom Clouds": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "Place a heavy fluid on top of a lighter one in a gravitational field and "
                  "the arrangement is unstable: the tiniest ripple on the interface grows, the "
@@ -961,8 +1002,8 @@ META = {
                     "wavemaker is simply a wall layer that moves. A δ-SPH density-diffusion "
                     "term and XSPH velocity smoothing damp the acoustic noise and relax the "
                     "initial lattice so the fluid starts genuinely at rest; the floating ship "
-                    "is a rigid body whose heave, surge and roll are driven by the pressure "
-                    "the water exerts on its hull.",
+                    "is a rigid body that rides on the fluid through a contact (penalty) "
+                    "force, heaving and rolling as the water surface moves beneath it.",
         "validation": "The leading surge-front advances at a speed within the physical range "
                        "of the frictionless Ritter dry-bed limit 2√(gH) — the column must "
                        "first collapse vertically, so the real front lags that ideal bound.",
@@ -980,8 +1021,9 @@ META = {
                     "nonlinear advection term is formed in physical space with 2/3-rule "
                     "dealiasing, and time advances with classical fourth-order Runge–Kutta "
                     "(stable for the advection operator's imaginary eigenvalues).",
-        "validation": "With viscosity switched off the scheme conserves kinetic energy to "
-                       "≈ 1.5×10⁻⁷ over hundreds of steps — the hallmark of spectral accuracy.",
+        "validation": "With viscosity switched off the scheme conserves kinetic energy essentially "
+                       "to round-off (relative drift below 10⁻⁸ over hundreds of steps) — the "
+                       "hallmark of spectral accuracy.",
         "demo": "results/turbulence.gif"},
     "Turing Patterns": {"method": "Reaction–Diffusion · Gray–Scott",
         "blurb": "Two chemicals diffuse at different rates while one feeds on the other. From a "
@@ -1021,9 +1063,10 @@ META = {
         "numerics": "The turbulent velocity comes from the same spectral vorticity solver; the "
                     "dye is a passive scalar advected by it with periodic bilinear semi-Lagrangian "
                     "transport (unconditionally stable) and a touch of spectral diffusion.",
-        "validation": "Semi-Lagrangian advection is monotone and conservative to interpolation "
-                       "error — the dye stays in [0, 1] and total dye is preserved as the "
-                       "filaments thin, the signature of stirring-dominated mixing.",
+        "validation": "Bilinear semi-Lagrangian advection is unconditionally stable and nearly "
+                       "monotone — the dye stays within [0, 1] as the filaments thin (interpolation "
+                       "is slightly diffusive, so a little contrast is lost rather than gained), the "
+                       "signature of stirring-dominated mixing.",
         "demo": "results/gallery/mix_bands.gif"},
     "Porous Flow": {"method": "Pore-scale Lattice-Boltzmann · Darcy",
         "blurb": "Push fluid through a packed bed of grains and it threads a tortuous path "
