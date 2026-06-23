@@ -15,12 +15,7 @@ function show(v) {
   $("#heroCanvas").style.opacity = v === "intro" ? 0.5 : 0.1;
   if (v !== "studio") { const sv = $("#s-video"); if (sv) sv.pause(); }
   if (v === "intro") { revealAll($("#intro")); runCounters(); }
-  if (v === "gallery") resetGallery();          // always open on the first scene of each row, scrolled to top
-}
-function resetGallery() {
-  _rows.forEach(c => { c._idx = 0; c._suppress = false; layoutRow(c); });
-  const r = $("#gallery-rows");
-  if (r) { r.scrollTop = 0; requestAnimationFrame(() => { r.scrollTop = 0; }); }   // also after layout settles
+  if (v === "gallery") { const r = $("#gallery-scroll"); if (r) r.scrollTop = 0; }   // open at the top
 }
 function revealAll(root) {
   root.querySelectorAll(".reveal").forEach((e, i) => { e.classList.remove("in"); setTimeout(() => e.classList.add("in"), 80 + i * 90); });
@@ -48,84 +43,53 @@ function runCounters() {
   });
 }
 
-/* ───────── gallery: each method is a row that is itself a coverflow ───────── */
+/* ───────── gallery: a card grid (one card per scene) ───────── */
 const SHORT = {
-  "Lattice–Boltzmann": "LBM", "Incompressible Navier–Stokes": "Navier–Stokes",
-  "Compressible Euler": "Euler", "Smoothed-Particle Hydrodynamics": "SPH",
-  "Pseudo-spectral": "Spectral", "Reaction–Diffusion": "Reaction"
+  "Lattice–Boltzmann": "Lattice–Boltzmann", "Incompressible Navier–Stokes": "Navier–Stokes",
+  "Compressible Euler": "Compressible Euler", "Smoothed-Particle Hydrodynamics": "SPH",
+  "Pseudo-spectral": "Pseudo-spectral", "Reaction–Diffusion": "Reaction–Diffusion"
 };
 const ACC = {
   "Lattice–Boltzmann": "#5b86f0", "Incompressible Navier–Stokes": "#e0a23a",
   "Compressible Euler": "#e35d6a", "Smoothed-Particle Hydrodynamics": "#56c5e8",
   "Pseudo-spectral": "#9b8cff", "Reaction–Diffusion": "#9be25a"
 };
-const _rows = [];
-const _rowio = new IntersectionObserver(es => es.forEach(e => { e.target._on = e.isIntersecting; layoutRow(e.target); }),
-  { root: null, threshold: 0.04 });
+const SCHEME = {
+  "Lattice–Boltzmann": "D2Q9 BGK", "Incompressible Navier–Stokes": "Projection",
+  "Compressible Euler": "HLLC", "Smoothed-Particle Hydrodynamics": "WCSPH",
+  "Pseudo-spectral": "FFT", "Reaction–Diffusion": "Gray–Scott"
+};
+// play only the cards currently on screen (keeps 29 clips light)
+const _vio = new IntersectionObserver(es => es.forEach(e => {
+  const v = e.target; if (e.isIntersecting) v.play().catch(() => {}); else v.pause();
+}), { root: null, threshold: 0.15 });
 
 async function buildGallery() {
-  const groups = await api().catalog();
-  GAL = groups;
-  const root = $("#gallery-rows");
-  root.querySelectorAll(".row").forEach(r => r.remove()); _rows.length = 0;
-  for (const g of groups) {
-    const row = el("div", "row"); row.style.setProperty("--acc", ACC[g.method] || "#5b86f0");
-    const rhead = el("div", "rhead");
-    rhead.append(el("div", "bar"), el("div", "name", g.method),
-      el("div", "count", `${g.scenes.length} scene${g.scenes.length > 1 ? "s" : ""}`));
-    row.append(rhead);
-    const car = el("div", "rcar"); car._idx = 0; car._on = true; car._n = g.scenes.length; car._short = SHORT[g.method] || g.method;
-    g.scenes.forEach((s, k) => car.append(coverCard(s, car, k)));
-    const la = el("button", "arrow left", "‹"); const ra = el("button", "arrow right", "›");
-    la.onclick = () => goRow(car, car._idx - 1); ra.onclick = () => goRow(car, car._idx + 1);
-    car.append(la, ra);
-    attachRowDrag(car);
-    row.append(car); root.append(row);
-    _rows.push(car); _rowio.observe(car); layoutRow(car);
+  GAL = await api().catalog();
+  const root = $("#gallery-grid"); root.innerHTML = "";
+  for (const g of GAL) {
+    const acc = ACC[g.method] || "#5b86f0", method = SHORT[g.method] || g.method, scheme = SCHEME[g.method] || "";
+    for (const s of g.scenes) root.append(sceneCard(s, acc, method, scheme));
   }
 }
-function coverCard(s, car, k) {
-  const c = el("div", "ccard");
-  const frame = el("div", "frame");
-  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; frame.append(v); }
-  c.append(frame, el("div", "cov"), el("div", "chip", car._short), el("div", "play", "▶"), el("div", "nm", s.name));
-  c._key = s.key;
-  c.onclick = () => { if (car._suppress) return; if (k === car._idx) morphToDetail(c, s.key); else goRow(car, k); };
+function sceneCard(s, acc, method, scheme) {
+  const c = el("div", "gcard");
+  const media = el("div", "media");
+  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; v.preload = "metadata"; media.append(v); _vio.observe(v); }
+  const pl = el("div", "pill left"); const dot = el("span", "dot"); dot.style.background = acc;
+  pl.append(dot, document.createTextNode(method));
+  media.append(pl, el("div", "pill right", scheme));
+  const body = el("div", "gbody");
+  body.append(el("div", "ttl", s.name));
+  const foot = el("div", "foot");
+  const teaser = (s.blurb || "").split(/[.;—]/)[0].trim();
+  foot.append(el("div", "sub", teaser.length > 46 ? teaser.slice(0, 44).trim() + "…" : teaser),
+    el("div", "go", "↗"));
+  body.append(foot);
+  c.append(media, body);
+  c.onclick = () => openDetail(s.key);
   return c;
 }
-function goRow(car, idx) {
-  car._idx = Math.max(0, Math.min(car._n - 1, idx)); layoutRow(car);
-}
-function layoutRow(car) {
-  const cards = [...car.querySelectorAll(".ccard")];
-  const off = Math.min(300, window.innerWidth * 0.22);
-  cards.forEach((c, k) => {
-    const d = k - car._idx, ad = Math.abs(d);
-    c.style.transform = `translate(-50%,-50%) translateX(${d * off}px) translateZ(${d ? -200 : 0}px) rotateY(${d * -10}deg) scale(${d ? 0.78 : 1})`;
-    c.style.opacity = ad <= 2 ? (d ? 0.45 : 1) : 0;
-    c.style.zIndex = String(30 - ad);
-    c.style.pointerEvents = ad <= 2 ? "auto" : "none";
-    c.classList.toggle("center", d === 0);
-    const v = c.querySelector("video");
-    if (v) { v.style.transform = `translateX(${(-d * 14).toFixed(1)}px) scale(1.08)`; if (car._on && ad <= 2) v.play().catch(() => {}); else v.pause(); }
-  });
-}
-function attachRowDrag(car) {
-  let x0 = 0, drag = false;
-  car.addEventListener("pointerdown", e => { if (e.target.closest(".arrow")) return; drag = true; x0 = e.clientX; car._hover = true; });
-  window.addEventListener("pointerup", e => {
-    if (!drag) return; drag = false; const dx = e.clientX - x0;
-    if (Math.abs(dx) > 45) { goRow(car, car._idx - Math.sign(dx)); car._suppress = true; setTimeout(() => car._suppress = false, 80); }
-  });
-  // only hijack the wheel for horizontal-intent scrolls; vertical wheel scrolls the page
-  let lock = false;
-  car.addEventListener("wheel", e => {
-    if (lock || Math.abs(e.deltaX) <= Math.abs(e.deltaY) || Math.abs(e.deltaX) < 6) return;
-    e.preventDefault(); lock = true; setTimeout(() => lock = false, 340);
-    goRow(car, car._idx + (e.deltaX > 0 ? 1 : -1));
-  }, { passive: false });
-}
-window.addEventListener("resize", () => { if (CUR === "gallery") _rows.forEach(layoutRow); });
 
 /* ───────── detail ───────── */
 // FLIP morph: navigate first (so the click always works), then glide a clone of the
