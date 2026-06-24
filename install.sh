@@ -4,8 +4,28 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "==> [1/3] Building the C++ solvers (needs g++ with OpenMP)…"
+# --- pick an OpenMP-capable C++ compiler ---
+if [ "$(uname)" = "Darwin" ]; then
+  if   command -v g++-14 >/dev/null 2>&1; then CXX=g++-14
+  elif command -v g++-13 >/dev/null 2>&1; then CXX=g++-13
+  elif command -v g++-12 >/dev/null 2>&1; then CXX=g++-12
+  else CXX=""; fi
+  if [ -n "$CXX" ]; then                       # Homebrew gcc: native OpenMP
+    CXXFLAGS="-O3 -fopenmp -std=c++17 -Wall"
+  else                                         # fall back to clang + libomp
+    OMP="$(brew --prefix libomp 2>/dev/null || echo /usr/local/opt/libomp)"
+    CXX=clang++
+    CXXFLAGS="-O3 -std=c++17 -Wall -Xpreprocessor -fopenmp -I$OMP/include -L$OMP/lib -lomp"
+    echo "    (using clang++ + libomp at $OMP — run 'brew install libomp' if this fails)"
+  fi
+else
+  CXX="${CXX:-g++}"; CXXFLAGS="-O3 -march=native -fopenmp -std=c++17 -Wall"
+fi
+export CXX CXXFLAGS
+
+echo "==> [1/3] Building the C++ solvers with $CXX …"
 for d in lbm incompressible compressible sph; do
+  make -C "solvers/$d" clean >/dev/null 2>&1 || true
   make -C "solvers/$d"
 done
 

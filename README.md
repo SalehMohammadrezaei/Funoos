@@ -69,7 +69,16 @@ to produce a standalone `dist\Funoos\Funoos.exe`, then compile `installer.iss` i
 Hand that file to anyone — they double-click, install, and launch from the Start menu.
 (Needs the WebView2 runtime, preinstalled on Windows 10/11.)
 
-**From source — one step (Linux / macOS).** Needs `g++` (with OpenMP) and Python 3:
+**Easiest — macOS app (`.app` / `.dmg`, no Python needed by the user).**
+On a Mac, first `brew install python gcc libomp` (gcc/libomp give OpenMP), then:
+```bash
+./build_mac.sh    # builds the solvers, bundles dist/Funoos.app, and a dist/Funoos.dmg
+```
+Hand out `Funoos.dmg`; the user drags `Funoos.app` to Applications. It's unsigned, so
+the first launch is **right-click ▸ Open** (to get past Gatekeeper).
+
+**From source — one step (Linux / macOS).** Needs Python 3 and an OpenMP `g++`
+(Linux: `g++`; macOS: `brew install gcc libomp` — `install.sh` auto-detects it):
 ```bash
 git clone https://github.com/SalehMohammadrezaei/Funoos.git
 cd Funoos
