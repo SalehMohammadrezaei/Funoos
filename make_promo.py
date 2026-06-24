@@ -112,7 +112,7 @@ def seg(d, out, dur, chip, sub, chapter=None):
 def intro(out):
     dur = 4.4
     vf = (
-        f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps={FPS},"
+        f"crop=ih:ih:0:0,scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps={FPS},"
         "eq=brightness=-0.24:saturation=1.14,"
         f"drawbox=x=0:y=0:w={W}:h={H}:color=black@0.38:t=fill,"
         f"drawtext=fontfile={FB}:text='FUNOOS':fontcolor=0x8aa2ff"
@@ -133,7 +133,7 @@ def intro(out):
 def outro(out):
     dur = 3.8
     vf = (
-        f"hflip,scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps={FPS},"
+        f"crop=ih:ih:0:0,hflip,scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps={FPS},"
         "eq=brightness=-0.30:saturation=1.08,"
         f"drawbox=x=0:y=0:w={W}:h={H}:color=black@0.48:t=fill,"
         f"drawtext=fontfile={FB}:text='Funoos':fontcolor=0x8aa2ff"
