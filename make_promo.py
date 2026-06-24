@@ -47,12 +47,15 @@ def solve_scene(key, resolution, dur=None):
 
 # ---------- render footage (or reuse a prior render dir via PROMO_REUSE) ----------
 RECOLOR = [("Curl (cyan–amber)", "Curl"), ("Inferno", "Inferno"), ("Twilight", "Twilight"), ("Turbo", "Turbo")]
-LIB = [("ns_flame", "Candle Flame", "Navier–Stokes"), ("euler_city", "Shockwave Hits a City", "Compressible Euler"),
-       ("sph_dam", "Dam Break", "SPH"), ("rd_mitosis", "Turing Patterns", "Reaction–Diffusion"),
-       ("porous_phi60", "Flow Through Rock", "permeability")]
+# all 29 scenes, ordered to spread the methods/colours across the tile wall
+MOSAIC = ["lbm_cylinder", "ns_smoke", "euler_city", "sph_dam", "spec_kh", "rd_mitosis",
+          "lbm_name", "ns_flame", "euler_blast", "sph_waves", "spec_decay", "rd_maze",
+          "lbm_f1", "ns_rb", "euler_bubble", "sph_ship", "mix_bands", "rd_spots",
+          "lbm_airfoil", "ns_rt", "euler_twin", "sph_slosh", "porous_phi60", "rd_stripes",
+          "lbm_cyclist", "ns_chimney", "lbm_peloton", "sph_drop", "sph_pour"]
 REUSE = os.environ.get("PROMO_REUSE")
 if REUSE:
-    keys = ["speed", "vort", "stream"] + ["rc_" + s for _, s in RECOLOR] + [k for k, _, _ in LIB]
+    keys = ["speed", "vort", "stream"] + ["rc_" + s for _, s in RECOLOR]
     dirs = {k: os.path.join(REUSE, k) for k in keys}
     print("reusing render dirs from", REUSE)
 else:
@@ -65,11 +68,6 @@ else:
     dirs["stream"] = dump(hero.render("Streamlines", "Ember (fire)"), "stream", 4.4)
     for cm, short in RECOLOR:
         dirs["rc_" + short] = dump(hero.render("Vorticity", cm), "rc_" + short, 2.2)
-    print("rendering library @ High…")
-    for key, _, _ in LIB:
-        r, cm = solve_scene(key, "High")
-        dirs[key] = dump(r.render(r.views[0], cm), key, 2.7)
-        print("  ", key)
 
 
 def src(d): return ["-framerate", str(FS), "-i", os.path.join(d, "f_%05d.png")]
@@ -135,6 +133,36 @@ def outro(out):
          "-c:v", "libx264", "-crf", "15", "-preset", "medium", "-pix_fmt", "yuv420p", out])
 
 
+# ---------- the scene-library tile wall (all 29 clips playing at once) ----------
+def build_mosaic(keys, out, dur):
+    cols, rows = 6, 5
+    tw, th = W // cols, H // rows          # 320 x 216
+    # 29 scenes + a FUNOOS logo tile -> a full 6x5 grid (no empty/green cells)
+    logo = os.path.join(TMP, "logo_tile.png")
+    from PIL import Image as _I, ImageDraw as _D, ImageFont as _F
+    img = _I.new("RGB", (tw, th), (10, 19, 34)); d = _D.Draw(img)
+    d.text((tw // 2, th // 2), "FUNOOS", font=_F.truetype(FB, 38), fill=(138, 162, 255), anchor="mm")
+    img.save(logo)
+    n = len(keys) + 1
+    coords = [(c * tw, r * th) for r in range(rows) for c in range(cols)][:n]
+    inputs = []
+    for k in keys: inputs += ["-stream_loop", "-1", "-i", os.path.join(GAL, k + ".mp4")]
+    inputs += ["-loop", "1", "-framerate", str(FPS), "-i", logo]   # last input = logo tile
+    parts = [f"[{i}:v]scale={tw-6}:{th-6}:force_original_aspect_ratio=increase,crop={tw-6}:{th-6},"
+             f"pad={tw}:{th}:3:3:color=0x0a1322,setsar=1,fps={FPS}[s{i}]" for i in range(n)]
+    layout = "|".join(f"{x}_{y}" for x, y in coords)
+    parts.append("".join(f"[s{i}]" for i in range(n)) + f"xstack=inputs={n}:layout={layout}[wall]")
+    post = (f"[wall]zoompan=z='min(zoom+0.00035,1.045)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
+            f"drawtext=fontfile={FB}:text='29 SCENES TO EXPLORE':fontcolor=white:fontsize=36:x=96:y=60"
+            ":alpha='if(lt(t,0.5),t/0.5,1)':shadowcolor=black@0.85:shadowx=0:shadowy=3,"
+            f"drawtext=fontfile={FR}:text='six methods · one app · free & open source':fontcolor=0xcdd9f2:fontsize=27"
+            f":x=(w-text_w)/2:y={H-64}:alpha='if(lt(t,0.6),t/0.6,1)':shadowcolor=black@0.9:shadowx=0:shadowy=3,"
+            "fade=t=in:st=0:d=0.6[v]")
+    run([FF, "-y", *inputs, "-filter_complex", ";".join(parts) + ";" + post, "-map", "[v]",
+         "-t", f"{dur}", "-r", str(FPS), "-an", "-c:v", "libx264", "-crf", "16", "-preset", "medium",
+         "-pix_fmt", "yuv420p", out])
+
+
 # ---------- timeline ----------
 print("building segments…")
 segs, durs = [], []
@@ -147,14 +175,13 @@ seg(dirs["stream"], os.path.join(TMP, "12.mp4"), 3.4, "Streamlines", "same run, 
 for i, (cm, short) in enumerate(RECOLOR):
     o = os.path.join(TMP, f"2{i}.mp4")
     seg(dirs["rc_" + short], o, 2.2, short, "11 palettes, one click", "RECOLOR INSTANTLY" if i == 0 else None); add(o, 2.2)
-for i, (k, n, m) in enumerate(LIB):
-    o = os.path.join(TMP, f"3{i}.mp4")
-    seg(dirs[k], o, 2.6, n, m, "29 SCENES TO EXPLORE" if i == 0 else None); add(o, 2.6)
+print("building scene-library tile wall…")
+mo = os.path.join(TMP, "80.mp4"); build_mosaic(MOSAIC, mo, 7.0); add(mo, 7.0)
 ot = os.path.join(TMP, "99.mp4"); outro(ot); add(ot, 3.8)
 
 print("crossfading -> final (clean 1080p)…")
 TRANS = ["fade", "dissolve", "dissolve", "dissolve", "dissolve", "dissolve", "dissolve",
-         "smoothleft", "dissolve", "smoothup", "dissolve", "smoothleft", "fadeblack"]
+         "dissolve", "fadeblack"]
 inputs = []
 for s in segs: inputs += ["-i", s]
 fc = []; prev = "0:v"; off = 0.0
