@@ -198,7 +198,9 @@ async function runSim() {
   try {
     const r = await api().run(CUR_EXH, params, view, CUR_CMAP); RUN = r; FPS = 26;
     buildViewbar(r); setVideo(r.video); renderKPIs(r.stats || []);
-    $("#s-status").textContent = "✓ " + r.info; toast("Simulation ready", "ok");
+    $("#s-status").textContent = "✓ " + r.info;
+    const pb = $("#s-plots"); pb.classList.add("ready");          // draw attention to the diagnostics
+    toast("Done — open 📊 Diagnostic plots for the analysis", "ok");
   } catch (e) { $("#s-status").textContent = "⚠ " + e; toast("Run failed: " + e, "err"); }
   $("#s-skel").classList.remove("on"); btn.disabled = false; btn.textContent = "▶  Run simulation";
 }
@@ -255,6 +257,7 @@ function setVideo(src) {
 }
 async function togglePlots() {
   if (!RUN) { toast("Run a simulation first", "err"); return; }
+  $("#s-plots").classList.remove("ready");           // attention cue consumed
   const p = $("#s-plotpanel"); if (p.style.display === "block") { p.style.display = "none"; return; }
   setBusy("computing diagnostics…");
   try {

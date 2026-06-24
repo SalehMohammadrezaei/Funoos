@@ -242,3 +242,7 @@ input[type=range]{accent-color:var(--blue-br)}
 .plot{margin-bottom:18px}
 .plot img{width:100%;border-radius:10px;border:1px solid var(--line);display:block;margin-top:6px}
 .plot .explain{margin-top:8px;font-size:12.5px;line-height:1.55;color:var(--read)}
+
+/* draw attention to the diagnostics button after a run finishes */
+#s-plots.ready{animation:plotpulse 1.4s ease-in-out infinite}
+@keyframes plotpulse{0%,100%{box-shadow:0 0 0 0 rgba(225,252,102,.0)}50%{box-shadow:0 0 0 6px rgba(225,252,102,.35)}}

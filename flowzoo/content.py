@@ -342,7 +342,14 @@ DETAIL["Rayleigh-Benard"] = {
 "sinking on the other. Push the forcing higher (a larger Rayleigh number) and the "
 "tidy rolls give way to unsteady, plume-shedding convection. Rayleigh–Bénard is the "
 "canonical example of pattern formation from instability, and the same buoyant engine "
-"drives the atmosphere, the oceans, a pot of boiling water and the Earth's mantle."),
+"drives the atmosphere, the oceans, a pot of boiling water and the Earth's mantle.\n\n"
+"How much the convection beats plain conduction is measured by the Nusselt number Nu "
+"(the ratio of total to conductive heat transport): below onset Nu = 1, and it climbs "
+"as the rolls strengthen. Once convection takes over, the interior becomes nearly "
+"uniform in temperature and almost all of the temperature drop is squeezed into thin "
+"thermal boundary layers right at the hot and cold plates — which is exactly what the "
+"mean-temperature plot in the player shows. The cells are typically about as wide as "
+"the fluid layer is deep."),
 "terms": (
 "• ∂t T + u·∇T = κ∇²T — temperature is carried by the flow and diffuses with κ\n"
 "• α g T ŷ — Boussinesq buoyancy: warm fluid (high T) feels an upward force\n"
@@ -360,7 +367,12 @@ DETAIL["Chimney Plume"] = {
 "the buoyancy lifting it and the wind's momentum sweeping it sideways. Strengthen the "
 "wind and the plume bends sooner and stays lower; increase the buoyancy and it punches "
 "higher first. That balance is exactly what engineers estimate when they size a "
-"smokestack and predict how far a pollutant travels before it reaches the ground."),
+"smokestack and predict how far a pollutant travels before it reaches the ground.\n\n"
+"As a rule of thumb the plume rise grows with the source's buoyancy and shrinks as the "
+"wind speeds up (the idea behind the Briggs plume-rise formulas used in air-quality "
+"models): a tall, buoyant, slow-wind plume stays high and dilutes before it descends, "
+"while a strong crosswind bends it down early and brings it to ground sooner. The "
+"trajectory plot in the player traces exactly this bend-over."),
 "terms": (
 "• (u·∇)u — advection: the mean wind carries the plume downstream\n"
 "• f_b = αg T ŷ — Boussinesq buoyancy from the hot, dyed source lifts the plume\n"
