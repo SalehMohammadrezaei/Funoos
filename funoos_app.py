@@ -132,6 +132,29 @@ class Api:
         res = r["result"]; cm = cmap or engine.DEFCMAP[res.kind]
         return {"video": _b64_mp4(res.render(view, cm), fps), "view": view}
 
+    def save_clip(self, run_id, view, cmap=None, fmt="mp4"):
+        """Render the current view and save it to a user-chosen file (MP4 or GIF)."""
+        import webview
+        r = self._runs.get(run_id)
+        if not r or not self._win:
+            return None
+        res = r["result"]
+        view = view if view in res.views else res.views[0]
+        cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
+        fmt = "gif" if str(fmt).lower() == "gif" else "mp4"
+        name = "".join(c if c.isalnum() else "_" for c in res.info.split("·")[0]).strip("_")[:40] or "funoos"
+        sel = self._win.create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=f"{name}.{fmt}",
+            file_types=(f"{fmt.upper()} (*.{fmt})", "All files (*.*)"))
+        if not sel:
+            return None
+        path = sel[0] if isinstance(sel, (list, tuple)) else sel
+        if not path.lower().endswith("." + fmt):
+            path += "." + fmt
+        frames = res.render(view, cm)
+        (render.save_gif if fmt == "gif" else render.save_mp4)(frames, path, fps=26)
+        return path
+
     def diagnostics(self, run_id):
         r = self._runs.get(run_id)
         if not r:

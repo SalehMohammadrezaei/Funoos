@@ -255,6 +255,15 @@ function setVideo(src) {
   v.playbackRate = 1; $("#s-rate").textContent = "1×";
   v.onloadeddata = () => { v.play(); $("#s-play").textContent = "⏸"; };
 }
+async function saveClip(fmt) {
+  if (!RUN) { toast("Run a simulation first", "err"); return; }
+  $("#s-status").textContent = "⏳ rendering " + fmt.toUpperCase() + " to save…";
+  try {
+    const path = await api().save_clip(RUN.run_id, RUN.view, $("#s-cmap").value, fmt);
+    if (path) { $("#s-status").textContent = "✓ saved: " + path; toast("Saved " + fmt.toUpperCase(), "ok"); }
+    else { $("#s-status").textContent = "Save cancelled."; }
+  } catch (e) { $("#s-status").textContent = "⚠ " + e; toast("Save failed: " + e, "err"); }
+}
 async function togglePlots() {
   if (!RUN) { toast("Run a simulation first", "err"); return; }
   $("#s-plots").classList.remove("ready");           // attention cue consumed
