@@ -24,16 +24,90 @@ Funoos (فانوس — *the lantern of imagination*) shows physics from many ang
 | **Pseudo-spectral** (FFT) | Kelvin–Helmholtz billows · decaying 2-D turbulence · **chaotic dye mixing** |
 | **Reaction–Diffusion** (Gray–Scott) | Turing patterns: spots · stripes · labyrinth · **mitosis** |
 
-<p align="center">
-  <img src="results/gallery/spec_kh.gif" width="30%">
-  <img src="results/gallery/ns_flame.gif" width="20%">
-  <img src="results/gallery/euler_city.gif" width="33%">
-</p>
-<p align="center">
-  <img src="results/gallery/porous_phi60.gif" width="28%">
-  <img src="results/gallery/rd_mitosis.gif" width="28%">
-  <img src="results/gallery/sph_drop.gif" width="33%">
-</p>
+## Gallery — all 29 scenes
+
+### Lattice–Boltzmann
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/lbm_cylinder.gif" width="260"><br><sub><b>Kármán Vortex Street</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/lbm_airfoil.gif" width="260"><br><sub><b>Airfoil at Angle</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/lbm_name.gif" width="260"><br><sub><b>Flow Around Your Name</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/lbm_f1.gif" width="260"><br><sub><b>F1 Car Aerodynamics</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/lbm_cyclist.gif" width="260"><br><sub><b>Cyclist in the Wind</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/lbm_peloton.gif" width="260"><br><sub><b>Drafting (Two Riders)</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/porous_phi60.gif" width="260"><br><sub><b>Flow Through Porous Rock</b></sub></td>
+</tr>
+</table>
+
+### Incompressible Navier–Stokes
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/ns_smoke.gif" width="260"><br><sub><b>Rising Smoke Plume</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/ns_rt.gif" width="260"><br><sub><b>Rayleigh–Taylor Fingers</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/ns_flame.gif" width="260"><br><sub><b>Candle Flame</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/ns_rb.gif" width="260"><br><sub><b>Rayleigh–Bénard Convection</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/ns_chimney.gif" width="260"><br><sub><b>Chimney Plume in Wind</b></sub></td>
+</tr>
+</table>
+
+### Compressible Euler
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/euler_blast.gif" width="260"><br><sub><b>Open-Air Blast</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/euler_city.gif" width="260"><br><sub><b>Shockwave Hits a City</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/euler_bubble.gif" width="260"><br><sub><b>Shock Meets a Bubble</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/euler_twin.gif" width="260"><br><sub><b>Twin-Bubble Mixing</b></sub></td>
+</tr>
+</table>
+
+### Smoothed-Particle Hydrodynamics
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/sph_dam.gif" width="260"><br><sub><b>Dam Break</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/sph_drop.gif" width="260"><br><sub><b>Droplet Crown</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/sph_slosh.gif" width="260"><br><sub><b>Sloshing Tank</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/sph_pour.gif" width="260"><br><sub><b>Pouring a Glass</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/sph_waves.gif" width="260"><br><sub><b>Ocean Swell</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/sph_ship.gif" width="260"><br><sub><b>Floating Ship</b></sub></td>
+</tr>
+</table>
+
+### Pseudo-spectral
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/spec_kh.gif" width="260"><br><sub><b>Kelvin–Helmholtz Billows</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/spec_decay.gif" width="260"><br><sub><b>Decaying Turbulence</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/mix_bands.gif" width="260"><br><sub><b>Chaotic Mixing of Dye</b></sub></td>
+</tr>
+</table>
+
+### Reaction–Diffusion
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/rd_spots.gif" width="260"><br><sub><b>Spots</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/rd_stripes.gif" width="260"><br><sub><b>Stripes & Coral</b></sub></td>
+<td align="center" width="33%"><img src="results/gallery/rd_maze.gif" width="260"><br><sub><b>Labyrinth</b></sub></td>
+</tr>
+<tr>
+<td align="center" width="33%"><img src="results/gallery/rd_mitosis.gif" width="260"><br><sub><b>Mitosis</b></sub></td>
+</tr>
+</table>
 
 ---
 
