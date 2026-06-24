@@ -1,10 +1,10 @@
 # 🏮 Funoos
 
-### *Where imagination becomes vision.*
+### *An interactive playground for the classic methods of fluid simulation.*
 
-**A visual exhibition of worlds in motion — six numerical methods, each written from scratch, each validated against a textbook benchmark, each rendered to be watched.**
+Funoos (فانوس — "lantern") is a small desktop app I made in my spare time to make computational fluid dynamics easier to **see**. Pick a scene, nudge a few sliders, hit run, and watch what happens — vortices peeling off a cylinder, a candle flame flickering, a dam breaking, Turing patterns forming. Six families of solver sit behind one click-through gallery, so you can get a feel for how each behaves without installing or configuring anything.
 
-Funoos (فانوس — *the lantern of imagination*) shows physics from many angles: kinetic (lattice Boltzmann), continuum (projection Navier–Stokes), compressible (finite-volume shock capturing), meshfree (SPH), spectral (FFT), and pattern-forming (reaction–diffusion). **29 scenes across 6 methods**, browsable in a dark, glassmorphic desktop app — and every solver is checked against an analytical or experimental result.
+It's meant for **curiosity and learning, not production CFD** — the solvers are compact 2-D implementations, each sanity-checked against a standard textbook case so the picture is believable. If CFD is new to you, it's a way to play with it; if you already know it, it's a quick visual reference.
 
 <p align="center">
   <img src="results/gallery/lbm_name.gif" alt="Flow shedding vortices off the word Funoos" width="92%">
@@ -111,7 +111,10 @@ Funoos (فانوس — *the lantern of imagination*) shows physics from many ang
 
 ---
 
-## Validation — every method is checked
+## Is the physics believable?
+
+Each method is checked against a standard analytical or textbook case — not a formal
+verification-and-validation effort, just enough to trust what you're watching:
 
 | Scene | Method | Benchmark | Result |
 |---|---|---|---|
