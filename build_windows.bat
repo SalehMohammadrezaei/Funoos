@@ -41,6 +41,7 @@ pyinstaller --noconfirm --onedir --windowed --name Funoos ^
 echo.
 echo === SUCCESS ===
 echo App:  dist\Funoos\Funoos.exe
+echo Next: open installer.iss in Inno Setup and click Compile to get Funoos-Setup.exe (a one-click installer to hand out).
 echo (If the window is blank, install the WebView2 Evergreen runtime from Microsoft.)
 echo (No ffmpeg.exe in bin\ ^=^> the player can't encode video; add it and rebuild.)
 goto :eof

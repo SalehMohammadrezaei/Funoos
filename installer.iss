@@ -1,29 +1,30 @@
-; Funoos Studio — Inno Setup installer script.
+; Funoos — Inno Setup installer script.
 ; Build the app first (run build_windows.bat), then open this file in Inno Setup
 ; (https://jrsoftware.org/isinfo.php) and click Compile. Produces a single
-; FunoosStudio-Setup.exe that installs the app with Start-menu + desktop icons.
+; Funoos-Setup.exe that installs the app with Start-menu + desktop icons —
+; the end user needs no Python, no compiler, nothing else.
 
 [Setup]
-AppName=Funoos Studio
-AppVersion=0.1.0
-AppPublisher=Saleh Rezaee
-DefaultDirName={autopf}\Funoos Studio
-DefaultGroupName=Funoos Studio
-OutputBaseFilename=FunoosStudio-Setup
+AppName=Funoos
+AppVersion=1.0.0
+AppPublisher=Saleh Mohammadrezaei
+DefaultDirName={autopf}\Funoos
+DefaultGroupName=Funoos
+OutputBaseFilename=Funoos-Setup
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 WizardStyle=modern
 
 [Files]
-Source: "dist\FunoosStudio\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "dist\Funoos\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
-Name: "{group}\Funoos Studio"; Filename: "{app}\FunoosStudio.exe"
-Name: "{commondesktop}\Funoos Studio"; Filename: "{app}\FunoosStudio.exe"; Tasks: desktopicon
+Name: "{group}\Funoos"; Filename: "{app}\Funoos.exe"
+Name: "{commondesktop}\Funoos"; Filename: "{app}\Funoos.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Run]
-Filename: "{app}\FunoosStudio.exe"; Description: "Launch Funoos Studio"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Funoos.exe"; Description: "Launch Funoos"; Flags: nowait postinstall skipifsilent

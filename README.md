@@ -57,17 +57,32 @@ These run in `tests/smoke_test.py` (CI): spectral energy, Sod shock, reaction-di
 A **dark glassmorphic desktop app** (HTML/CSS/JS in a [pywebview](https://pywebview.flowrl.com/) shell, with the Python/C++ solvers as the backend):
 
 - **Home** — the brand, the methods, who built it.
-- **Gallery** — an adaptive **bento mosaic** of scenes grouped by method; each opens a detail page with the clip, the **governing equation**, an in-depth write-up, and validation.
-- **Studio** — a **bento dashboard**: tune every parameter (each scene shows only its relevant controls), **Run once**, then switch visualizations live (vorticity / speed / streamlines / schlieren / …), recolor across palettes, scrub/step/speed the playback, read **live KPI tiles** (e.g. permeability, porosity), and open **diagnostic plots** (lift spectrum & Strouhal, energy/enstrophy, blast radius, permeability vs Kozeny–Carman).
+- **Gallery** — a **card grid** of all 29 scenes; each card opens a detail page with the clip, the **governing equation**, an undergrad-level write-up, the setup (initial & boundary conditions), and validation.
+- **Studio** — a **bento dashboard**: tune every parameter (each scene shows only its relevant controls), **Run once** (with a live progress %), switch visualizations live (vorticity / speed / streamlines / schlieren / …), recolor across palettes, scrub/step/speed the playback, read **live KPI tiles** (e.g. permeability, porosity), and open the **Diagnostic plots** (Strouhal, lift/drag, drafting shelter, convective flux, blast radius, permeability vs Kozeny–Carman — each with an explanation).
 
+### Install & run
+
+**Easiest — Windows installer (no Python, no compiler needed by the user).**
+On a Windows machine with `g++` (MSYS2/w64devkit) and Python, run `build_windows.bat`
+to produce a standalone `dist\Funoos\Funoos.exe`, then compile `installer.iss` in
+[Inno Setup](https://jrsoftware.org/isinfo.php) to get a single **`Funoos-Setup.exe`**.
+Hand that file to anyone — they double-click, install, and launch from the Start menu.
+(Needs the WebView2 runtime, preinstalled on Windows 10/11.)
+
+**From source — one step (Linux / macOS).** Needs `g++` (with OpenMP) and Python 3:
 ```bash
-pip install pywebview imageio-ffmpeg numpy scipy matplotlib pillow
-# build the C++ solvers once (need g++ with OpenMP):
-make -C solvers/lbm && make -C solvers/incompressible && make -C solvers/compressible && make -C solvers/sph
-python funoos_app.py
+git clone https://github.com/SalehMohammadrezaei/Funoos.git
+cd Funoos
+./install.sh      # builds the C++ solvers + sets up a local .venv with all deps
+./run.sh          # launch the app
 ```
 
-**Windows `.exe`:** `build_windows.bat` compiles the solvers, bundles the app, and produces `dist\Funoos\Funoos.exe` (needs the WebView2 runtime, preinstalled on Win 10/11). See **[docs/windows_build.md](docs/windows_build.md)**.
+**From source (any OS, manual).**
+```bash
+make -C solvers/lbm && make -C solvers/incompressible && make -C solvers/compressible && make -C solvers/sph
+pip install -r requirements.txt
+python funoos_app.py        # or run.bat on Windows
+```
 
 The gallery clips ship in `results/gallery/`; regenerate any time with `python render_gallery.py High 1.8`.
 
