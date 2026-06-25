@@ -124,7 +124,7 @@ DETAIL = {
 "blast damage is so directional.\n\n"
 "The 'schlieren' view mimics a classic laboratory technique that makes density "
 "gradients visible, so the shock fronts light up as sharp bright lines; the "
-"Speed view shows the gas velocity, where you can watch the flow accelerate "
+"Velocity view shows the gas velocity, where you can watch the flow accelerate "
 "around and pile up against the buildings."),
 "terms": (
 "• U — the vector of conserved quantities: density ρ, momentum ρu and ρv, and "

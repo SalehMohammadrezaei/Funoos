@@ -146,6 +146,16 @@ to produce a standalone `dist\Funoos\Funoos.exe`, then compile `installer.iss` i
 Hand that file to anyone — they double-click, install, and launch from the Start menu.
 (Needs the WebView2 runtime, preinstalled on Windows 10/11.)
 
+> **"Windows protected your PC" / unknown-publisher warning.** Funoos is a free,
+> open-source app and the installer is **not code-signed** (a signing certificate
+> is a paid, identity-verified service), so Windows SmartScreen — and occasionally
+> antivirus — will warn the first time you run it. This is expected for unsigned
+> indie software, not a sign of malware. To install anyway: click **More info →
+> Run anyway** on the SmartScreen dialog. If your antivirus quarantines it, allow/
+> restore the file. You can verify you have the genuine file by checking its SHA-256
+> against the value listed on the [Releases page](https://github.com/SalehMohammadrezaei/Funoos/releases),
+> or skip the installer entirely and run **from source** (below).
+
 **From source — one step (Linux).** Needs Python 3 and `g++` with OpenMP:
 ```bash
 git clone https://github.com/SalehMohammadrezaei/Funoos.git

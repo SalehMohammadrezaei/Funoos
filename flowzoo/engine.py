@@ -2,7 +2,7 @@
 
 `solve_exhibit(name, params)` runs the solver once and returns a Result holding
 the raw fields. `Result.render(view, colormap)` turns those into RGB frames —
-so a GUI can switch Vorticity / Speed / Streamlines / Density … instantly
+so a GUI can switch Vorticity / Velocity / Streamlines / Density … instantly
 without re-running. `run_exhibit(...)` is a convenience that solves and renders
 the default view (used by the command-line demos).
 
@@ -92,12 +92,12 @@ def _nframes(d):
 
 
 RES = {"Low (fast)": 0.6, "Medium": 1.0, "High": 1.35, "Ultra (slow)": 1.8}
-VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
-         "spectral": ["Vorticity", "Speed", "Streamlines"],
-         "density": ["Schlieren", "Density", "Speed"],
-         "ns": ["Dye", "Speed", "Vorticity", "Streamlines"],
-         "particles": ["Particles", "Foam & spray", "Speed field"],
-         "porous": ["Speed", "Streamlines", "Vorticity"],
+VIEWS = {"lbm": ["Vorticity", "Velocity", "Streamlines"],
+         "spectral": ["Vorticity", "Velocity", "Streamlines"],
+         "density": ["Schlieren", "Density", "Velocity"],
+         "ns": ["Dye", "Velocity", "Vorticity", "Streamlines"],
+         "particles": ["Particles", "Foam & spray", "Velocity field"],
+         "porous": ["Velocity", "Streamlines", "Vorticity"],
          "field": ["Pattern"],
          "quantum": ["Probability |ψ|²", "Phase"]}
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
@@ -140,7 +140,7 @@ class Result:
                     cm, v0, v1, self.hints.get("label", "")) for s in self.raw]
             return self._render_vel(self.hints["vel"], view, cm, None)
         if self.kind == "particles":
-            if view == "Speed field":
+            if view == "Velocity field":
                 return self._render_sph_field(cm)
             return self._render_particles(cm, foam=(view == "Foam & spray"))
         if self.kind == "field":
@@ -173,7 +173,7 @@ class Result:
             return [render.add_colorbar(
                 render.streamlines_rgb(ux, uy, cmap=cm, mask=mask, vmax=vmax),
                 cm, 0, vmax, "|u|") for ux, uy in vel]
-        if view == "Speed":
+        if view == "Velocity":
             sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
             vmax = np.percentile(sp[-1], pct) + 1e-12
             g = 0.45 if self.kind == "porous" else 1.0          # brighten the slow pore flow
@@ -201,7 +201,7 @@ class Result:
             vis = solid & ((failt < 0) | (tau < failt))
             return vis[::-1]
 
-        if view == "Speed":
+        if view == "Velocity":
             vel = h.get("vel")
             sp = [np.hypot(ux, uy) for ux, uy in vel]
             ref = sp[-1] if not city else sp[-1][~solid]
