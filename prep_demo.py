@@ -34,7 +34,7 @@ detail = api.scene_detail(KEY)
 json.dump(detail, open(demo / "detail.json", "w"))
 exhibit, preset = detail["exhibit"], detail["preset"]
 params = {q["name"]: q["default"] for q in E.EXHIBITS[exhibit]["params"]}
-params.update(preset or {}); params["resolution"] = "Medium"
+params.update(preset or {}); params["resolution"] = "High"
 print("solving demo…", flush=True)
 res = E.solve_exhibit(exhibit, params)
 views = list(res.views); defcmap = detail.get("cmap") or E.DEFCMAP[res.kind]

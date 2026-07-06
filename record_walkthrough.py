@@ -13,7 +13,22 @@ from playwright.sync_api import sync_playwright
 ROOT = Path("/home/impres/Saleh/FlowZoo")
 demo = ROOT / "results" / "_demo"
 PORT = 8137
-W, H = 1920, 1080
+W, H = 2560, 1440
+
+# burned-in headline overlay (rendered in-page, so it is perfectly timed)
+HL_SETUP = """
+(() => {
+  const hl = document.createElement('div'); hl.id = 'promoHL';
+  hl.style.cssText = 'position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:99999;'
+    + 'padding:14px 34px;border-radius:999px;background:rgba(10,19,34,.76);'
+    + 'border:1px solid rgba(126,155,255,.42);color:#eaf0fb;'
+    + 'font:600 36px/1 \\"DejaVu Sans\\",system-ui,sans-serif;letter-spacing:.3px;'
+    + 'opacity:0;transition:opacity .45s ease;box-shadow:0 14px 50px rgba(0,0,0,.45);white-space:nowrap';
+  document.body.appendChild(hl);
+  window.__hl = (t) => { const e = document.getElementById('promoHL');
+    if (t === null) { e.style.opacity = 0; } else { e.textContent = t; e.style.opacity = 1; } };
+})();
+"""
 
 CAT = json.load(open(demo / "catalog.json"))
 DET = json.load(open(demo / "detail.json"))
@@ -70,36 +85,45 @@ def main():
         pg.wait_for_selector(".gcard", state="attached", timeout=15000)
 
         def dwell(ms): pg.wait_for_timeout(ms)
+        pg.evaluate(HL_SETUP)
+        def hl(t): pg.evaluate("window.__hl(" + json.dumps(t) + ")")
 
-        # 1) HOME — let the wordmark + counters animate
-        dwell(3800)
+        # 1) HOME
+        hl("An interactive fluid-dynamics studio"); dwell(3600)
 
-        # 2) GALLERY — open, scroll the card grid
+        # 2) GALLERY — scroll the card grid
+        hl("Browse 29 scenes across 6 methods")
         pg.click('.railbtn[data-view="gallery"]'); dwell(1200)
-        pg.evaluate("document.querySelector('#gallery-scroll').scrollTo({top:600,behavior:'smooth'})"); dwell(1500)
-        pg.evaluate("document.querySelector('#gallery-scroll').scrollTo({top:1300,behavior:'smooth'})"); dwell(1500)
-        pg.evaluate("document.querySelector('#gallery-scroll').scrollTo({top:0,behavior:'smooth'})"); dwell(900)
+        pg.evaluate("document.querySelector('#gallery-scroll').scrollTo({top:600,behavior:'smooth'})"); dwell(1400)
+        pg.evaluate("document.querySelector('#gallery-scroll').scrollTo({top:1300,behavior:'smooth'})"); dwell(1400)
+        pg.evaluate("document.querySelector('#gallery-scroll').scrollTo({top:0,behavior:'smooth'})"); dwell(800)
 
-        # 3) DETAIL — open the Kármán scene, scroll past equation + write-up
-        pg.click('.gcard:has-text("Kármán")'); dwell(2200)
-        pg.evaluate("document.querySelector('#d-text').scrollTo({top:420,behavior:'smooth'})"); dwell(1800)
-        pg.evaluate("document.querySelector('#d-text').scrollTo({top:900,behavior:'smooth'})"); dwell(1600)
+        # 3) DETAIL — physics + equation
+        hl("Every scene — the physics and the equation")
+        pg.click('.gcard:has-text("Kármán")'); dwell(2100)
+        pg.evaluate("document.querySelector('#d-text').scrollTo({top:420,behavior:'smooth'})"); dwell(1700)
+        pg.evaluate("document.querySelector('#d-text').scrollTo({top:900,behavior:'smooth'})"); dwell(1300)
 
-        # 4) STUDIO — open, run
-        pg.click('#d-open'); dwell(1400)
-        pg.click('#s-run'); dwell(2600)                    # progress bar fills, result plays
+        # 4) STUDIO — run
+        hl("Run any simulation")
+        pg.click('#d-open'); dwell(1300)
+        pg.click('#s-run'); dwell(2600)
 
-        # 5) SWITCH VIEWS — same run, different visualisation
+        # 5) SWITCH VIEWS
+        hl("Switch views live")
         for v in ["Velocity", "Streamlines", "Vorticity"]:
-            pg.click(f'#s-views button:has-text("{v}")'); dwell(1900)
+            pg.click(f'#s-views button:has-text("{v}")'); dwell(1800)
 
         # 6) RECOLOUR
-        pg.select_option('#s-cmap', 'Inferno'); dwell(1800)
-        pg.select_option('#s-cmap', 'Ocean (water)'); dwell(1700)
+        hl("Recolour instantly")
+        pg.select_option('#s-cmap', 'Inferno'); dwell(1700)
+        pg.select_option('#s-cmap', 'Ocean (water)'); dwell(1500)
 
-        # 7) DIAGNOSTIC PLOTS
-        pg.click('#s-plots'); dwell(1500)
-        pg.evaluate("document.querySelector('#s-plotpanel').scrollTo({top:380,behavior:'smooth'})"); dwell(2200)
+        # 7) DIAGNOSTIC PLOTS — shorter
+        hl("Built-in diagnostics")
+        pg.click('#s-plots'); dwell(1100)
+        pg.evaluate("document.querySelector('#s-plotpanel').scrollTo({top:360,behavior:'smooth'})"); dwell(900)
+        hl(None); dwell(200)
 
         video = pg.video
         ctx.close(); browser.close()
