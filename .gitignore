@@ -38,3 +38,7 @@ bin/
 Funoos-Setup.exe
 *.exe
 Output/
+
+# app-walkthrough promo build artifacts
+results/_demo/
+funoos_app_promo.mp4
