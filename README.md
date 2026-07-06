@@ -182,14 +182,14 @@ python demos/shock_tube.py      #     shock_bubble, dam_break, turbulence (--qui
 ```
 
 ## Stack
-**C++ + OpenMP** for the four grid/particle solver cores (fast enough on a CPU to run the high resolution that makes the output beautiful) · **Python** (NumPy/SciPy/Pillow/Matplotlib + ffmpeg via imageio-ffmpeg) for the spectral, reaction–diffusion and quantum solvers, the engine, geometry, text→mask, validation, post-processing diagnostics, and a shared cinematic rendering pipeline · **HTML/CSS/JS** UI in pywebview.
+**C++ + OpenMP** for the four grid/particle solver cores (fast enough on a CPU to run the high resolution that makes the output beautiful) · **Python** (NumPy/SciPy/Pillow/Matplotlib + ffmpeg via imageio-ffmpeg) for the spectral and reaction–diffusion solvers, the engine, geometry, text→mask, validation, post-processing diagnostics, and a shared cinematic rendering pipeline · **HTML/CSS/JS** UI in pywebview.
 
 ## Repository layout
 ```
 funoos_app.py     pywebview app (backend bridge to the solvers)
 index.html, web/  the dark glassmorphic UI (CSS + JS, no external libraries)
 solvers/          C++ solver cores: lbm/ incompressible/ compressible/ sph/
-flowzoo/          engine · catalog · spectral · reaction · quantum · geometry · postproc · render · validate
+flowzoo/          engine · catalog · spectral · reaction · geometry · postproc · render · validate
 demos/            one runnable script per grid/particle exhibit
 results/gallery/  the gallery clips (GIF + full-res MP4), one per scene
 docs/             method notes, equation images, Windows build guide
