@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
             for (int j=0;j<ny;j++) for (int i=0;i<nx;i++) {
                 int s=j*nx+i; double rho=0,ux=0,uy=0;
                 for (int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
-                buf[s]   = (float)(ux/rho);
+                buf[s]   = (float)((ux+0.5*a.force)/rho);   // same velocity definition as collision
                 buf[N+s] = (float)(uy/rho);
             }
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nframes);
@@ -187,21 +187,28 @@ int main(int argc, char** argv) {
         }
     }
 
-    // volume-averaged velocity over the fluid → Darcy permeability  k = ν⟨u⟩/g
+    // Darcy (superficial) velocity: flow averaged over the WHOLE sample with solids
+    // counting as u=0, i.e. U_D = phi*<u>_pore. Uses the same macroscopic velocity as
+    // collision (Guo half-force). Previously the pore average was used as U_D, which
+    // over-states k by 1/phi.
     double sumux=0; long nfluid=0;
     for (int s=0;s<N;s++) if(!solid[s]){
         double rho=0,ux=0; for(int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; }
-        sumux += ux/rho; nfluid++;
+        sumux += (ux+0.5*a.force)/rho; nfluid++;
     }
-    double nu=(a.tau-0.5)/3.0, meanux=nfluid?sumux/nfluid:0.0;
-    double porosity=(double)nfluid/N, perm=(a.force!=0.0)? nu*meanux/a.force : 0.0;
+    double nu=(a.tau-0.5)/3.0;
+    double meanux_pore = nfluid ? sumux/nfluid : 0.0;   // interstitial (pore-average) velocity
+    double meanux      = sumux/(double)N;              // superficial (Darcy) velocity U_D
+    double porosity=(double)nfluid/N;
+    // k = nu*U_D/g, g = body force per unit mass (= pressure gradient / rho with rho~1)
+    double perm=(a.force!=0.0)? nu*meanux/a.force : 0.0;
 
     // metadata for the Python renderer
     std::ofstream meta(a.out + "/meta.txt");
     meta << "nx "<<nx<<"\nny "<<ny<<"\nU "<<a.U<<"\ntau "<<a.tau
          << "\nnu "<<nu<<"\nsave_every "<<a.save_every
          << "\nnframes "<<nframes
-         << "\nporosity "<<porosity<<"\nmean_ux "<<meanux<<"\npermeability "<<perm<<"\n";
+         << "\nporosity "<<porosity<<"\nmean_ux "<<meanux<<"\nmean_ux_pore "<<meanux_pore<<"\npermeability "<<perm<<"\n";
     printf("done: %d frames -> %s\n", nframes, a.out.c_str());
     return 0;
 }
