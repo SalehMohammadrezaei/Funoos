@@ -156,6 +156,19 @@ Hand that file to anyone — they double-click, install, and launch from the Sta
 > against the value listed on the [Releases page](https://github.com/SalehMohammadrezaei/Funoos/releases),
 > or skip the installer entirely and run **from source** (below).
 
+**macOS — one-file installer (no Python, no compiler needed by the user).**
+Download **`Funoos-macOS-arm64.dmg`** (Apple Silicon: M1/M2/M3/M4) or
+**`Funoos-macOS-x86_64.dmg`** (Intel) from the
+[Releases](https://github.com/SalehMohammadrezaei/Funoos/releases) page, open it,
+and drag **Funoos** into **Applications**. It is built automatically on GitHub's macOS
+runners by `build_mac.sh` (see `.github/workflows/release-mac.yml`).
+
+> **"Funoos can't be opened because it is from an unidentified developer."** Same
+> story as the Windows build: the app is free and open-source but not notarized
+> with Apple (a paid, identity-verified developer account), so macOS Gatekeeper
+> warns on first launch. To open it: **right-click the app → Open → Open** (one
+> time only), or in Terminal run `xattr -cr /Applications/Funoos.app`.
+
 **From source — one step (Linux).** Needs Python 3 and `g++` with OpenMP:
 ```bash
 git clone https://github.com/SalehMohammadrezaei/Funoos.git

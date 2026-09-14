@@ -1,0 +1,53 @@
+name: release-mac
+
+# Builds the one-file macOS installer (Funoos-macOS-<arch>.dmg) on GitHub's macOS
+# runners - no Mac needed. Runs on version tags (v*) and attaches the .dmg to the
+# GitHub Release; can also be run by hand from the Actions tab.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest   # Apple Silicon (arm64)
+            arch: arm64
+          - os: macos-13       # Intel (x86_64) - may be retired by GitHub; allowed to fail
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Homebrew GCC (OpenMP) and dylibbundler
+        run: brew install gcc dylibbundler
+
+      - name: Build Funoos.app and the .dmg
+        run: bash build_mac.sh
+
+      - name: Smoke + validation tests (with the freshly built solvers)
+        run: |
+          export CXX=$(ls /opt/homebrew/bin/g++-[0-9]* /usr/local/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
+          export CXXFLAGS="-O3 -fopenmp -std=c++17"
+          python tests/smoke_test.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Funoos-macOS-${{ matrix.arch }}
+          path: Funoos-macOS-*.dmg
+
+      - name: Attach the .dmg to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Funoos-macOS-*.dmg
