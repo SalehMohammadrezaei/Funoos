@@ -28,7 +28,7 @@
 
 struct Args {
     int nx=240, ny=360, steps=4000, save_every=20, iters=60;
-    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0, flicker=0.0, wind=0.0, zst=0.12;
+    double dt=1.0, visc=0.0001, buoy=2.0e-3, grav=3.0e-3, conf=6.0, srcw=1.0, pert=1.0, atwood=1.0, flicker=0.0, wind=0.0, zst=0.12, kappa=0.0;   // kappa: thermal diffusivity (RB conduction)
     std::string mode="smoke", out="frames";
 };
 static Args parse(int c, char** v){
@@ -37,7 +37,7 @@ static Args parse(int c, char** v){
         if(k=="--nx")a.nx=atoi(x.c_str()); else if(k=="--ny")a.ny=atoi(x.c_str());
         else if(k=="--steps")a.steps=atoi(x.c_str()); else if(k=="--save_every")a.save_every=atoi(x.c_str());
         else if(k=="--iters")a.iters=atoi(x.c_str()); else if(k=="--dt")a.dt=atof(x.c_str());
-        else if(k=="--visc")a.visc=atof(x.c_str()); else if(k=="--buoy")a.buoy=atof(x.c_str());
+        else if(k=="--visc")a.visc=atof(x.c_str()); else if(k=="--kappa")a.kappa=atof(x.c_str()); else if(k=="--buoy")a.buoy=atof(x.c_str());
         else if(k=="--grav")a.grav=atof(x.c_str()); else if(k=="--conf")a.conf=atof(x.c_str());
         else if(k=="--srcw")a.srcw=atof(x.c_str()); else if(k=="--pert")a.pert=atof(x.c_str());
         else if(k=="--atwood")a.atwood=atof(x.c_str()); else if(k=="--flicker")a.flicker=atof(x.c_str());
@@ -74,10 +74,14 @@ int main(int argc,char**argv){
         double q00=q[IX(i,j)],q10=q[IX(i+1,j)],q01=q[IX(i,j+1)],q11=q[IX(i+1,j+1)];
         return (1-fx)*(1-fy)*q00+fx*(1-fy)*q10+(1-fx)*fy*q01+fx*fy*q11;
     };
-    auto advect=[&](std::vector<double>&d,const std::vector<double>&d0){
+    // Semi-Lagrangian advection of d (from its copy d0) along the FROZEN velocity (ua,va).
+    // Both velocity components must be back-traced with the same field -- previously the
+    // second component used a u that the first call had already overwritten.
+    auto advect=[&](std::vector<double>&d,const std::vector<double>&d0,
+                    const std::vector<double>&ua,const std::vector<double>&va){
         #pragma omp parallel for schedule(static)
         for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
-            double x=i-a.dt*u[IX(i,j)], y=j-a.dt*v[IX(i,j)];
+            double x=i-a.dt*ua[IX(i,j)], y=j-a.dt*va[IX(i,j)];
             d[IX(i,j)]=sample(d0,x,y);
         }
     };
@@ -205,11 +209,19 @@ int main(int argc,char**argv){
         set_bc(u,1); set_bc(v,2); solidify();
 
         // advect velocity
-        u0=u; v0=v; advect(u,u0); advect(v,v0); set_bc(u,1); set_bc(v,2);
+        u0=u; v0=v; advect(u,u0,u0,v0); advect(v,v0,u0,v0); set_bc(u,1); set_bc(v,2);
         project(); solidify();
         // advect scalar
-        s0=s; advect(s,s0); set_bc(s,0);
+        s0=s; advect(s,s0,u,v); set_bc(s,0);
         if(rb){ for(int i=0;i<nx;i++){ s[IX(i,0)]=1.0; s[IX(i,ny-1)]=0.0; } }  // fixed hot/cold plates
+        if(rb && a.kappa>0){                        // thermal diffusion (conduction): dT/dt = kappa*lap(T)
+            s0=s;                                   // explicit FTCS; stable for dt*kappa <= 0.25
+            #pragma omp parallel for schedule(static)
+            for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++)
+                s[IX(i,j)] += a.dt*a.kappa*(s0[IX(i-1,j)]+s0[IX(i+1,j)]+s0[IX(i,j-1)]+s0[IX(i,j+1)]-4*s0[IX(i,j)]);
+            set_bc(s,0);
+            for(int i=0;i<nx;i++){ s[IX(i,0)]=1.0; s[IX(i,ny-1)]=0.0; }   // plates last, so they win
+        }
         if(flame){                                  // diffuse the mixture fraction (sets the flame thickness)
             s0=s;
             #pragma omp parallel for schedule(static)
@@ -228,7 +240,7 @@ int main(int argc,char**argv){
             for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
                 double lapu=u0[IX(i-1,j)]+u0[IX(i+1,j)]+u0[IX(i,j-1)]+u0[IX(i,j+1)]-4*u0[IX(i,j)];
                 double lapv=v0[IX(i-1,j)]+v0[IX(i+1,j)]+v0[IX(i,j-1)]+v0[IX(i,j+1)]-4*v0[IX(i,j)];
-                u[IX(i,j)]+=a.visc*lapu; v[IX(i,j)]+=a.visc*lapv;
+                u[IX(i,j)]+=a.dt*a.visc*lapu; v[IX(i,j)]+=a.dt*a.visc*lapv;   // viscosity scales with dt
             }
             set_bc(u,1); set_bc(v,2);
         }
