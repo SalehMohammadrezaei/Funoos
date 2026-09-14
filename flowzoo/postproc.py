@@ -166,8 +166,10 @@ def _airfoil(result):
         g, c = _circulation(ux, uy, result.mask); gam.append(g)
     U = float(result.hints.get("U", 0.1)) or 0.1
     _g, chord = _circulation(vel[-1][0], vel[-1][1], result.mask)
-    sign = 1.0 if np.mean(gam[len(gam) // 2:]) >= 0 else -1.0
-    cl = sign * 2.0 * np.array(gam) / (U * max(chord, 1.0))
+    # Signed lift: C_l = 2*Gamma/(U*c) with Gamma the circulation around the body taken
+    # counter-clockwise (positive C_l = upward lift for a positive angle of attack). No
+    # sign is forced: a negative C_l is a real result (downward lift), not an error to hide.
+    cl = 2.0 * np.array(gam) / (U * max(chord, 1.0))
     t = np.linspace(0, 1, len(cl))
     fig, ax, plt = _new_ax("time (normalised)", "lift coefficient  C_l",
                            "Lift from the bound circulation (Kutta–Joukowski)")
