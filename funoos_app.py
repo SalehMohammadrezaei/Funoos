@@ -21,6 +21,17 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
+
+# Every completed run keeps all of its velocity/scalar frames in memory, so retaining
+# runs indefinitely grew memory with each simulation. Keep a short, bounded history.
+MAX_RUNS = 3
+
+
+def _bound_runs(runs, max_runs=MAX_RUNS):
+    """Evict the oldest entries of the insertion-ordered `runs` dict beyond `max_runs`."""
+    while len(runs) > max_runs:
+        del runs[next(iter(runs))]
+    return runs
 sys.path.insert(0, str(ROOT))
 from flowzoo import engine, render, content, postproc, catalog   # noqa: E402
 
@@ -121,6 +132,7 @@ class Api:
         vid = _b64_mp4(res.render(view, cm), fps)
         rid = uuid.uuid4().hex[:8]
         self._runs[rid] = {"result": res, "info": res.info}
+        _bound_runs(self._runs)
         return {"run_id": rid, "video": vid, "views": list(res.views),
                 "view": view, "info": res.info, "cmaps": list(render.COLORMAPS),
                 "defcmap": cm, "stats": _stats(res, exhibit)}
