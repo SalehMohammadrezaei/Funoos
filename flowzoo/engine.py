@@ -626,8 +626,9 @@ def _solve_spectral(p, pr, tmp):
 
 def _solve_mixing(p, pr, tmp):
     from .spectral import Spectral2D, random_field, advect_sl
-    s = _res(p); n = int(256 * s); steps = int(2600 * _durv(p)); nu = 4e-4
-    sim = Spectral2D(n=n, nu=nu); wh = random_field(n, seed=3); dt = 0.4 * (2 * np.pi / n)
+    s = _res(p); n = int(256 * s); nu = 4e-4
+    n0 = 256; T_end = 2600 * _durv(p) * 0.4 * (2 * np.pi / n0)   # experiment-defined interval (same policy as _solve_spectral)
+    sim = Spectral2D(n=n, nu=nu); wh = random_field(n, seed=3); dt = 0.4 * (2 * np.pi / n); steps = max(1, int(round(T_end / dt)))
     L = 2 * np.pi
     # dye: alternating horizontal bands (so stirring shows the folding/filamentation)
     yy = np.linspace(0, L, n, endpoint=False)[None, :] * np.ones((n, 1))
@@ -638,14 +639,15 @@ def _solve_mixing(p, pr, tmp):
     for st in range(steps + 1):
         u, v = sim.velocity(wh)
         if st % max(1, steps // 100) == 0:
-            raw.append(c.copy())
+            raw.append(c.T.copy())      # solver is [x,y]; public arrays are [y,x]
         if st % _pp == 0:
             pr(f"simulating… {int(100 * st / steps)}%")
         c = advect_sl(c, u, v, dt, L)
         if kap > 0:                                   # gentle scalar diffusion (spectral)
             c = np.real(np.fft.ifft2(np.exp(-kap * sim.k2 * dt) * np.fft.fft2(c)))
         wh = sim.step(wh, dt)
-    return Result("field", raw, f"chaotic mixing  {n}×{n}", hints={"label": "dye"})
+    return Result("field", raw, f"chaotic mixing  {n}×{n}",
+                  hints={"label": "dye", "dx": L / n, "dt": dt, "T_end": T_end})
 
 
 def _solve_reaction(p, pr, tmp):

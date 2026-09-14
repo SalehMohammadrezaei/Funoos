@@ -138,6 +138,24 @@ def test_run_history_bounded():
     assert len(runs) == MAX_RUNS and list(runs) == [f"r{i}" for i in range(4, MAX_RUNS + 4)]
 
 
+def test_mixing_bands_orientation():
+    """The dye starts as HORIZONTAL bands (a function of y). In the public [y,x] arrays
+    each row must therefore be uniform and rows must differ. Catches the untransposed
+    [x,y] dye field, which drew the bands vertically."""
+    import flowzoo.engine as engine
+    base = None
+    for name, ex in engine.EXHIBITS.items():
+        if "bands" in {q["name"] for q in ex["params"]}:
+            base = {q["name"]: q["default"] for q in ex["params"]}; break
+    assert base is not None, "mixing exhibit not found"
+    p = dict(base); p.update({"resolution": "Low (fast)", "duration": 0.01})
+    r = engine._solve_mixing(p, lambda *_: None, None)
+    c0 = r.raw[0]
+    assert c0.std(axis=1).max() < 1e-9, "rows not uniform: bands are not horizontal"
+    assert c0.std(axis=0).mean() > 0.1, "rows identical: no bands along y"
+    assert abs(r.hints["T_end"] - 2600 * 0.01 * 0.4 * (2 * np.pi / 256)) < 1e-12
+
+
 if __name__ == "__main__":
     print("poiseuille permeability: PASS  (err %.2f%%)" % (100 * test_permeability_poiseuille()))
     print("rb thermal diffusion: PASS  (rms dev %s)" % test_rb_thermal_diffusion())
@@ -145,3 +163,4 @@ if __name__ == "__main__":
     print("spectral fixed end time: PASS  %s" % test_spectral_fixed_end_time())
     test_text_geometry_font_fallback(); print("text font fallback: PASS")
     test_run_history_bounded(); print("run history bounded: PASS")
+    test_mixing_bands_orientation(); print("mixing bands orientation: PASS")
