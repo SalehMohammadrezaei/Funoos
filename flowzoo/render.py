@@ -143,10 +143,11 @@ def overlay_particles(rgb, xs, ys, sizes, heat=None):
     return np.asarray(img)
 
 
-def vorticity(ux, uy):
-    """omega_z = d(uy)/dx - d(ux)/dy on a unit-spaced grid."""
-    duy_dx = np.gradient(uy, axis=1)
-    dux_dy = np.gradient(ux, axis=0)
+def vorticity(ux, uy, dx=1.0):
+    """omega_z = d(uy)/dx - d(ux)/dy. Arrays are [y, x]; `dx` is the grid spacing
+    (1 lattice unit unless the caller supplies the physical spacing)."""
+    duy_dx = np.gradient(uy, dx, axis=1)
+    dux_dy = np.gradient(ux, dx, axis=0)
     return duy_dx - dux_dy
 
 

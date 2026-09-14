@@ -181,7 +181,7 @@ class Result:
             return [render.add_colorbar(
                 render.field_to_rgb(s, cm, 0, vmax, mask=mask, mask_color=mc,
                                     upscale=1, gamma=g), cm, 0, vmax, "|u|") for s in sp]
-        vt = [render.vorticity(ux, uy) for ux, uy in vel]
+        vt = [render.vorticity(ux, uy, self.hints.get("dx", 1.0)) for ux, uy in vel]
         vmax = np.percentile(np.abs(vt[-1]), 99.0) + 1e-12
         return [render.add_colorbar(
             render.field_to_rgb(w, cm, -vmax, vmax, mask=mask, mask_color=render.SOLID,
@@ -476,8 +476,8 @@ def _solve_ns(mode, p, pr, tmp):
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "density ρ"}
     elif mode == "rb":
         args += ["--buoy", str(p["buoyancy"]), "--conf", "0", "--iters", "80",
-                 "--pert", str(p.get("perturbation", 1.0))]
-        hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "temperature T"}
+                 "--pert", str(p.get("perturbation", 1.0)), "--kappa", str(p.get("kappa", 0.02))]
+        hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "temperature T", "kappa": float(p.get("kappa", 0.02))}
     elif mode == "flame":                           # laminar diffusion flame (Burke–Schumann)
         args += ["--buoy", str(p["buoyancy"]), "--zst", str(p.get("zst", 0.12)),
                  "--conf", str(p["confinement"]), "--srcw", str(p["source"]), "--visc", str(p["viscosity"])]
@@ -596,22 +596,32 @@ def _solve_dam(p, pr, tmp):
 
 def _solve_spectral(p, pr, tmp):
     from .spectral import Spectral2D, double_shear_layer, random_field
-    s = _res(p); n = int(256 * s); steps = int(2800 * _durv(p)); nu = float(p["viscosity"])
-    sim = Spectral2D(n=n, nu=nu)
+    s = _res(p); n = int(256 * s); nu = float(p["viscosity"]); L = 2 * np.pi
+    sim = Spectral2D(n=n, L=L, nu=nu)
     if p.get("init") == "Random turbulence":
         wh = random_field(n, seed=1); label = "decaying turbulence"
     else:
         wh = double_shear_layer(n, amp=float(p["perturbation"])); label = "Kelvin–Helmholtz"
-    dt = 0.4 * (2 * np.pi / n)
-    pr(f"spectral {n}×{n}, ν={nu:.1e}, {steps} steps…")
-    vel = []; _pp = max(1, steps // 50)
+    # The simulated interval belongs to the EXPERIMENT, not the resolution: fix T_end from
+    # the duration at the reference grid (n0=256) and take however many CFL-limited steps
+    # that needs here. (Before, the step count was fixed while dt ~ 1/n, so "Ultra"
+    # silently simulated about half the time of "Medium".)
+    n0 = 256; T_end = 2800 * _durv(p) * 0.4 * (L / n0)
+    dt = 0.4 * (L / n); steps = max(1, int(round(T_end / dt)))
+    pr(f"spectral {n}×{n}, ν={nu:.1e}, T={T_end:.2f}, {steps} steps…")
+    vel = []; times = []; _pp = max(1, steps // 50); every = max(1, steps // 90)
     for st in range(steps + 1):
-        if st % max(1, steps // 90) == 0:
-            vel.append(sim.velocity(wh))
+        if st % every == 0 or st == steps:
+            u, v = sim.velocity(wh)
+            vel.append((u.T.copy(), v.T.copy()))      # solver works in [x, y]; public arrays are [y, x]
+            times.append(st * dt)
         if st % _pp == 0:
             pr(f"simulating… {int(100 * st / steps)}%")
-        wh = sim.step(wh, dt)
-    return Result("spectral", vel, f"{label}  {n}×{n}")
+        if st < steps:
+            wh = sim.step(wh, dt)
+    r = Result("spectral", vel, f"{label}  {n}×{n}")
+    r.hints.update({"dx": L / n, "L": L, "dt": dt, "T_end": T_end, "times": times})
+    return r
 
 
 def _solve_mixing(p, pr, tmp):

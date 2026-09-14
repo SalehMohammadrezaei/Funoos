@@ -3,8 +3,9 @@
 Periodic box, vorticity transport  d(omega)/dt + u.grad(omega) = nu * lap(omega).
 The nonlinear term is evaluated in physical space (pseudo-spectral) with 2/3-
 rule dealiasing; viscosity is treated explicitly in the right-hand side; time
-stepping is RK4. Spectral accuracy makes this conserve energy to round-off in the
-inviscid limit -- which is exactly how we validate it.
+stepping is explicit RK4. Space is spectrally accurate, but time integration is
+not exact: in the inviscid limit energy is conserved only to the RK4 truncation
+error (measured in tests/), not to round-off.
 """
 from __future__ import annotations
 
