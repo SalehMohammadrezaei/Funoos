@@ -6,6 +6,7 @@ can write the mask to the flat binary file the C++ solver reads.
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 _FONT_CANDIDATES = [
@@ -44,6 +45,25 @@ def airfoil(nx, ny, cx, cy, chord, thickness=0.12, aoa_deg=12.0):
     return ((X >= 0) & (X <= chord) & (np.abs(Y) <= yt)).astype(np.uint8)
 
 
+def _find_font():
+    """First usable bold TrueType font: the system DejaVu (Linux), else the copy that
+    Matplotlib bundles on every platform (present inside the packaged app too). Raises
+    a clear error instead of handing Pillow a None path."""
+    cands = list(_FONT_CANDIDATES)
+    try:
+        import matplotlib
+        cands.append(str(Path(matplotlib.get_data_path()) / "fonts" / "ttf" / "DejaVuSans-Bold.ttf"))
+    except Exception:
+        pass
+    for c in cands:
+        try:
+            ImageFont.truetype(c, 10); return c
+        except OSError:
+            continue
+    raise RuntimeError("No TrueType font found for text geometry (DejaVuSans-Bold.ttf; "
+                       "Matplotlib normally bundles it).")
+
+
 def text(nx, ny, string, font_frac=0.55, x_frac=0.5, max_w_frac=0.9,
          font_path=None):
     """Render `string` as a solid obstacle in the domain.
@@ -55,13 +75,7 @@ def text(nx, ny, string, font_frac=0.55, x_frac=0.5, max_w_frac=0.9,
     img = Image.new("L", (nx, ny), 0)
     draw = ImageDraw.Draw(img)
     target_h = int(ny * font_frac)
-    path = font_path
-    if path is None:
-        for c in _FONT_CANDIDATES:
-            try:
-                ImageFont.truetype(c, 10); path = c; break
-            except OSError:
-                continue
+    path = font_path or _find_font()
     size = target_h
     font = ImageFont.truetype(path, size)
     # shrink to fit width
