@@ -157,10 +157,9 @@ Hand that file to anyone — they double-click, install, and launch from the Sta
 > or skip the installer entirely and run **from source** (below).
 
 **macOS — one-file installer (no Python, no compiler needed by the user).**
-Download **`Funoos-macOS-arm64.dmg`** (Apple Silicon: M1/M2/M3/M4) or
-**`Funoos-macOS-x86_64.dmg`** (Intel) from the
+Download **`Funoos-macOS-arm64.dmg`** (Apple Silicon: M1/M2/M3/M4 Macs) from the
 [Releases](https://github.com/SalehMohammadrezaei/Funoos/releases) page, open it,
-and drag **Funoos** into **Applications**. It is built automatically on GitHub's macOS
+and drag **Funoos** into **Applications**. (Intel Macs: run from source, below.) It is built automatically on GitHub's macOS
 runners by `build_mac.sh` (see `.github/workflows/release-mac.yml`).
 
 > **"Funoos can't be opened because it is from an unidentified developer."** Same

@@ -17,10 +17,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest   # Apple Silicon (arm64)
-            arch: arm64
-          - os: macos-13       # Intel (x86_64) - may be retired by GitHub; allowed to fail
-            arch: x86_64
+          - os: macos-latest   # Apple Silicon (arm64). GitHub has retired its Intel runners,
+            arch: arm64        # so Intel Macs run from source (see README).
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
