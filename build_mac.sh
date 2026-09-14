@@ -18,7 +18,8 @@ LIBGOMP_A=$("$GXX" -print-file-name=libgomp.a)
 echo "=== [1/4] Building C++ solvers with $GXX (arch $ARCH) ==="
 
 build_solver() {                       # usage: build_solver <dir> <name>
-  local d=$1 n=$2 src="solvers/$d/$n.cpp" bin="solvers/$d/$n"
+  local d=$1 n=$2
+  local src="solvers/$d/$n.cpp" bin="solvers/$d/$n"
   rm -f "$bin" "$bin.o"; rm -rf "solvers/$d/libs"
   "$GXX" -O3 -fopenmp -std=c++17 -c "$src" -o "$bin.o"
   if [ -f "$LIBGOMP_A" ]; then
