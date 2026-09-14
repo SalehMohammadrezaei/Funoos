@@ -38,6 +38,7 @@ jobs:
           export CXX=$(ls /opt/homebrew/bin/g++-[0-9]* /usr/local/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
           export CXXFLAGS="-O3 -fopenmp -std=c++17"
           python tests/smoke_test.py
+          python tests/test_numerics.py
 
       - uses: actions/upload-artifact@v4
         with:

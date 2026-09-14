@@ -24,7 +24,7 @@ def test_spectral_energy_conservation():
     for _ in range(200):
         wh = sim.step(wh, dt)
     drift = abs(sim.energy(wh) - e0) / e0
-    assert drift < 1e-2, f"energy drift too large: {drift:.2e}"
+    assert drift < 1e-7, f"energy drift too large: {drift:.2e}"   # measured ~2e-9 (RK4 truncation)
 
 
 def test_sod_shock_tube():
@@ -41,7 +41,7 @@ def test_sod_shock_tube():
     x = (np.arange(nx) + 0.5) / nx
     exact = validate.exact_sod(x, float(meta["time"]) / nx)
     err = np.mean(np.abs(rho - exact))
-    assert err < 0.02, f"Sod mean abs error too large: {err:.4f}"
+    assert err < 0.01, f"Sod mean abs error too large: {err:.4f}"   # measured ~0.003
 
 
 def test_quantum_unitarity():

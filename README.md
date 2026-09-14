@@ -119,13 +119,14 @@ verification-and-validation effort, just enough to trust what you're watching:
 | Scene | Method | Benchmark | Result |
 |---|---|---|---|
 | Vortex street | LBM D2Q9 | Strouhal number (Re ≈ 160) | **St ≈ 0.20** ✓ (live in the player) |
-| Sod shock tube | Compressible HLLC | exact Riemann solution | **mean abs error ≈ 0.002** ✓ |
-| Kelvin–Helmholtz | Pseudo-spectral | inviscid energy conservation | **drift < 10⁻⁸ (to round-off)** ✓ |
-| Porous flow | Pore-scale LBM | Darcy / Kozeny–Carman | **k = ν⟨u⟩/g**, monotonic in porosity ✓ |
+| Sod shock tube | Compressible HLLC | exact Riemann solution | **mean abs error ≈ 0.003** (test enforces < 0.01) ✓ |
+| Kelvin–Helmholtz | Pseudo-spectral | inviscid energy conservation | **drift ≈ 2×10⁻⁹** measured — RK4 time-integration error, not round-off (test enforces < 10⁻⁷) ✓ |
+| Porous flow | Pore-scale LBM | plane-Poiseuille channel (exact) | **superficial k = H³/(12·N_y) to 0.07 %**; k monotonic in porosity ✓ |
+| Rayleigh–Bénard | Projection NS | conduction profile (buoyancy off) | temperature relaxes to the linear profile ✓ |
 | Turing patterns | Gray–Scott | Pearson's regimes | reproduces spots/stripes/maze/mitosis ✓ |
 | Dam break | SPH | dry-bed front vs 2√(gH) | front in the physical (Ritter) range ✓ |
 
-These run in `tests/smoke_test.py` (CI): spectral energy, Sod shock, reaction-diffusion bounds, and porous-permeability monotonicity all assert automatically.
+These run in CI: `tests/smoke_test.py` (spectral energy, Sod shock, reaction-diffusion bounds, porous monotonicity) and `tests/test_numerics.py` (analytic Poiseuille permeability, Rayleigh–Bénard conduction, spectral orientation/spacing, resolution-independent end time, font fallback). The numbers in the table are measured values; each test enforces the stated bound.
 
 ---
 

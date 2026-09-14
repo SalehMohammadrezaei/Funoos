@@ -28,4 +28,6 @@ jobs:
           make -C solvers/sph
 
       - name: Smoke + validation tests
-        run: python tests/smoke_test.py
+        run: |
+          python tests/smoke_test.py
+          python tests/test_numerics.py
