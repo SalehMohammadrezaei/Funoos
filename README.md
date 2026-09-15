@@ -16,8 +16,8 @@ phenomenon: wakes and aerodynamics, porous media, buoyancy and convection, shock
 free surfaces and waves, vortices and mixing, pattern formation
 ([docs/gallery_map.md](docs/gallery_map.md)).
 
-<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4"><img src="docs/funoos_promo_poster.jpg" width="92%" alt="Funoos video: the 27 experiments"></a></p>
-<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4">▶ Watch the 30-second video</a></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4"><img src="docs/funoos_promo.gif" width="92%" alt="Funoos: views, palettes and the 27 experiments"></a></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4">Full-quality video (MP4)</a></p>
 
 ## What you can do
 
