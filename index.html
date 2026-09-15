@@ -127,11 +127,31 @@
             <div class="seg" id="s-views"></div>
             <select id="s-cmap" onchange="recolor()"></select>
             <span class="spacer"></span>
-            <button class="btn btn-ghost" style="padding:9px 13px" id="s-save-mp4" onclick="saveClip('mp4')">⬇ MP4</button>
-            <button class="btn btn-ghost" style="padding:9px 13px" id="s-save-gif" onclick="saveClip('gif')">⬇ GIF</button>
+            <label class="sr" for="s-export">Export</label>
+            <select class="btn btn-ghost" style="padding:9px 13px" id="s-export" onchange="exportAction(this)" aria-label="Export">
+              <option value="">⬇ export…</option>
+              <option value="mp4">MP4 clip</option>
+              <option value="gif">GIF clip</option>
+              <option value="png">PNG of this frame</option>
+              <option value="svg">Diagnostic plots (SVG)</option>
+              <option value="csv">Time series (CSV)</option>
+              <option value="npz">Fields with coordinates (NPZ)</option>
+              <option value="report">Experiment report (HTML)</option>
+              <option value="project">Setup file (JSON)</option>
+              <option value="options">Export & colour options…</option>
+            </select>
             <button class="btn btn-ghost" style="padding:9px 13px" id="s-probe" onclick="toggleProbe()" aria-pressed="false" title="Click the field to read values, probe a point, or draw profiles (Shift/Alt-click)">📍 Probe</button>
             <span class="zoomctl"><button class="linkbtn" type="button" onclick="zoomBy(1/1.15)" aria-label="Zoom out">−</button><span id="s-zoom" class="tlabel" style="min-width:44px">100%</span><button class="linkbtn" type="button" onclick="zoomBy(1.15)" aria-label="Zoom in">＋</button><button class="linkbtn" type="button" onclick="zoomReset()" aria-label="Reset zoom">⟲</button></span>
             <button class="btn btn-blue" style="padding:9px 18px" id="s-plots" onclick="togglePlots()">📊 Diagnostic plots</button>
+          </div>
+          <div class="xopts" id="x-opts" style="display:none">
+            <label>fps <input id="x-fps" type="number" min="1" max="60" value="26"></label>
+            <label>size × <input id="x-scale" type="number" min="0.25" max="4" step="0.25" value="1"></label>
+            <label>from <input id="x-t0" type="number" min="0" max="1" step="0.05" value="0"></label>
+            <label>to <input id="x-t1" type="number" min="0" max="1" step="0.05" value="1"></label>
+            <label>colour min <input id="x-vmin" type="text" placeholder="auto"></label>
+            <label>max <input id="x-vmax" type="text" placeholder="auto"></label>
+            <button class="linkbtn" type="button" onclick="applyLimits()">apply colour limits to the view</button>
           </div>
           <div class="screen glass" id="s-screen">
             <video id="s-video" loop playsinline></video>

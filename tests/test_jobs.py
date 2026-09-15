@@ -304,6 +304,41 @@ def test_compare_probe_inspect_profile():
     assert api.probe("zz", "Speed", 0.5, 0.5)["ok"] is False
 
 
+class _FakeWin:
+    """Stands in for the pywebview window: every save dialog picks a file in `d`."""
+    def __init__(self, d): self.d = d
+    def create_file_dialog(self, kind, save_filename="x", file_types=(), allow_multiple=False):
+        return str(Path(self.d) / save_filename)
+    def evaluate_js(self, js): pass
+
+
+def test_exports_are_traceable_to_the_run():
+    import json
+    api = _api(); r = api.run("__quick__", {"a": 2}, None, None, 26, "ex1"); assert r["ok"]
+    with tempfile.TemporaryDirectory() as d:
+        api._win = _FakeWin(d)
+        p = api.save_png("ex1", "Speed", "Turbo", 0.5); assert p["ok"] and Path(p["path"]).stat().st_size > 100 and p["index"] == 1
+        s = api.save_plots_svg("ex1"); assert s["ok"] and s["paths"] and all(Path(x).read_text().startswith("<?xml") for x in s["paths"])
+        z = api.save_arrays("ex1"); assert z["ok"] and {"ux", "uy", "x", "y", "times", "meta_json"} <= set(z["arrays"])
+        data = np.load(z["path"]); meta = json.loads(str(data["meta_json"]))
+        assert data["ux"].shape == (3, 8, 8) and meta["kind"] == "lbm" and "time_unit" in meta and len(data["times"]) == 3
+        c = api.export_csv("ex1", "series", {}); assert c["ok"] and "time" in Path(c["path"]).read_text().splitlines()[0]
+        rp = api.save_report("ex1", "lbm_cylinder", "Speed", "Turbo")
+        html = Path(rp["path"]).read_text(); assert rp["ok"] and "ex1" in html and "Measurements" in html and "Checks and limitations" in html
+        # clip options: frame window, fps and scale reach the encoder
+        n0 = len(_ENCODES)
+        import funoos_app as fa
+        saved = fa.render.save_mp4
+        got = {}
+        fa.render.save_mp4 = lambda frames, path, fps=26: got.update(n=sum(1 for _ in frames), fps=fps) or Path(path).write_bytes(b"x")
+        try:
+            cl = api.save_clip("ex1", "Speed", "Turbo", "mp4", {"fps": 12, "scale": 0.5, "t0": 0.5, "t1": 1.0})
+        finally:
+            fa.render.save_mp4 = saved
+        assert cl["ok"] and cl["frames"] == 2 and got == {"n": 2, "fps": 12}
+        assert api.save_png("nope", "Speed")["ok"] is False
+
+
 # ----------------------------------------------------------------- result store
 def test_store_bounded_by_count_lru():
     st = RunStore(max_runs=3, max_bytes=10 ** 9)

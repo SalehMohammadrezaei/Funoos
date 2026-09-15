@@ -540,12 +540,43 @@ function setVideo(src, keepPosition) {
 }
 async function saveClip(fmt) {
   if (!RUN) { toast("Run a simulation first", "err"); return; }
+  const v = $("#s-video");
+  const opts = { fps: +($("#x-fps").value || 26), scale: +($("#x-scale").value || 1), t0: +($("#x-t0").value || 0), t1: +($("#x-t1").value || 1),
+                 vmin: $("#x-vmin").value, vmax: $("#x-vmax").value };
   $("#s-status").textContent = "⏳ rendering " + fmt.toUpperCase() + " to save…";
   try {
-    const r = await call("save_clip", RUN.run_id, RUN.view, $("#s-cmap").value, fmt);
-    if (r.path) { $("#s-status").textContent = "✓ saved: " + r.path; toast("Saved " + fmt.toUpperCase(), "ok"); }
+    const r = await call("save_clip", RUN.run_id, RUN.view, $("#s-cmap").value, fmt, opts);
+    if (r.path) { $("#s-status").textContent = `✓ saved: ${r.path} (${r.frames} frames at ${r.fps} fps)`; toast("Saved " + fmt.toUpperCase(), "ok"); }
     else { $("#s-status").textContent = "Save cancelled."; }
   } catch (e) { $("#s-status").textContent = "⚠ " + errText(e); toast("Save failed: " + errText(e), "err"); }
+}
+async function exportAction(sel) {
+  const what = sel.value; sel.value = "";
+  if (!RUN) { toast("Run a simulation first", "err"); return; }
+  const v = $("#s-video"), frac = v.duration ? v.currentTime / v.duration : 1.0, cmap = $("#s-cmap").value;
+  try {
+    let r;
+    if (what === "mp4" || what === "gif") { await saveClip(what); return; }
+    if (what === "png") r = await call("save_png", RUN.run_id, RUN.view, cmap, frac, $("#x-vmin").value, $("#x-vmax").value);
+    else if (what === "svg") r = await call("save_plots_svg", RUN.run_id);
+    else if (what === "npz") r = await call("save_arrays", RUN.run_id);
+    else if (what === "csv") r = await call("export_csv", RUN.run_id, "series", {});
+    else if (what === "report") r = await call("save_report", RUN.run_id, CUR_SCENE, RUN.view, cmap);
+    else if (what === "project") { await saveProject(); return; }
+    else if (what === "options") { const b = $("#x-opts"); b.style.display = b.style.display === "block" ? "none" : "block"; return; }
+    if (!r) return;
+    const p = r.path || (r.paths && r.paths.join(", "));
+    if (p) { toast("Saved " + p, "ok"); $("#s-status").textContent = "✓ saved: " + p; } else $("#s-status").textContent = "Save cancelled.";
+  } catch (e) { toast("Export failed: " + errText(e), "err"); }
+}
+async function applyLimits() {
+  if (!RUN) return;
+  const t = nextReq("view"), rid = RUN.run_id;
+  try {
+    const r = await call("render_view", rid, RUN.view, $("#s-cmap").value, 26, t, $("#x-vmin").value, $("#x-vmax").value);
+    if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;
+    hideStill(); setVideo(r.video, true); $("#s-status").textContent = "✓ colour limits applied";
+  } catch (e) { if (isCurrent("view", t) && !/superseded/.test(errText(e))) toast(errText(e), "err"); }
 }
 async function togglePlots() {
   if (!RUN) { toast("Run a simulation first", "err"); return; }

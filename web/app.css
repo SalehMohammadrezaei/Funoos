@@ -313,3 +313,16 @@ input[type=range]{accent-color:var(--blue-br)}
 .helppanel .layer .body{font-size:12.5px}
 .helppanel .kicker{margin-bottom:6px}
 #s-scene{max-width:200px}
+
+/* ── export options, responsive studio ── */
+.xopts{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:-4px 0 10px;font-size:11px;color:var(--muted)}
+.xopts input{width:64px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:4px 6px;font-size:11px;margin-left:4px}
+#s-export{max-width:150px}
+@media (max-width:1100px){
+  #studio .dash{grid-template-columns:260px 1fr;grid-template-rows:1fr auto auto;grid-template-areas:"params stage" "params transport" "kpis kpis"}
+}
+@media (max-width:860px){
+  #studio .dash{grid-template-columns:1fr;grid-template-rows:auto auto auto auto;grid-template-areas:"params" "stage" "transport" "kpis";overflow-y:auto}
+  .screen{min-height:320px}
+  .wordmark{font-size:64px}
+}

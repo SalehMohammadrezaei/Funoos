@@ -34,14 +34,32 @@ def _new_ax(xl, yl, title):
     return fig, ax, plt
 
 
+_SVG_SINK = None      # when a list, _rgb also appends the figure as SVG text (see plots_svg)
+
+
 def _rgb(fig, plt):
     from . import render
     with render._MPL_LOCK:
+        if _SVG_SINK is not None:
+            import io
+            buf = io.StringIO(); fig.savefig(buf, format="svg", facecolor=fig.get_facecolor()); _SVG_SINK.append(buf.getvalue())
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()
         a = np.frombuffer(fig.canvas.buffer_rgba(), np.uint8).reshape(h, w, 4)[..., :3].copy()
         plt.close(fig)
     return a
+
+
+def plots_svg(result):
+    """[(title, svg_text, explanation)] — vector versions of `plots(result)`."""
+    global _SVG_SINK
+    _SVG_SINK = []
+    try:
+        pl = plots(result)
+        svgs = list(_SVG_SINK)
+    finally:
+        _SVG_SINK = None
+    return [(t, svg, ex) for (t, _rgb_, ex), svg in zip(pl, svgs)]
 
 
 def _legend(ax):

@@ -47,6 +47,8 @@ import types
 import uuid
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
 sys.path.insert(0, str(ROOT))
 from flowzoo import engine, render, content, postproc, catalog, schema, analysis   # noqa: E402
@@ -623,8 +625,22 @@ class Api:
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e)}
 
-    def save_clip(self, run_id, view, cmap=None, fmt="mp4"):
-        """Render the current view and save it to a user-chosen file (MP4 or GIF).
+    def _ask_save(self, default_name, fmt, label):
+        import webview
+        sel = self._win.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"{default_name}.{fmt}",
+                                           file_types=(f"{label} (*.{fmt})", "All files (*.*)"))
+        if not sel:
+            return None
+        path = sel[0] if isinstance(sel, (list, tuple)) else sel
+        return path if path.lower().endswith("." + fmt) else path + "." + fmt
+
+    @staticmethod
+    def _slug(res):
+        return "".join(c if c.isalnum() else "_" for c in res.info.split("·")[0]).strip("_")[:40] or "funoos"
+
+    def save_clip(self, run_id, view, cmap=None, fmt="mp4", opts=None):
+        """Render a view and save it as MP4 or GIF. `opts`: fps (default 26), scale (output size
+        multiplier, e.g. 0.5 or 2), t0/t1 (clip fraction window, 0..1), vmin/vmax (colour limits).
         `path` is None when the user dismissed the dialog."""
         res = self.store.result(run_id)
         if res is None:
@@ -632,22 +648,159 @@ class Api:
         if not self._win:
             return {"ok": False, "error": "no window", "run_id": run_id}
         try:
-            import webview
-            view = view if view in res.views else res.views[0]
+            o = dict(opts or {})
+            view = res.view_name(view)
             cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
             fmt = "gif" if str(fmt).lower() == "gif" else "mp4"
-            name = "".join(c if c.isalnum() else "_" for c in res.info.split("·")[0]).strip("_")[:40] or "funoos"
-            sel = self._win.create_file_dialog(
-                webview.SAVE_DIALOG, save_filename=f"{name}.{fmt}",
-                file_types=(f"{fmt.upper()} (*.{fmt})", "All files (*.*)"))
-            if not sel:
+            fps = int(o.get("fps") or 26); scale = float(o.get("scale") or 1.0)
+            t0 = float(o.get("t0") or 0.0); t1 = float(o.get("t1") if o.get("t1") not in (None, "") else 1.0)
+            vmin = None if o.get("vmin") in (None, "") else float(o["vmin"]); vmax = None if o.get("vmax") in (None, "") else float(o["vmax"])
+            path = self._ask_save(self._slug(res), fmt, fmt.upper())
+            if not path:
                 return {"ok": True, "path": None, "run_id": run_id}
-            path = sel[0] if isinstance(sel, (list, tuple)) else sel
-            if not path.lower().endswith("." + fmt):
-                path += "." + fmt
+            n = res.nframes; i0 = int(round(max(0.0, min(1.0, t0)) * (n - 1))); i1 = int(round(max(0.0, min(1.0, t1)) * (n - 1)))
+            i0, i1 = min(i0, i1), max(i0, i1)
+
+            def gen():
+                from PIL import Image
+                for i, fr in enumerate(res.iter_frames(view, cm, vmin, vmax)):
+                    if i < i0 or i > i1:
+                        continue
+                    if scale != 1.0:
+                        im = Image.fromarray(fr); fr = np.asarray(im.resize((max(2, int(im.width * scale)), max(2, int(im.height * scale))), Image.LANCZOS))
+                    yield fr
             with self._encode:
-                (render.save_gif if fmt == "gif" else render.save_mp4)(res.iter_frames(view, cm), path, fps=26)
-            return {"ok": True, "path": path, "run_id": run_id}
+                (render.save_gif if fmt == "gif" else render.save_mp4)(gen(), path, fps=fps)
+            return {"ok": True, "path": path, "run_id": run_id, "frames": i1 - i0 + 1, "fps": fps}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "run_id": run_id}
+
+    def save_png(self, run_id, view, cmap=None, frac=1.0, vmin=None, vmax=None):
+        """Save the frame on screen (clip fraction `frac`) as a PNG."""
+        res = self.store.result(run_id)
+        if res is None or not self._win:
+            return {"ok": False, "error": "run expired" if res is None else "no window", "run_id": run_id}
+        try:
+            view = res.view_name(view); cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
+            vmin = None if vmin in (None, "") else float(vmin); vmax = None if vmax in (None, "") else float(vmax)
+            i = int(round(max(0.0, min(1.0, float(frac))) * (res.nframes - 1)))
+            path = self._ask_save(f"{self._slug(res)}_{view.replace(' ', '_')}_f{i:03d}", "png", "PNG image")
+            if not path:
+                return {"ok": True, "path": None}
+            render.save_png(res.frame(i, view, cm, vmin, vmax), path)
+            return {"ok": True, "path": path, "index": i, "time": float(res.times[i])}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "run_id": run_id}
+
+    def save_plots_svg(self, run_id):
+        """Save every diagnostic plot of a run as SVG files (one per plot) next to a chosen name."""
+        res = self.store.result(run_id)
+        if res is None or not self._win:
+            return {"ok": False, "error": "run expired" if res is None else "no window", "run_id": run_id}
+        try:
+            path = self._ask_save(f"{self._slug(res)}_plots", "svg", "SVG plots")
+            if not path:
+                return {"ok": True, "paths": []}
+            base = Path(path).with_suffix(""); paths = []
+            for k, (title, svg, _ex) in enumerate(postproc.plots_svg(res)):
+                pth = Path(f"{base}_{k + 1}_{''.join(c if c.isalnum() else '_' for c in title)[:30]}.svg")
+                pth.write_text(svg); paths.append(str(pth))
+            return {"ok": True, "paths": paths}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "run_id": run_id}
+
+    def save_arrays(self, run_id):
+        """Save the raw fields with coordinates, timestamps, names and units as a .npz file."""
+        res = self.store.result(run_id)
+        if res is None or not self._win:
+            return {"ok": False, "error": "run expired" if res is None else "no window", "run_id": run_id}
+        try:
+            path = self._ask_save(f"{self._slug(res)}_fields", "npz", "NumPy arrays")
+            if not path:
+                return {"ok": True, "path": None}
+            arrays = {"times": np.asarray(res.times, float)}
+            h = res.hints; meta = {"kind": res.kind, "info": res.info, "time_unit": h.get("time_unit", "frame"),
+                                   "length_unit": "lattice cells" if res.kind in ("lbm", "porous") else ("m" if res.kind == "particles" else "grid units"),
+                                   "convention": "arrays are [frame, y, x] with y increasing upward; particles are [frame][particle, (x, y, speed)]"}
+            f0 = res.raw[0]
+            if isinstance(f0, tuple):
+                arrays["ux"] = np.stack([f[0] for f in res.raw]); arrays["uy"] = np.stack([f[1] for f in res.raw])
+                ny, nx = f0[0].shape; meta["fields"] = "ux, uy (velocity components)"
+            elif getattr(f0, "ndim", 0) == 2 and f0.shape[1] == 3 and res.kind == "particles":
+                for i, f in enumerate(res.raw):
+                    arrays[f"particles_{i:04d}"] = np.asarray(f)
+                nx = ny = None; meta["fields"] = "particles_NNNN: x, y, speed per particle"
+            else:
+                arrays[h.get("label", "scalar").replace(" ", "_")] = np.stack(res.raw); ny, nx = f0.shape
+                meta["fields"] = h.get("label", "scalar")
+                if isinstance(h.get("vel"), list):
+                    arrays["ux"] = np.stack([f[0] for f in h["vel"]]); arrays["uy"] = np.stack([f[1] for f in h["vel"]])
+            if nx:
+                dx = float(h.get("dx", 1.0)); arrays["x"] = np.arange(nx) * dx; arrays["y"] = np.arange(ny) * dx
+            if res.mask is not None:
+                arrays["solid_mask"] = np.asarray(res.mask, np.uint8)
+            arrays["meta_json"] = np.array(json.dumps({**meta, "hints": res.meta()["hints"]}))
+            np.savez_compressed(path, **arrays)
+            return {"ok": True, "path": path, "arrays": sorted(arrays)}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "run_id": run_id}
+
+    def save_report(self, run_id, scene=None, view=None, cmap=None):
+        """A compact self-contained HTML report: settings, derived quantities, selected
+        figures, measurements and model notes, traceable to the run."""
+        res = self.store.result(run_id)
+        if res is None or not self._win:
+            return {"ok": False, "error": "run expired" if res is None else "no window", "run_id": run_id}
+        try:
+            path = self._ask_save(f"{self._slug(res)}_report", "html", "HTML report")
+            if not path:
+                return {"ok": True, "path": None}
+            with self._lock:
+                job = self._jobs.get(run_id)
+            exhibit = job.exhibit if job else None
+            params = dict(job.params) if job else {}
+            rec = self.project(scene, exhibit, params, view, cmap, False, run_id) if exhibit else {"result": res.meta()}
+            view = res.view_name(view); cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
+            still = _b64_png(res.frame(-1, view, cm))
+            plots = [(t, _b64_png(img), ex) for t, img, ex in postproc.plots(res)]
+            mets = postproc.metrics(res)
+            sc = catalog.scene(scene) if scene else None
+            lay = catalog.scene_layers(scene) if sc else None
+            esc = lambda x: str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")   # noqa: E731
+            h = [f"<!doctype html><html><head><meta charset='utf-8'><title>Funoos report — {esc(res.info)}</title>",
+                 "<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:30px auto;padding:0 16px;color:#222}"
+                 "table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px;font-size:13px}img{max-width:100%}"
+                 "h2{margin-top:28px}.small{color:#666;font-size:12px}</style></head><body>",
+                 f"<h1>{esc(sc['name'] if sc else res.info)}</h1>",
+                 f"<p class='small'>Funoos {APP_VERSION} · run {esc(run_id)} · {esc(rec.get('saved', ''))} · status {esc(rec.get('status', 'completed'))}</p>"]
+            if sc:
+                h.append(f"<p><b>Question:</b> {esc(sc['question'])}<br><b>Status:</b> {esc(catalog.STATUS_LABEL[sc['status']])}</p>")
+            h.append(f"<h2>Setup</h2><table><tr><th>parameter</th><th>value</th></tr>" +
+                     "".join(f"<tr><td>{esc(k)}</td><td>{esc(v)}</td></tr>" for k, v in params.items()) + "</table>")
+            if rec.get("derived"):
+                h.append("<h2>Derived quantities</h2><table>" + "".join(
+                    f"<tr><td>{esc(d['label'])}</td><td>{esc(d['value'])} {esc(d.get('units', ''))}</td><td class='small'>{esc(d.get('note', ''))}</td></tr>"
+                    for d in rec["derived"]) + "</table>")
+            m = res.meta()
+            h.append(f"<h2>Result</h2><p>{esc(res.info)} · {m['frames']} frames · grid {esc(m['shape'])} · times {m['times'][0]:g} … {m['times'][-1]:g} {esc(m['time_unit'])}</p>")
+            h.append(f"<p><img src='{still}' alt='final frame, {esc(view)}'><br><span class='small'>{esc(view)} view, final frame, palette {esc(cm)}</span></p>")
+            if mets:
+                h.append("<h2>Measurements</h2><table><tr><th>metric</th><th>value</th></tr>" +
+                         "".join(f"<tr><td>{esc(k)}</td><td>{v:.6g}</td></tr>" for k, v in mets.items() if isinstance(v, (int, float))) + "</table>")
+            for t, img, ex in plots:
+                h.append(f"<h3>{esc(t)}</h3><img src='{img}' alt='{esc(t)}'><p class='small'>{esc(ex)}</p>")
+            if lay:
+                for L in lay["layers"]:
+                    if L["id"] in ("checks", "numerics", "setup"):
+                        body = L.get("text") or ""
+                        if L["id"] == "setup":
+                            body = f"Initial: {L.get('ic', '')}  Boundary: {L.get('bc', '')}"
+                        h.append(f"<h2>{esc(L['title'])}</h2><p>{esc(body)}</p>")
+            if rec.get("solver_versions"):
+                h.append("<h2>Provenance</h2><p class='small'>" + esc(json.dumps(rec["solver_versions"])) + "</p>")
+            h.append("</body></html>")
+            Path(path).write_text("\n".join(h), encoding="utf-8")
+            return {"ok": True, "path": path}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e), "run_id": run_id}
 
