@@ -140,12 +140,9 @@ async function buildGallery() {
 // Favourites and recents were stored as scene keys; they now refer to experiments but keep
 // the original preset so reopening lands on what the user had selected.
 function migrateStoredKeys() {
-  const favRaw = _lsGet("funoos.favs", []); const favs = {};
-  for (const k of favRaw) { if (typeof k === "string") { const e = S2E[k]; if (e) favs[e] = k; } }
-  const favObj = _lsGet("funoos.favs2", null);
-  if (!favObj) _lsSet("funoos.favs2", favs);
+  if (!_lsGet("funoos.favs2", null)) _lsSet("funoos.favs2", FunoosLogic.migrateFavs(_lsGet("funoos.favs", []), S2E));
   const rec = _lsGet("funoos.recents", []);
-  if (rec.length && typeof rec[0] === "string") _lsSet("funoos.recents", rec.map(k => ({ exp: S2E[k], key: k })).filter(x => x.exp));
+  if (rec.length && typeof rec[0] === "string") _lsSet("funoos.recents", FunoosLogic.migrateRecents(rec, S2E));
 }
 function fillCounts(c) {
   for (const [k, id] of [["methods", "#n-methods"], ["experiments", "#n-scenes"], ["solvers", "#n-solvers"], ["presets", "#n-presets"]]) {
@@ -428,9 +425,8 @@ function markMatch() {
   m.className = "match " + (same ? "ok" : "stale");
 }
 function fmtNum(v) { return (typeof v === "number" && !Number.isInteger(v)) ? +v.toPrecision(6) : v; }
-// Complete numeric parsing: "0,01" → 0.01, "1e" / "2abc" / "" → NaN (never a silently truncated value).
-const NUM_RE = /^[+-]?(\d+([.,]\d*)?|[.,]\d+)([eE][+-]?\d+)?$/;
-function parseNum(s) { s = String(s).trim(); if (!NUM_RE.test(s)) return NaN; return Number(s.replace(",", ".")); }
+// Complete numeric parsing lives in web/logic.js (unit-tested with node): "0,01" → 0.01, "1e" / "2abc" / "" → NaN.
+const parseNum = FunoosLogic.parseNum;
 function field(q) {
   const f = el("div", "field"); f.dataset.name = q.name;
   const id = "p-" + q.name;
@@ -457,19 +453,7 @@ function field(q) {
   return f;
 }
 // client-side validation (the backend repeats it before any solver starts)
-function checkParam(q, v) {
-  if (q.type === "choice") return q.choices.includes(v) ? null : "choose one of the options";
-  if (q.type === "str") return (v == null || !String(v).trim()) ? "enter some text" : null;
-  if (v == null || v === "" || !Number.isFinite(typeof v === "number" ? v : parseNum(v))) return "enter a number (e.g. 0.01 or 1e-3)";
-  v = typeof v === "number" ? v : parseNum(v);
-  if (q.type === "int" && !Number.isInteger(v)) return "warn:will be rounded to " + Math.round(v);
-  if (q.hard_min != null && v < q.hard_min) return "must be ≥ " + q.hard_min + (q.units ? " " + q.units : "") + " (solver limit)";
-  if (q.hard_max != null && v > q.hard_max) return "must be ≤ " + q.hard_max + (q.units ? " " + q.units : "") + " (solver limit)";
-  const out = (q.min != null && v < q.min) || (q.max != null && v > q.max);
-  if (out && !ADV) return "outside the recommended range " + q.min + " – " + q.max + " (turn on advanced mode to explore)";
-  if (out) return "warn:outside the recommended range " + q.min + " – " + q.max;
-  return null;
-}
+function checkParam(q, v) { return FunoosLogic.checkParam(q, v, ADV); }
 function validateOne(q, f) {
   const msg = checkParam(q, PSTATE[q.name]); const e = f.querySelector(".verr");
   f.classList.toggle("invalid", !!msg && !/^warn:/.test(msg)); f.classList.toggle("warn", !!msg && /^warn:/.test(msg));
@@ -865,8 +849,7 @@ let PROBE = false;
 function toggleProbe() { PROBE = !PROBE; const b = $("#s-probe"); if (b) { b.classList.toggle("on", PROBE); b.setAttribute("aria-pressed", PROBE ? "true" : "false"); } $("#s-status").textContent = PROBE ? "📍 click on the field to read a value, probe a point in time, or draw a profile" : "Ready."; }
 function curFrame() {                     // index of the encoded frame on screen
   const v = $("#s-video"); if (!v.duration || !RUN || !RUN.meta) return null;
-  const n = RUN.meta.frames || 1;
-  return Math.min(n - 1, Math.max(0, Math.floor(v.currentTime * FPS + 1e-6)));
+  return FunoosLogic.frameAt(v.currentTime, FPS, RUN.meta.frames || 1);
 }
 function _fieldFrac(ev) {
   // fractions of the rendered frame (object-fit: contain letterboxing accounted for), +y up

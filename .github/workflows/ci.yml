@@ -38,6 +38,9 @@ jobs:
           python tests/test_cases.py
           python tests/test_matrix.py
 
+      - name: Frontend logic checks (node)
+        run: node tests/test_frontend.js
+
   package-linux:
     runs-on: ubuntu-latest
     steps:

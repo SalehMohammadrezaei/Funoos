@@ -14,11 +14,13 @@ binaries and then runs the packaged app's self-test. Each suite is a plain scrip
 | `test_schema.py` | parameter schema | every shipped preset valid; invalid values (NaN, strings, out of solver limits, unknown names) fail before execution; hidden controls ignored; integers coerced; recommended ranges need advanced mode; active controls change derived quantities; blast pressure ratio migration |
 | `test_jobs.py` | frontend/backend contract, resource use | cancellation kills the solver; job states and immutable snapshots; error envelopes; request tokens and superseded encodes; view cache; previews; store bounds, pinning, disk spill and cleanup; sweeps; comparison; probes/profiles; project save/load; temp sweep after a crash |
 | `test_media.py` | media/export, colour mapping | streamed MP4/GIF encode → decode with the right frame count and size; generator input; field/legend agreement incl. gamma and floor; palette independence; empty vs zero; derived-field cache; actual frame times; estimate |
+| `test_frontend.js` (node) | frontend logic | complete numeric parsing, Run re-enabled after a corrected value, hard vs recommended limits, stale-response tokens, encoded-frame index, favourite/recent migration, result-vs-controls identity |
 | `Funoos --selftest` | packaging | bundled solvers, font and encoder work inside the packaged app (CI on Linux; build scripts on Windows/macOS) |
 
-Frontend logic (stale responses, cancellation, preserved settings, keyboard
-operation) is exercised through the backend contract tests above and by manual
-walkthrough; there is no JavaScript unit-test runner in the repository.
+The pure frontend logic lives in `web/logic.js` and is checked with node
+(`tests/test_frontend.js`, run in CI). Behaviour that needs a real window
+(keyboard operation, native dropdown rendering, playback) is covered by manual
+walkthrough only.
 
 ## Tolerances
 

@@ -44,6 +44,7 @@ jobs:
           python tests/test_schema.py
           python tests/test_cases.py
           python tests/test_matrix.py
+          node tests/test_frontend.js
           dist/Funoos.app/Contents/MacOS/Funoos --selftest
           python -m pip freeze > requirements-resolved-macos-${{ matrix.arch }}.txt
 
