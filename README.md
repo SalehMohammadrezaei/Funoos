@@ -1,225 +1,132 @@
 # 🏮 Funoos
 
-### *An interactive playground for the classic methods of fluid simulation.*
+### Explore fluid motion through simulation.
 
-Funoos (فانوس — "lantern") is a small desktop app I made in my spare time to make computational fluid dynamics easier to **see**. Pick a scene, nudge a few sliders, hit run, and watch what happens — vortices peeling off a cylinder, a candle flame flickering, a dam breaking, Turing patterns forming. Six families of solver sit behind one click-through gallery, so you can get a feel for how each behaves without installing or configuring anything.
+Funoos (فانوس — "lantern") is a desktop application for exploring two-dimensional
+fluid motion and pattern formation. Choose an experiment, adjust its setup, and
+inspect the resulting fields and measurements. Each scene explains its model, its
+numerical method and the checks that have been made. It started as a spare-time
+project to make computational fluid dynamics easier to *see*; it is now an
+interactive laboratory where you can change a setup, compare experiments and
+inspect results you can trust — with the limits of every model stated.
 
-It's meant for **curiosity and learning, not production CFD** — the solvers are compact 2-D implementations, each sanity-checked against a standard textbook case so the picture is believable. If CFD is new to you, it's a way to play with it; if you already know it, it's a quick visual reference.
+Five solvers written from scratch (four in C++/OpenMP, one in Python/FFT) plus a
+reaction–diffusion model drive 48 experiments organised by phenomenon: wakes and
+aerodynamics, porous media, buoyancy and convection, shocks, free surfaces and
+waves, vortices and mixing, pattern formation.
 
-<p align="center">
-  <img src="results/gallery/lbm_name.gif" alt="Flow shedding vortices off the word Funoos" width="92%">
-</p>
-<p align="center"><em>The signature scene: type your name and watch the flow braid vortices off the letters (lattice Boltzmann).</em></p>
+<p align="center"><img src="results/gallery/lbm_cylinder.gif" width="46%"> <img src="results/gallery/euler_blast.gif" width="46%"></p>
+<p align="center"><img src="results/gallery/sph_dam.gif" width="46%"> <img src="results/gallery/spec_kh.gif" width="46%"></p>
 
----
+## What you can do
 
-## The methods & scenes
+* **Run an experiment** with typed, documented controls (units, recommended ranges,
+  solver limits, what is held fixed), see the derived quantities (viscosity, lattice
+  Mach number, Rayleigh and Prandtl numbers, particle spacing, post-shock state …)
+  and a resource estimate before you start, and cancel a run that is under way.
+* **Look at the result** in several views (speed, vorticity, streamlines, schlieren,
+  particles …) with a legend that uses the same colour mapping as the field, manual
+  colour limits, zoom and pan, frame inspection, point probes and line profiles.
+* **Measure**: every scene has diagnostics that state their definition, units, data
+  source and sampling; measurements are separated from the plots and exportable as CSV.
+* **Compare**: keep a bounded history of runs, pin the ones you want, duplicate a
+  setup and change one thing, sweep a parameter over a bounded queue, and view two
+  runs side by side synchronised by simulation time with one shared colour scale.
+* **Reproduce**: save the complete resolved setup (parameters, derived quantities,
+  solver provenance, output times) to a file and load it later; named presets; undo/redo.
+* **Understand**: each scene page is layered — what you are seeing, what to try, what
+  to observe, the physics, the mathematical model, the actual initial and boundary
+  conditions, the numerical method, the checks and limitations, further reading.
 
-| Method | Scenes |
-|---|---|
-| **Lattice–Boltzmann** (D2Q9, BGK) | Kármán vortex street · airfoil · **flow around your name** · **F1-car aero** · **cyclist** · **drafting pair** · **flow through porous rock** (measures permeability) |
-| **Incompressible Navier–Stokes** (projection) | rising smoke · Rayleigh–Taylor fingers · **candle flame** · **Rayleigh–Bénard convection** · **chimney plume in a crosswind** |
-| **Compressible Euler** (finite-volume HLLC) | open-air blast · **shockwave hits a city** (towers crumble) · shock–bubble · twin-bubble |
-| **Smoothed-Particle Hydrodynamics** | dam break · droplet crown · sloshing · pouring · ocean swell · **floating ship** (rigid-body FSI) |
-| **Pseudo-spectral** (FFT) | Kelvin–Helmholtz billows · decaying 2-D turbulence · **chaotic dye mixing** |
-| **Reaction–Diffusion** (Gray–Scott) | Turing patterns: spots · stripes · labyrinth · **mitosis** |
+## Model checks and limitations
 
-## Gallery — all 29 scenes
+Every scene carries one of three status labels. The checks behind them run in CI
+(`tests/`); the numbers below are measured there.
 
-### Lattice–Boltzmann
+| status | meaning | examples (measured) |
+|---|---|---|
+| **Analytical comparison** | compared with an exact solution, error reported | Sod shock tube: mean density error 0.0017, velocity 0.0027 at 600 cells (0.003 at 300); Taylor–Green vortex decay: relative error 1e-15; diffusion-only dye stripes vs exp(−2κm²t): 3 %; heated layer with buoyancy off: linear profile, Nu = 1.000; plane-Poiseuille permeability: 0.07 % |
+| **Numerical check** | self-consistency, convergence or a documented reference value | cylinder Strouhal number vs the 0.18–0.21 reference range (Williamson 1996); airfoil lift antisymmetric in the angle (C_l(+12°) = +0.41, C_l(−12°) = −0.43); slab sample k_x = 9.2 vs k_y ≈ 0 and k independent of the driving force; still water: residual speed 0.06 m/s, surface at the fill level; spectral energy drift with ν = 0: 2×10⁻⁹ over 200 steps (RK4 truncation, not round-off) |
+| **Qualitative demonstration** | shows the phenomenon; no quantitative claim | smoke plume, candle-flame model, blast and buildings, shock–bubble, sloshing, wave tank, floating hull, dye mixing |
 
-<table>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/lbm_cylinder.gif" width="260"><br><sub><b>Kármán Vortex Street</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/lbm_airfoil.gif" width="260"><br><sub><b>Airfoil at Angle</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/lbm_name.gif" width="260"><br><sub><b>Flow Around Your Name</b></sub></td>
-</tr>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/lbm_f1.gif" width="260"><br><sub><b>F1 Car Aerodynamics</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/lbm_cyclist.gif" width="260"><br><sub><b>Cyclist in the Wind</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/lbm_peloton.gif" width="260"><br><sub><b>Drafting (Two Riders)</b></sub></td>
-</tr>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/porous_phi60.gif" width="260"><br><sub><b>Flow Through Porous Rock</b></sub></td>
-</tr>
-</table>
+What the models do **not** do is stated on each scene page and in
+[docs/theory.md](docs/theory.md): the Rayleigh–Taylor scene is a Boussinesq-like
+approximation; the candle flame is a simplified model without chemistry; the blast
+is a pressure-release model, not a detonation; the buildings are held cells, not true
+walls, and their erosion rule is experimental; the hull moves under contact forces
+and damping; the wave tank has a flat bottom; the water-blob impact has no surface
+tension; the Gray–Scott patterns resemble biological ones without establishing a
+mechanism; drag from the wake deficit is an approximation.
 
-### Incompressible Navier–Stokes
+## Install and run
 
-<table>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/ns_smoke.gif" width="260"><br><sub><b>Rising Smoke Plume</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/ns_rt.gif" width="260"><br><sub><b>Rayleigh–Taylor Fingers</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/ns_flame.gif" width="260"><br><sub><b>Candle Flame</b></sub></td>
-</tr>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/ns_rb.gif" width="260"><br><sub><b>Rayleigh–Bénard Convection</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/ns_chimney.gif" width="260"><br><sub><b>Chimney Plume in Wind</b></sub></td>
-</tr>
-</table>
+**Windows — installer.** Download `Funoos-Setup.exe` from the
+[Releases](https://github.com/SalehMohammadrezaei/Funoos/releases) page and check its
+SHA-256 against the value listed there. The app is free, open source and not
+code-signed, so SmartScreen shows an "unknown publisher" warning the first time:
+choose *More info → Run anyway*. Needs the WebView2 runtime (preinstalled on Windows
+10/11; the app prints a hint if it is missing). Building the installer yourself:
+[docs/windows_build.md](docs/windows_build.md).
 
-### Compressible Euler
+**macOS (Apple Silicon) — disk image.** Download `Funoos-macOS-arm64.dmg` and its
+checksum from the Releases page, open it and drag Funoos into Applications. It is
+built on GitHub's macOS runners by `build_mac.sh` and is not notarized: on first
+launch use *right-click → Open → Open*, or `xattr -cr /Applications/Funoos.app`.
+Intel Macs: run from source.
 
-<table>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/euler_blast.gif" width="260"><br><sub><b>Open-Air Blast</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/euler_city.gif" width="260"><br><sub><b>Shockwave Hits a City</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/euler_bubble.gif" width="260"><br><sub><b>Shock Meets a Bubble</b></sub></td>
-</tr>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/euler_twin.gif" width="260"><br><sub><b>Twin-Bubble Mixing</b></sub></td>
-</tr>
-</table>
+**From source (Linux, macOS, Windows).** Python 3.10–3.12 and `g++` with OpenMP.
 
-### Smoothed-Particle Hydrodynamics
-
-<table>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/sph_dam.gif" width="260"><br><sub><b>Dam Break</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/sph_drop.gif" width="260"><br><sub><b>Droplet Crown</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/sph_slosh.gif" width="260"><br><sub><b>Sloshing Tank</b></sub></td>
-</tr>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/sph_pour.gif" width="260"><br><sub><b>Pouring a Glass</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/sph_waves.gif" width="260"><br><sub><b>Ocean Swell</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/sph_ship.gif" width="260"><br><sub><b>Floating Ship</b></sub></td>
-</tr>
-</table>
-
-### Pseudo-spectral
-
-<table>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/spec_kh.gif" width="260"><br><sub><b>Kelvin–Helmholtz Billows</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/spec_decay.gif" width="260"><br><sub><b>Decaying Turbulence</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/mix_bands.gif" width="260"><br><sub><b>Chaotic Mixing of Dye</b></sub></td>
-</tr>
-</table>
-
-### Reaction–Diffusion
-
-<table>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/rd_spots.gif" width="260"><br><sub><b>Spots</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/rd_stripes.gif" width="260"><br><sub><b>Stripes & Coral</b></sub></td>
-<td align="center" width="33%"><img src="results/gallery/rd_maze.gif" width="260"><br><sub><b>Labyrinth</b></sub></td>
-</tr>
-<tr>
-<td align="center" width="33%"><img src="results/gallery/rd_mitosis.gif" width="260"><br><sub><b>Mitosis</b></sub></td>
-</tr>
-</table>
-
----
-
-## Is the physics believable?
-
-Each method is checked against a standard analytical or textbook case — not a formal
-verification-and-validation effort, just enough to trust what you're watching:
-
-| Scene | Method | Benchmark | Result |
-|---|---|---|---|
-| Vortex street | LBM D2Q9 | Strouhal number (Re ≈ 160) | **St ≈ 0.20** ✓ (live in the player) |
-| Sod shock tube | Compressible HLLC | exact Riemann solution | **mean abs error ≈ 0.003** (test enforces < 0.01) ✓ |
-| Kelvin–Helmholtz | Pseudo-spectral | inviscid energy conservation | **drift ≈ 2×10⁻⁹** measured — RK4 time-integration error, not round-off (test enforces < 10⁻⁷) ✓ |
-| Porous flow | Pore-scale LBM | plane-Poiseuille channel (exact) | **superficial k = H³/(12·N_y) to 0.07 %**; k monotonic in porosity ✓ |
-| Rayleigh–Bénard | Projection NS | conduction profile (buoyancy off) | temperature relaxes to the linear profile ✓ |
-| Turing patterns | Gray–Scott | Pearson's regimes | reproduces spots/stripes/maze/mitosis ✓ |
-| Dam break | SPH | dry-bed front vs 2√(gH) | front in the physical (Ritter) range ✓ |
-
-These run in CI: `tests/smoke_test.py` (spectral energy, Sod shock, reaction-diffusion bounds, porous monotonicity) and `tests/test_numerics.py` (analytic Poiseuille permeability, Rayleigh–Bénard conduction, spectral orientation/spacing, resolution-independent end time, font fallback). The numbers in the table are measured values; each test enforces the stated bound.
-
----
-
-## Funoos — the app
-
-A **dark glassmorphic desktop app** (HTML/CSS/JS in a [pywebview](https://pywebview.flowrl.com/) shell, with the Python/C++ solvers as the backend):
-
-- **Home** — the brand, the methods, who built it.
-- **Gallery** — a **card grid** of all 29 scenes; each card opens a detail page with the clip, the **governing equation**, an undergrad-level write-up, the setup (initial & boundary conditions), and validation.
-- **Studio** — a **bento dashboard**: tune every parameter (each scene shows only its relevant controls), **Run once** (with a live progress %), switch visualizations live (vorticity / speed / streamlines / schlieren / …), recolor across palettes, scrub/step/speed the playback, read **live KPI tiles** (e.g. permeability, porosity), and open the **Diagnostic plots** (Strouhal, lift/drag, drafting shelter, convective flux, blast radius, permeability vs Kozeny–Carman — each with an explanation).
-
-### Install & run
-
-**Easiest — Windows installer (no Python, no compiler needed by the user).**
-On a Windows machine with `g++` (MSYS2/w64devkit) and Python, run `build_windows.bat`
-to produce a standalone `dist\Funoos\Funoos.exe`, then compile `installer.iss` in
-[Inno Setup](https://jrsoftware.org/isinfo.php) to get a single **`Funoos-Setup.exe`**.
-Hand that file to anyone — they double-click, install, and launch from the Start menu.
-(Needs the WebView2 runtime, preinstalled on Windows 10/11.)
-
-> **"Windows protected your PC" / unknown-publisher warning.** Funoos is a free,
-> open-source app and the installer is **not code-signed** (a signing certificate
-> is a paid, identity-verified service), so Windows SmartScreen — and occasionally
-> antivirus — will warn the first time you run it. This is expected for unsigned
-> indie software, not a sign of malware. To install anyway: click **More info →
-> Run anyway** on the SmartScreen dialog. If your antivirus quarantines it, allow/
-> restore the file. You can verify you have the genuine file by checking its SHA-256
-> against the value listed on the [Releases page](https://github.com/SalehMohammadrezaei/Funoos/releases),
-> or skip the installer entirely and run **from source** (below).
-
-**macOS — one-file installer (no Python, no compiler needed by the user).**
-Download **`Funoos-macOS-arm64.dmg`** (Apple Silicon: M1/M2/M3/M4 Macs) from the
-[Releases](https://github.com/SalehMohammadrezaei/Funoos/releases) page, open it,
-and drag **Funoos** into **Applications**. (Intel Macs: run from source, below.) It is built automatically on GitHub's macOS
-runners by `build_mac.sh` (see `.github/workflows/release-mac.yml`).
-
-> **"Funoos can't be opened because it is from an unidentified developer."** Same
-> story as the Windows build: the app is free and open-source but not notarized
-> with Apple (a paid, identity-verified developer account), so macOS Gatekeeper
-> warns on first launch. To open it: **right-click the app → Open → Open** (one
-> time only), or in Terminal run `xattr -cr /Applications/Funoos.app`.
-
-**From source — one step (Linux).** Needs Python 3 and `g++` with OpenMP:
 ```bash
-git clone https://github.com/SalehMohammadrezaei/Funoos.git
-cd Funoos
-./install.sh      # builds the C++ solvers + sets up a local .venv with all deps
-./run.sh          # launch the app
-```
-
-**From source (any OS, manual).**
-```bash
+git clone https://github.com/SalehMohammadrezaei/Funoos.git && cd Funoos
 make -C solvers/lbm && make -C solvers/incompressible && make -C solvers/compressible && make -C solvers/sph
-pip install -r requirements.txt
-python funoos_app.py        # or run.bat on Windows
+python -m pip install -r requirements.txt     # Linux also needs a GUI backend: python3-gi + gir1.2-webkit2-4.1, or pip install pywebview[qt]
+python funoos_app.py                          # ./install.sh + ./run.sh on Linux does the same in a .venv
+python funoos_app.py --selftest               # checks solvers, font and encoder without opening a window
 ```
 
-The gallery clips ship in `results/gallery/`; regenerate any time with `python render_gallery.py High 1.8`.
+The gallery clips ship in `results/gallery/`; regenerate with
+`python render_gallery.py High 1.8` (exits non-zero if a scene fails).
 
-### Runs, Cancel and memory
-Every **Run** is a job with an immutable copy of the parameters and an explicit
-state (preparing → running → rendering → completed / cancelled / failed). **Cancel**
-really stops the solver (the C++ process is killed; Python solvers stop at their
-next progress tick) and the previous result stays on screen. View switches keep
-the playback position, speed and palette. Completed results are kept in a bounded
-store — at most `FUNOOS_MAX_RUNS` (default 3) runs and `FUNOOS_MEMORY_MB`
-(default 1024) of field data; the least recently used unpinned run is released
-first (`pin_run` keeps one). Solver scratch folders are removed on completion,
-cancel, failure and exit, and any left by a crash are swept at the next launch.
+### Runs, memory and settings
 
-### Command-line demos
-Each grid/particle exhibit also has a standalone script that writes a GIF + MP4:
+Every Run is a job with an immutable copy of its parameters and an explicit state
+(preparing → running → rendering → completed / cancelled / failed). Cancel really
+stops the solver. Results are kept in a bounded store: at most `FUNOOS_MAX_RUNS`
+(default 3) runs and `FUNOOS_MEMORY_MB` (default 1024) of field data in memory; larger
+results are memory-mapped from disk within `FUNOOS_DISK_MB`; the least recently used
+unpinned run is released first. Solver threads follow `OMP_NUM_THREADS` (default up to
+8). Scratch folders are removed on completion, cancel, failure and exit, and swept
+after a crash.
+
+Performance measurements (before/after, same machine) are in
+[docs/performance.md](docs/performance.md).
+
+## Command-line demos
+
 ```bash
-python demos/flow_around_name.py --text "YourName"     # the signature scene
-python demos/vortex_street.py   # ... and smoke_plume, rayleigh_taylor, explosion,
-python demos/shock_tube.py      #     shock_bubble, dam_break, turbulence (--quick for fast)
+python demos/flow_around_name.py --text "YourName"
+python demos/vortex_street.py    # ... smoke_plume, rayleigh_taylor, explosion, shock_bubble, dam_break, turbulence
 ```
 
-## Stack
-**C++ + OpenMP** for the four grid/particle solver cores (fast enough on a CPU to run the high resolution that makes the output beautiful) · **Python** (NumPy/SciPy/Pillow/Matplotlib + ffmpeg via imageio-ffmpeg) for the spectral and reaction–diffusion solvers, the engine, geometry, text→mask, validation, post-processing diagnostics, and a shared cinematic rendering pipeline · **HTML/CSS/JS** UI in pywebview.
+## Stack and layout
 
-## Repository layout
+Python 3.10–3.12 · NumPy · SciPy · Matplotlib · Pillow · pywebview · ffmpeg (via
+imageio-ffmpeg) · C++17/OpenMP solvers.
+
 ```
-funoos_app.py     pywebview app (backend bridge to the solvers)
-index.html, web/  the dark glassmorphic UI (CSS + JS, no external libraries)
-solvers/          C++ solver cores: lbm/ incompressible/ compressible/ sph/
-flowzoo/          engine · catalog · spectral · reaction · geometry · postproc · render · validate
-demos/            one runnable script per grid/particle exhibit
-results/gallery/  the gallery clips (GIF + full-res MP4), one per scene
-docs/             method notes, equation images, Windows build guide
-tests/            smoke + validation suite
-studio.py         legacy CustomTkinter desktop app (superseded by funoos_app.py)
+funoos_app.py        desktop app (pywebview shell, job lifecycle, result store, experiments API)
+index.html, web/     the UI
+flowzoo/             engine (exhibits, runners, Result), schema (parameters), catalog (scene registry),
+                     content (physics text), postproc (measurements + plots), analysis (probes/compare),
+                     render (colour mapping, encoders), spectral, reaction, geometry, validate
+solvers/             lbm2d, ins2d, euler2d, sph2d (C++/OpenMP)
+tests/               smoke, numerics, cases, schema, jobs, media suites (all run in CI)
+docs/                theory, performance, result schema, testing, Windows build
+tools/               pipeline profiler
+studio.py            legacy CustomTkinter UI — unsupported
 ```
 
-## License
-MIT — see [LICENSE](LICENSE). Built by **Saleh Mohammadrezaei** · salehmrezaee@gmail.com
+## Citation and licence
+
+MIT. Created by Saleh Mohammadrezaei (salehmrezaee@gmail.com). If Funoos is useful in
+teaching or research, please cite the repository and the release version you used.
