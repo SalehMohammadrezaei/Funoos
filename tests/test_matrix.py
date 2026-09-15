@@ -48,8 +48,10 @@ def test_lbm_uniform_flow_and_mass():
                   "--tau", "0.8", "--steps", "300", "--save_every", "300", "--out", d])
         assert r.returncode == 0
         m = fio.read_meta(d)
-        assert abs(m.get("mass_final", 1.0) / max(m.get("mass_initial", 1.0), 1e-30) - 1.0) < 1e-9 if "mass_final" in m else True
-    print("    lbm: uniform inflow kept; periodic run completed")
+        assert "mass_initial" in m and "mass_final" in m, "mass metadata is required evidence (missing = fail)"
+        rel = abs(m["mass_final"] / m["mass_initial"] - 1.0)
+        assert rel < 1e-9, f"periodic body-force run must conserve mass exactly (rel change {rel:.1e})"
+    print(f"    lbm: uniform inflow kept; periodic mass conserved (rel change {rel:.1e})")
 
 
 def test_incompressible_divergence_free():
@@ -65,16 +67,22 @@ def test_euler_positivity_and_held_walls():
     r = engine.solve_exhibit("Detonation", {"resolution": "Low (fast)", "duration": 0.3, "pressure": 300, "scene": "Shock hits a city"})
     for rho in r.raw:
         assert np.isfinite(rho).all() and rho.min() > 0, "density positive"
+    assert r.hints.get("pmin") is not None and r.hints["pmin"] > 0, "raw pressure (before the 1e-6 floor) stays positive over the saved frames"
+    assert r.hints.get("rhomin") is not None and r.hints["rhomin"] > 0
     solid = r.hints["solid"]; ux, uy = r.hints["vel"][-1]
-    assert np.abs(ux[solid]).max() < 1e-9 and np.abs(uy[solid]).max() < 1e-9, "held cells have zero velocity"
-    print(f"    euler: min ρ = {min(float(x.min()) for x in r.raw):.3f} > 0; towers at rest")
+    # held cells: state pinned (zero velocity). This is NOT an impermeable-wall claim; the flux through the
+    # obstacle faces is not enforced, and the scene says so.
+    assert np.abs(ux[solid]).max() < 1e-9 and np.abs(uy[solid]).max() < 1e-9, "held cells keep zero velocity"
+    print(f"    euler: min ρ = {r.hints['rhomin']:.3f}, min p = {r.hints['pmin']:.4f} > 0 (raw); held cells pinned")
 
 
 def test_sph_particle_accounting():
     r = engine.solve_exhibit("The Big Splash", {"scene": "Dam break", "duration": 0.3, "particles": 1200})
     counts = [len(d) for d in r.raw]
     assert len(set(counts)) == 1, f"fluid particle count changed: {set(counts)}"
-    print(f"    sph: {counts[0]} particles in every frame")
+    dev = r.hints.get("rho_rms_dev")
+    assert dev is not None and dev < 0.05, f"weakly compressible: rms density deviation {dev} should be < 5 %"
+    print(f"    sph: {counts[0]} particles in every frame; rms density deviation {dev:.3%}")
 
 
 def test_reaction_uniform_state_and_bounds():

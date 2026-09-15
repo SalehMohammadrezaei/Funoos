@@ -52,11 +52,10 @@ for s in catalog.SCENES:
         cmap = s.get("cmap") or engine.DEFCMAP[res.kind]
         frames = res.render(res.views[0], cmap)
         render.save_gif(_shrink(frames), OUT / f"{key}.gif", fps=26)   # light clip for the gallery
-        try:
-            render.save_mp4(frames, OUT / f"{key}.mp4", fps=26)        # full-resolution download
-
-        except Exception as e:
-            print(f"   (mp4 skipped: {e})", flush=True)
+        render.save_mp4(frames, OUT / f"{key}.mp4", fps=26)            # the app needs the MP4: a failure is a failure
+        import subprocess as _sp
+        _sp.run([render._ffmpeg(), "-v", "error", "-y", "-ss", "0.5", "-i", str(OUT / f"{key}.mp4"), "-frames:v", "1", "-q:v", "4",
+                 "-vf", "scale=480:-2", str(OUT / f"{key}.jpg")], check=True)   # poster for the gallery card
         print(f"   ✓ {len(frames)} frames in {time.time()-t0:.0f}s -> gallery/{key}.gif", flush=True)
     except Exception as e:
         failed.append(key); print(f"   ✗ FAILED: {e}", flush=True)

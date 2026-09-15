@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Funoos</title>
+<title>Funoos — fluid simulation laboratory</title>
 <link rel="stylesheet" href="web/app.css">
 </head>
 <body>
@@ -19,7 +19,19 @@
     <button class="railbtn" data-view="gallery" onclick="show('gallery')" aria-label="Gallery">▦<span class="lbl">Gallery</span></button>
     <button class="railbtn" data-view="studio" onclick="show('studio')" aria-label="Studio">⚙<span class="lbl">Studio</span></button>
     <div class="railspace"></div>
+    <button class="railbtn" onclick="openSettings()" aria-label="Settings">⚒<span class="lbl">Settings</span></button>
+    <button class="railbtn" data-view="about" onclick="show('about')" aria-label="About">ⓘ<span class="lbl">About</span></button>
   </nav>
+  <div class="glass settings" id="settings" style="display:none" role="dialog" aria-label="Settings">
+    <div class="kicker">settings</div>
+    <label>runs kept in memory <input id="st-maxruns" type="number" min="1" max="20"></label>
+    <label>memory budget (MB) <input id="st-mem" type="number" min="128" step="128"></label>
+    <label>solver threads <input id="st-threads" type="number" min="1"> <span id="st-threadnote" class="muted small"></span></label>
+    <label><input id="st-preview" type="checkbox"> instant still previews when changing the palette</label>
+    <label><input id="st-autoplay" type="checkbox"> autoplay preview clips in the gallery</label>
+    <div id="st-usage" class="muted small"></div>
+    <div class="ptools"><button class="linkbtn" type="button" onclick="applySettings()">apply</button><button class="linkbtn" type="button" onclick="openSettings()">close</button></div>
+  </div>
 
   <div id="content">
 
@@ -31,7 +43,8 @@
         <div class="subtitle reveal">A desktop laboratory for two-dimensional fluid motion and pattern formation.<br>Choose an experiment, adjust its setup, and inspect the resulting fields and measurements.</div>
         <div class="statrow reveal">
           <div class="stat"><div class="n" id="n-methods" data-count="6">0</div><div class="l">methods</div></div>
-          <div class="stat"><div class="n" id="n-scenes" data-count="48">0</div><div class="l">experiments</div></div>
+          <div class="stat"><div class="n" id="n-scenes" data-count="27">0</div><div class="l">experiments</div></div>
+          <div class="stat"><div class="n" id="n-presets" data-count="48">0</div><div class="l">presets</div></div>
           <div class="stat"><div class="n" id="n-solvers" data-count="5">0</div><div class="l">solvers</div></div>
         </div>
         <div class="introchips reveal">
@@ -44,7 +57,18 @@
           <div class="kicker">created by</div>
           <div class="name">Saleh Mohammadrezaei</div>
           <div class="mail">salehmrezaee@gmail.com</div>
+          <div class="ptools" style="justify-content:center;margin-top:8px"><button class="linkbtn" type="button" onclick="openUrl('https://github.com/SalehMohammadrezaei/Funoos')">GitHub</button><button class="linkbtn" type="button" onclick="show('about')">About &amp; licence</button></div>
         </div>
+      </div>
+    </section>
+
+    <!-- ───────── about ───────── -->
+    <section class="view" id="about">
+      <div class="body scroll" style="padding:24px 40px;max-width:820px">
+        <div class="kicker">about</div>
+        <h1>Funoos — fluid simulation laboratory</h1>
+        <p class="read" style="margin:10px 0 18px">A desktop application for exploring two-dimensional fluid motion and pattern formation, created by Saleh Mohammadrezaei. Free and open source under the MIT licence.</p>
+        <div id="about-body"></div>
       </div>
     </section>
 
@@ -71,7 +95,7 @@
     <!-- ───────── detail ───────── -->
     <section class="view" id="detail">
       <div class="topbar">
-        <span class="back" onclick="show('gallery')">‹ Gallery</span>
+        <button class="back" type="button" onclick="show('gallery')">‹ Gallery</button>
         <span class="brand"><b>FUN</b>OOS</span>
       </div>
       <div class="body">
@@ -79,6 +103,8 @@
           <div class="kicker" id="d-method"></div>
           <h1 id="d-title" style="margin:6px 0 6px"></h1>
           <div class="dq"><span id="d-question" class="read"></span> <span id="d-status" class="statusbadge"></span></div>
+          <div class="presetrow"><label for="d-preset" class="kicker">Preset</label> <select id="d-preset" class="linkbtn" aria-label="Preset of this experiment"></select> <span id="d-presetname" class="muted small"></span></div>
+          <div id="d-compare" class="gcmpbox"></div>
           <video id="d-video" autoplay loop muted playsinline aria-label="preview clip"></video>
           <button class="btn btn-blue" style="margin-top:16px;padding:15px 26px;width:100%" id="d-open">Open in Studio →</button>
         </div>
@@ -92,8 +118,10 @@
         <div class="glass tile t-params">
           <div class="kicker" id="s-name">parameters</div>
           <div class="ptools">
-            <label class="sr" for="s-scene">Scene</label>
-            <select class="linkbtn" id="s-scene" onchange="studioPick(this)"></select>
+            <label class="sr" for="s-scene">Experiment</label>
+            <select class="linkbtn" id="s-scene" onchange="studioPickExperiment(this)" aria-label="Experiment"></select>
+            <label class="sr" for="s-preset">Preset</label>
+            <select class="linkbtn" id="s-preset" aria-label="Preset" style="display:none"></select>
             <button class="linkbtn" type="button" onclick="toggleHelp()" aria-label="Show the scene explanation and control help">? explain</button>
           </div>
           <div class="ptools">

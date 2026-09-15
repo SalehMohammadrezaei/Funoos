@@ -135,6 +135,17 @@ class RunStore:
                 r["last_used"] = time.time()
             return r
 
+    def refresh(self, run_id):
+        """Re-count a run's bytes after its derived caches grew; evict if the budget is exceeded
+        (the run itself is kept)."""
+        with self._lock:
+            r = self._runs.get(run_id)
+            if not r:
+                return []
+            res = r["result"]
+            r["bytes"] = max(0, result_bytes(res) - r.get("disk", 0)) + (res.cache_bytes() if hasattr(res, "cache_bytes") else 0)
+            return self._evict(keep=run_id)
+
     def result(self, run_id):
         r = self.get(run_id)
         return r["result"] if r else None
@@ -324,13 +335,18 @@ class _Superseded(Exception):
 
 
 MAX_VIEW_CACHE = int(os.environ.get("FUNOOS_VIEW_CACHE", "12"))   # rendered clips kept (all runs)
+MAX_VIEW_CACHE_MB = float(os.environ.get("FUNOOS_VIEW_CACHE_MB", "96"))   # and at most this many MB of encoded clips
 
 
 class ViewCache:
-    """LRU cache of encoded clips keyed by (run_id, view, cmap, fps, vmin, vmax)."""
+    """LRU cache of encoded clips keyed by (run_id, view, cmap, fps, vmin, vmax), bounded by
+    count AND total bytes."""
 
-    def __init__(self, max_items=MAX_VIEW_CACHE):
-        self.max_items = max(1, int(max_items)); self._d = {}; self._lock = threading.Lock()
+    def __init__(self, max_items=MAX_VIEW_CACHE, max_bytes=int(MAX_VIEW_CACHE_MB * 2 ** 20)):
+        self.max_items = max(1, int(max_items)); self.max_bytes = int(max_bytes); self._d = {}; self._lock = threading.Lock()
+
+    def total_bytes(self):
+        return sum(len(v) for v in self._d.values())
 
     def get(self, key):
         with self._lock:
@@ -342,7 +358,7 @@ class ViewCache:
     def put(self, key, value):
         with self._lock:
             self._d[key] = value
-            while len(self._d) > self.max_items:
+            while len(self._d) > 1 and (len(self._d) > self.max_items or self.total_bytes() > self.max_bytes):
                 del self._d[next(iter(self._d))]
 
     def drop_run(self, run_id):
@@ -438,21 +454,23 @@ class Api:
 
     # ---------- static content ----------
     def catalog(self):
-        """Scenes grouped by phenomenon (the gallery's organisation), with method/status/question."""
-        groups = []
-        for phen, scenes in catalog.by_phenomenon().items():
-            items = []
-            for s in scenes:
-                key = s["key"]
-                mp4 = ROOT / "results" / "gallery" / (key + ".mp4")
-                items.append({"key": key, "name": s["name"], "blurb": s["blurb"], "method": s["method"],
-                              "exhibit": s["exhibit"], "preset": s["preset"], "question": s["question"],
-                              "status": s["status"], "status_label": catalog.STATUS_LABEL[s["status"]],
-                              "estimate_s": engine.estimate(s["exhibit"], s["preset"]).get("seconds"),
-                              "clip": ("results/gallery/" + key + ".mp4") if mp4.exists() else None})
-            groups.append({"phenomenon": phen, "scenes": items})
+        """Experiments (gallery cards) grouped by phenomenon, each with its named presets."""
+        exps = catalog.experiments()
+        by_phen = {}
+        for e in exps:
+            for pz in e["presets"]:
+                sc = catalog.scene(pz["key"]); mp4 = ROOT / "results" / "gallery" / (pz["key"] + ".mp4")
+                pz["clip"] = ("results/gallery/" + pz["key"] + ".mp4") if mp4.exists() else None
+                pz["poster"] = ("results/gallery/" + pz["key"] + ".jpg") if (ROOT / "results" / "gallery" / (pz["key"] + ".jpg")).exists() else None
+                pz["question"] = sc["question"]; pz["blurb"] = sc["blurb"]
+                pz["estimate_s"] = engine.estimate(sc["exhibit"], sc["preset"]).get("seconds")
+            rep = next((pz for pz in e["presets"] if pz["key"] == e["representative"]), e["presets"][0])
+            e["clip"] = rep["clip"]; e["poster"] = rep["poster"]; e["status"] = rep["status"]; e["status_label"] = rep["status_label"]
+            e["estimate_s"] = min([pz["estimate_s"] for pz in e["presets"] if pz["estimate_s"] is not None] or [None])
+            by_phen.setdefault(e["phenomenon"], []).append(e)
+        groups = [{"phenomenon": p, "experiments": by_phen[p]} for p in catalog.PHENOMENA if p in by_phen]
         return {"ok": True, "groups": groups, "methods": sorted({s["method"] for s in catalog.SCENES}),
-                "counts": catalog.counts()}
+                "counts": catalog.counts(), "scene_to_experiment": {s["key"]: catalog.experiment_of(s["key"])["id"] for s in catalog.SCENES}}
 
     def scene_detail(self, key, req=None):
         s = catalog.scene(key)
@@ -469,7 +487,17 @@ class Api:
                 "validation": s.get("checks", m.get("validation", "")), "eq": _eq_b64(ex),
                 "clip": ("results/gallery/" + key + ".mp4") if (ROOT / "results" / "gallery" / (key + ".mp4")).exists() else None,
                 "preset": s["preset"], "layers": catalog.scene_layers(key)["layers"],
+                "experiment": self._experiment_ctx(key),
                 "cmap": s.get("cmap"), "params": _param_spec(ex), "method_label": m.get("method", "")}
+
+    @staticmethod
+    def _experiment_ctx(key):
+        e = catalog.experiment_of(key)
+        if not e:
+            return None
+        return {"id": e["id"], "name": e["name"], "question": e["question"], "preset_label": catalog.preset_label(key),
+                "presets": [{"key": k, "label": lab, "exhibit": catalog.scene(k)["exhibit"]} for k, lab in e["presets"]],
+                "compare": [{"a": x, "b": y, "text": t} for x, y, t in e.get("compare", [])]}
 
     def validate(self, exhibit, params, advanced=False):
         """Validate a setup without running it (errors / warnings / applied adjustments)."""
@@ -653,7 +681,10 @@ class Api:
                     return {"ok": False, "error": "superseded", "superseded": True, "run_id": run_id, "req": req}
                 vid = _b64_mp4(self._frames(res, view, cm, fps, run_id=run_id, req=req, vmin=vmin, vmax=vmax), fps)
             self.views.put(key, vid)
-            return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm, "video": vid, "cached": False}
+            for rid in self.store.refresh(run_id):
+                self.views.drop_run(rid)
+            return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm, "video": vid, "cached": False,
+                    "field_rect": analysis.field_rect(res, view)}
         except _Superseded:
             return {"ok": False, "error": "superseded", "superseded": True, "run_id": run_id, "req": req}
         except Exception as e:                      # noqa: BLE001
@@ -672,6 +703,7 @@ class Api:
             vmax = None if vmax in (None, "") else float(vmax)
             i = _frame_sel(res, frac)
             img = res.frame(i, view, cm, vmin, vmax)
+            self.store.refresh(run_id)
             return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm, "index": i,
                     "time": float(res.times[i]), "img": _b64_png(img)}
         except Exception as e:                      # noqa: BLE001
@@ -859,6 +891,8 @@ class Api:
                         h.append(f"<h2>{esc(L['title'])}</h2><p>{esc(body)}</p>")
             if rec.get("solver_versions"):
                 h.append("<h2>Provenance</h2><p class='small'>" + esc(json.dumps(rec["solver_versions"])) + "</p>")
+            h.append(f"<hr><p class='small'>Generated with Funoos {esc(APP_VERSION)} (https://github.com/SalehMohammadrezaei/Funoos), "
+                     "created by Saleh Mohammadrezaei, MIT licence. The results in this report belong to the user who produced them.</p>")
             h.append("</body></html>")
             Path(path).write_text("\n".join(h), encoding="utf-8")
             return {"ok": True, "path": path}
@@ -1065,11 +1099,11 @@ class Api:
         if res is None:
             return {"ok": False, "error": "run expired", "req": req}
         try:
-            pf = analysis.panel_fraction(res, view)
-            xf = float(xfrac) / max(1e-9, 1.0 - pf)
-            if xf > 1.0:
+            rc = analysis.field_rect(res, view)
+            xf = (float(xfrac) - rc["x0"]) / max(1e-9, rc["w"]); yf = (float(yfrac) - rc["y0"]) / max(1e-9, rc["h"])
+            if not (0.0 <= xf <= 1.0 and 0.0 <= yf <= 1.0):
                 return {"ok": True, "req": req, "outside": True}
-            out = analysis.value_at(res, view, xf, float(yfrac), {"index": _frame_sel(res, when)})
+            out = analysis.value_at(res, view, xf, yf, {"index": _frame_sel(res, when)})
             return {"ok": True, "req": req, "outside": False, **out}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e), "req": req}
@@ -1079,9 +1113,9 @@ class Api:
         if res is None:
             return {"ok": False, "error": "run expired", "req": req}
         try:
-            pf = analysis.panel_fraction(res, view)
-            xf = min(1.0, float(xfrac) / max(1e-9, 1.0 - pf))
-            ser = analysis.probe_series(res, view, xf, float(yfrac))
+            rc = analysis.field_rect(res, view)
+            xf = min(1.0, max(0.0, (float(xfrac) - rc["x0"]) / max(1e-9, rc["w"]))); yf = min(1.0, max(0.0, (float(yfrac) - rc["y0"]) / max(1e-9, rc["h"])))
+            ser = analysis.probe_series(res, view, xf, yf)
             fig, ax, plt = postproc._new_ax(f"time ({ser['time_unit']})", ser["label"], f"Probe at ({ser['ix']}, {ser['iy']})")
             ax.plot(ser["times"], [np.nan if v is None else v for v in ser["values"]], color=postproc._CYAN, lw=2)
             return {"ok": True, "req": req, **ser, "plot": _b64_png(postproc._rgb(fig, plt))}
@@ -1159,6 +1193,47 @@ class Api:
         for rid in evicted:
             self.views.drop_run(rid)
         return {"ok": True, "evicted": evicted, **self.runs()}
+
+    def about(self):
+        import platform
+        build = None
+        try:
+            from flowzoo import _build
+            build = getattr(_build, "REVISION", None)
+        except Exception:                           # noqa: BLE001
+            try:
+                import subprocess
+                build = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), capture_output=True, text=True, timeout=3).stdout.strip() or None
+            except Exception:                       # noqa: BLE001
+                build = None
+        cit = (f"Mohammadrezaei, S. ({time.strftime('%Y')}). Funoos — fluid simulation laboratory (version {APP_VERSION}) [Computer software]. "
+               "https://github.com/SalehMohammadrezaei/Funoos")
+        return {"ok": True, "author": "Saleh Mohammadrezaei", "email": "salehmrezaee@gmail.com", "version": APP_VERSION, "build": build,
+                "license": "MIT (see LICENSE and THIRD_PARTY_NOTICES.md)", "python": platform.python_version(),
+                "links": [["GitHub repository", "https://github.com/SalehMohammadrezaei/Funoos"],
+                          ["Releases", "https://github.com/SalehMohammadrezaei/Funoos/releases"]],
+                "citation": cit,
+                "acknowledgements": "Built with NumPy, SciPy, Matplotlib, Pillow, pywebview and ffmpeg (via imageio-ffmpeg); "
+                                    "DejaVu fonts. Solver families follow published methods cited on each scene page."}
+
+    def open_url(self, url):
+        """Open an external link in the system browser (never inside the app window)."""
+        import webbrowser
+        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+            return {"ok": False, "error": "only http(s) links can be opened"}
+        webbrowser.open(url)
+        return {"ok": True}
+
+    def settings(self):
+        return {"ok": True, "threads": int(engine._ENV.get("OMP_NUM_THREADS", "1")), "cpus": os.cpu_count() or 1,
+                "max_runs": self.store.max_runs, "memory_mb": self.store.max_bytes / 2 ** 20, "disk_mb": self.store.disk_bytes / 2 ** 20,
+                "view_cache_mb": self.views.max_bytes / 2 ** 20}
+
+    def set_threads(self, n):
+        """OpenMP threads for the next solver runs (0 = automatic default)."""
+        n = int(n or 0); cpus = os.cpu_count() or 1
+        engine._ENV["OMP_NUM_THREADS"] = str(min(cpus, n) if n > 0 else engine._default_threads())
+        return {"ok": True, "threads": int(engine._ENV["OMP_NUM_THREADS"])}
 
     # ---------- lifecycle ----------
     def shutdown(self):
@@ -1246,7 +1321,7 @@ def main():
         print("WebView2 runtime not found: install the Evergreen runtime from Microsoft, then start Funoos again.")
     import atexit
     api = Api()
-    win = webview.create_window("Funoos — where imagination becomes vision",
+    win = webview.create_window("Funoos — fluid simulation laboratory",
                                 str(ROOT / "index.html"), js_api=api,
                                 width=1440, height=900, min_size=(1120, 720),
                                 background_color="#0A1322")

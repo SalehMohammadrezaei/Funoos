@@ -376,7 +376,7 @@ def figure_rgb(fig):
 
 
 def streamlines_rgb(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID,
-                    density=1.1, bg=INK, dpi=100, vmax=None, upscale=2, engine="fast"):
+                    density=1.1, bg=INK, dpi=100, vmax=None, upscale=2, engine="fast", norm=None):
     """Flow streamlines coloured by speed, as an RGB frame.
 
     engine="fast" (default): a vectorised numpy integrator + rasteriser (~50× faster
@@ -385,13 +385,13 @@ def streamlines_rgb(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID,
     """
     if engine == "fast":
         return streamlines_fast(ux, uy, cmap=cmap, mask=mask, mask_color=mask_color, density=density,
-                                bg=bg, vmax=vmax, upscale=upscale)
+                                bg=bg, vmax=vmax, upscale=upscale, norm=norm)
     return streamlines_mpl(ux, uy, cmap=cmap, mask=mask, mask_color=mask_color, density=density,
                            bg=bg, dpi=dpi, vmax=vmax)
 
 
 def streamlines_fast(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID, density=1.1,
-                     bg=INK, vmax=None, upscale=2, seed_spacing=None, max_len=None):
+                     bg=INK, vmax=None, upscale=2, seed_spacing=None, max_len=None, norm=None):
     """Vectorised streamline rendering (numpy only, no figure objects).
 
     Seeds sit on a regular grid (spacing ≈ 8/density cells). Each is integrated
@@ -409,8 +409,11 @@ def streamlines_fast(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID, de
     if mask is not None:
         m = np.asarray(mask).astype(bool); U = U.copy(); V = V.copy(); U[m] = 0; V[m] = 0
     spd = np.hypot(U, V)
-    if vmax is None:
-        vmax = float(np.percentile(spd, 99.5)) + 1e-12
+    if norm is None:
+        if vmax is None:
+            vmax = float(np.percentile(spd, 99.5)) + 1e-12
+        norm = Norm(0.0, vmax)
+    vmax = norm.vmax
     cmap = matplotlib.colormaps[cmap] if isinstance(cmap, str) else cmap
     lut = (np.asarray(cmap(np.linspace(0, 1, 256)))[:, :3] * 255).astype(np.uint8)
     sp = seed_spacing or max(3.0, 8.0 / max(density, 0.05))
@@ -479,8 +482,8 @@ def streamlines_fast(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID, de
                 xs_all.append(px[alive]); ys_all.append(py[alive]); cs_all.append(s2[alive])
     img = np.zeros((H, W), np.float32)              # brightness = normalised speed (max-blend)
     if xs_all:
-        X = np.concatenate(xs_all); Y = np.concatenate(ys_all); C = np.concatenate(cs_all) / vmax
-        C = np.clip(C, 0, 1).astype(np.float32)
+        X = np.concatenate(xs_all); Y = np.concatenate(ys_all)
+        C = np.asarray(norm(np.concatenate(cs_all)), np.float32)      # the SAME mapping as the legend (vmin, vmax, gamma)
         ix = np.clip((X * upscale).round().astype(int), 0, W - 1)
         iy = np.clip((Y * upscale).round().astype(int), 0, H - 1)
         for dx_, dy_ in ((0, 0), (1, 0), (0, 1), (1, 1)):

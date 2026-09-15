@@ -197,6 +197,33 @@ def _durv(p):
     return float(p.get("duration", 1.0))
 
 
+class _LazyFields:
+    """A per-frame derived field computed on first access (a one-frame preview does not
+    derive the whole animation). Indexable and iterable like a list."""
+
+    def __init__(self, n, fn):
+        self._n, self._fn, self._d = n, fn, {}
+
+    def __len__(self):
+        return self._n
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return [self[j] for j in range(*i.indices(self._n))]
+        i = i % self._n
+        v = self._d.get(i)
+        if v is None:
+            v = self._d[i] = self._fn(i)
+        return v
+
+    def __iter__(self):
+        for i in range(self._n):
+            yield self[i]
+
+    def nbytes(self):
+        return sum(getattr(v, "nbytes", 0) for v in self._d.values())
+
+
 # ---------- Result: holds raw fields, renders any view on demand ----------
 class Result:
     """Solved fields + everything needed to render any view of them.
@@ -243,21 +270,32 @@ class Result:
             d = self._cache[view] = self._derive(view)
         return d
 
+    def cache_bytes(self):
+        """Bytes held by the derived-field caches (counted by the run store)."""
+        n = 0
+        for d in self._cache.values():
+            f = d.get("fields")
+            if isinstance(f, _LazyFields):
+                n += f.nbytes()
+            elif isinstance(f, list):
+                n += sum(getattr(x, "nbytes", 0) for x in f if not isinstance(x, np.memmap))
+        return n
+
     def _vel(self):
         return self.raw if self.kind in ("lbm", "spectral", "porous") else self.hints.get("vel")
 
     def _derive(self, view):
         N = render.Norm
         if self.kind in ("lbm", "spectral", "porous", "ns") and view in ("Speed", "Streamlines", "Vorticity"):
-            vel = self._vel()
+            vel = self._vel(); n = len(vel); dx = self.hints.get("dx", 1.0)
             if view == "Vorticity":
-                f = [render.vorticity(ux, uy, self.hints.get("dx", 1.0)) for ux, uy in vel]
-                v = float(np.percentile(np.abs(f[-1]), 99.0)) + 1e-12
+                f = _LazyFields(n, lambda i: render.vorticity(vel[i][0], vel[i][1], dx))
+                v = float(np.percentile(np.abs(f[n - 1]), 99.0)) + 1e-12       # colour limits from the final frame only
                 return {"fields": f, "norm": N(-v, v), "label": "vorticity ω",
                         "mask_color": render.SOLID, "upscale": 1}
-            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
+            sp = _LazyFields(n, lambda i: np.sqrt(vel[i][0] * vel[i][0] + vel[i][1] * vel[i][1]))
             pct = 80.0 if self.kind == "porous" else 99.5          # porous flow is slow/sparse → brighten
-            vmax = float(np.percentile(sp[-1], pct)) + 1e-12
+            vmax = float(np.percentile(sp[n - 1], pct)) + 1e-12
             if view == "Streamlines":
                 return {"fields": sp, "vel": vel, "norm": N(0, vmax), "label": "speed |u|"}
             g = 0.45 if self.kind == "porous" else 1.0
@@ -271,22 +309,22 @@ class Result:
         if self.kind == "density":
             h = self.hints; solid = h.get("solid")
             if view == "Speed":
-                sp = [np.hypot(ux, uy) for ux, uy in h["vel"]]
-                ref = sp[-1] if solid is None else sp[-1][~solid]
+                vel = h["vel"]; sp = _LazyFields(len(vel), lambda i: np.hypot(vel[i][0], vel[i][1]))
+                ref = sp[len(vel) - 1] if solid is None else sp[len(vel) - 1][~solid]
                 return {"fields": sp, "norm": N(0, float(np.percentile(ref, 99.0)) + 1e-9),
                         "label": "speed |u|", "upscale": 1}
             if view == "Density":
                 return {"fields": self.raw, "norm": N(float(np.percentile(self.raw[-1], 1)),
                                                       float(np.percentile(self.raw[-1], 99.5)) + 1e-6),
                         "label": "density ρ", "upscale": 1}
-            sch = [render.schlieren(r) for r in self.raw]
-            sref = sch[-1] if solid is None else sch[-1][~solid]
+            raw = self.raw; sch = _LazyFields(len(raw), lambda i: render.schlieren(raw[i]))
+            sref = sch[len(raw) - 1] if solid is None else sch[len(raw) - 1][~solid]
             return {"fields": sch, "norm": N(0.0, float(np.percentile(sref, 99.5)) + 1e-6, gamma=0.7),
                     "label": "|∇ρ|", "upscale": 1}
         if self.kind == "particles":
             vmax = self.hints["vmax"]
             if view == "Speed field":
-                return {"fields": self._sph_fields(), "norm": N(0, vmax), "label": "speed |v|",
+                return {"fields": _LazyFields(self.nframes, self._sph_field), "norm": N(0, vmax), "label": "speed |v|",
                         "upscale": 3}
             # particle shading floors at 0.34 so resting water stays visible; the legend uses the same floor
             return {"fields": None, "norm": N(0, vmax, floor=0.34 if view == "Particles" else 0.0),
@@ -301,8 +339,8 @@ class Result:
             return {"fields": self.raw, "norm": N(0, pmax), "label": "|ψ|²", "upscale": 2}
         raise ValueError(f"no view {view!r} for kind {self.kind!r}")
 
-    def _sph_fields(self):
-        """Bin the particles onto a grid: a smooth speed field, NaN where there is no water."""
+    def _sph_field(self, i):
+        """Bin frame i's particles onto a grid: a smooth speed field, NaN where there is no water."""
         Lx, Ly = self.hints["Lx"], self.hints["Ly"]
         gx = 150; gy = max(40, int(gx * Ly / Lx))
 
@@ -311,17 +349,15 @@ class Result:
             for ax in (0, 1):
                 a = np.apply_along_axis(lambda m: np.convolve(m, w, mode="same"), ax, a)
             return a
-        out = []
-        for d in self.raw:
-            ix = np.clip((d[:, 0] / Lx * gx).astype(int), 0, gx - 1)
-            iy = np.clip((d[:, 1] / Ly * gy).astype(int), 0, gy - 1)
-            cnt = np.zeros((gy, gx)); ssum = np.zeros((gy, gx))
-            np.add.at(cnt, (iy, ix), 1.0); np.add.at(ssum, (iy, ix), d[:, 2])
-            bc = blur(cnt, 2)
-            field = blur(ssum, 2) / (bc + 1e-6)
-            field[bc < 0.05] = np.nan                      # empty (air) cells: no measurement, not zero
-            out.append(field)
-        return out
+        d = self.raw[i]
+        ix = np.clip((d[:, 0] / Lx * gx).astype(int), 0, gx - 1)
+        iy = np.clip((d[:, 1] / Ly * gy).astype(int), 0, gy - 1)
+        cnt = np.zeros((gy, gx)); ssum = np.zeros((gy, gx))
+        np.add.at(cnt, (iy, ix), 1.0); np.add.at(ssum, (iy, ix), d[:, 2])
+        bc = blur(cnt, 2)
+        field = blur(ssum, 2) / (bc + 1e-6)
+        field[bc < 0.05] = np.nan                          # empty (air) cells: no measurement, not zero
+        return field
 
     # ----- stage 2: frames -----
     def render(self, view=None, colormap=None, vmin=None, vmax=None):
@@ -350,7 +386,7 @@ class Result:
         if view == "Streamlines":
             for i in idx:
                 ux, uy = d["vel"][i]
-                yield render.add_colorbar(render.streamlines_rgb(ux, uy, cmap=cm, mask=self.mask, vmax=norm.vmax),
+                yield render.add_colorbar(render.streamlines_rgb(ux, uy, cmap=cm, mask=self.mask, norm=norm),
                                           cm, norm, d["label"])
             return
         if self.kind == "quantum" and view == "Phase":
@@ -368,7 +404,7 @@ class Result:
         for i in idx:
             f = fields[i]
             img = render.field_to_rgb(f, cm, norm, mask=self.mask, mask_color=mc, upscale=up)
-            yield render.add_colorbar(img, cm, norm, d["label"], clip_frac=norm.clipped(f) if i == idx[-1] or only is not None else None)
+            yield render.add_colorbar(img, cm, norm, d["label"], clip_frac=norm.clipped(f) if (i == idx[-1] or only is not None) else None)
 
     def _iter_density(self, view, cm, norm, d, idx):
         h = self.hints; deb = h.get("debris", 0); nx, ny = h.get("nx"), h.get("ny")
@@ -466,18 +502,21 @@ class Result:
                 return frames
             f0 = frames[0]
             if isinstance(f0, tuple):                                   # (ux, uy) pairs
-                comps = list(zip(*frames))
-                mm = []
-                for ci, comp in enumerate(comps):
-                    arr = np.stack(comp); path = directory / f"{name}_{ci}.npy"
-                    m = np.lib.format.open_memmap(path, mode="w+", dtype=arr.dtype, shape=arr.shape)
-                    m[:] = arr; m.flush(); del m; moved += arr.nbytes
+                ncomp = len(f0); mm = []
+                for ci in range(ncomp):
+                    path = directory / f"{name}_{ci}.npy"; a0 = np.asarray(f0[ci])
+                    m = np.lib.format.open_memmap(path, mode="w+", dtype=a0.dtype, shape=(len(frames),) + a0.shape)
+                    for i, fr in enumerate(frames):                     # one frame at a time: no stacked copy
+                        m[i] = fr[ci]; moved += a0.nbytes
+                    m.flush(); del m
                     mm.append(np.load(path, mmap_mode="r"))
-                return [tuple(mm[ci][i] for ci in range(len(mm))) for i in range(len(frames))]
+                return [tuple(mm[ci][i] for ci in range(ncomp)) for i in range(len(frames))]
             if all(getattr(f, "shape", None) == f0.shape for f in frames):
-                arr = np.stack(frames); path = directory / f"{name}.npy"
-                m = np.lib.format.open_memmap(path, mode="w+", dtype=arr.dtype, shape=arr.shape)
-                m[:] = arr; m.flush(); del m; moved += arr.nbytes
+                path = directory / f"{name}.npy"; a0 = np.asarray(f0)
+                m = np.lib.format.open_memmap(path, mode="w+", dtype=a0.dtype, shape=(len(frames),) + a0.shape)
+                for i, fr in enumerate(frames):
+                    m[i] = fr; moved += a0.nbytes
+                m.flush(); del m
                 mm = np.load(path, mmap_mode="r")
                 return [mm[i] for i in range(len(frames))]
             out = []                                                    # ragged (particles)
@@ -1390,8 +1429,9 @@ META = {
                     "ratio of buoyant forcing to viscous and diffusive damping is the Rayleigh number.",
         "validation": "Numerical check: with buoyancy off the explicit diffusion step preserves the linear "
                        "conduction profile (tests/) and the Nusselt number is 1. The Rayleigh number "
-                       "Ra = β·ΔT·H³/(ν κ) is computed from the controls; at this grid it lies far above the "
-                       "rigid-plate onset value 1708, so the onset regime itself is not reachable."},
+                       "Ra = β·ΔT·H³/(ν κ) is computed from the controls; the plates are free-slip and conducting "
+                       "(onset Ra ≈ 657.5 in linear theory; 1708 is the no-slip value), and at this grid Ra lies far "
+                       "above both, so the onset regime itself is not reachable."},
     "Chimney Plume": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "A buoyant plume leaves a stack into a steady crosswind. Near the source buoyancy "
                  "lifts it almost vertically, but the horizontal wind keeps pushing, so the plume "
@@ -1418,7 +1458,7 @@ META = {
                     "strong-stability-preserving Runge–Kutta time step under a CFL condition "
                     "(γ = 1.4). Schlieren imaging shows |∇ρ|, lighting up the shock fronts. In "
                     "the city scene the towers are cells held at a fixed dense state each stage (an "
-                    "approximate reflecting boundary, not a wall-flux condition); an experimental erosion "
+                    "approximate reflecting obstacle: holding the state does not enforce an impermeable wall flux); an experimental erosion "
                     "rule can remove a block when the overpressure on an exposed face exceeds its strength.",
         "validation": "Analytical comparison for the solver: the Sod shock tube against the exact Riemann "
                        "solution (mean density error ≈ 0.003 at 300 cells, CI). The blast scenes themselves "

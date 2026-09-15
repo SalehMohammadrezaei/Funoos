@@ -1,11 +1,16 @@
 /* Funoos — dark glassmorphic design system (v2)
    bento dashboards · persistent rail · purposeful motion · 60-30-10 colour. */
 :root{
+  color-scheme: dark;                              /* native form controls (dropdown popups, scrollbars) render dark */
   --navy-0:#070d18; --navy-1:#0a1322; --navy-2:#0e1d33;
-  --ink:#e8eefc; --read:#c3d0ea; --muted:#8294b4; --dim:#5d6f92;
+  /* semantic text tokens — contrast measured against the composited backgrounds (docs/accessibility.md):
+     ink ≥ 15:1, read ≥ 10:1, muted ≥ 7:1, dim ≥ 6:1 on navy-0 / navy-2 / glass-2 */
+  --ink:#e8eefc; --read:#c3d0ea; --muted:#9fb0cc; --dim:#8fa3c4;
   --line:rgba(255,255,255,.10); --line-2:rgba(255,255,255,.06);
-  --blue:#476dd5; --blue-br:#5b86f0; --blue-lt:#93b2f1; --ocean:#1a4278;
-  --lime:#e1fc66; --on-lime:#0e1b30;             /* 10% accent — primary actions only */
+  --ctrl-bg:#111c31; --ctrl-fg:#e8eefc; --ctrl-border:#66789b; --ctrl-placeholder:#8fa3c4;   /* border ≥ 3:1 vs navy-1 */
+  --sel-bg:#2f57c0; --sel-fg:#ffffff; --err:#ff9a9a; --warn:#f2b866; --ok:#a9e6a0;
+  --blue:#2f57c0; --blue-br:#3f6fe0; --blue-lt:#93b2f1; --ocean:#1a4278;   /* white on blue-br 4.6:1, on blue 6.5:1 */
+  --lime:#e1fc66; --on-lime:#0e1b30;             /* 10% accent — primary actions only (15:1) */
   --glass:rgba(255,255,255,.045); --glass-2:rgba(255,255,255,.07); --glass-hi:rgba(255,255,255,.16);
   --shadow:0 14px 50px rgba(0,0,0,.45);
   --r:18px; --r-sm:12px; --rail:74px;
@@ -330,3 +335,37 @@ input[type=range]{accent-color:var(--blue-br)}
 .match{font-size:11px;margin-top:4px;min-height:14px}.match.ok{color:#a9e6a0}.match.stale{color:#e0a23a}
 .cmpinfo{position:absolute;left:12px;right:12px;bottom:12px;background:rgba(8,16,30,.9);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:11.5px;color:var(--read);z-index:3}
 .sweepcard.expired{opacity:.55}
+
+.presetrow{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px}
+.presetrow .kicker{font-size:10px}
+.gcmpbox{margin:0 0 10px}.gcmpbox .kicker{margin-bottom:4px;font-size:10px}
+.gcmp{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--line-2);font-size:12px}
+#s-preset[data-custom="1"]{border-color:#e0a23a}
+
+/* ── controls: one readable scheme for every input, select, opened dropdown and option ── */
+input,select,textarea,button{color-scheme:dark}
+select,input[type=text],input[type=search],input[type=number],textarea{background:var(--ctrl-bg);color:var(--ctrl-fg);border:1px solid var(--ctrl-border)}
+select option,select optgroup{background:var(--ctrl-bg);color:var(--ctrl-fg)}
+select option:checked,select option:hover{background:var(--sel-bg);color:var(--sel-fg)}
+select optgroup{font-weight:700;color:var(--muted)}
+input::placeholder{color:var(--ctrl-placeholder);opacity:1}
+select:disabled,input:disabled,button:disabled{color:var(--muted);opacity:.7;cursor:default}
+select:focus-visible,input:focus-visible{border-color:var(--lime);outline:2px solid var(--lime);outline-offset:1px}
+.field input,.field select,.viewbar select,.galtools input,.galtools select,.sweep select,.sweep input,.xopts input,#s-export,#s-scene,#s-preset,#s-presets,#d-preset{background:var(--ctrl-bg);color:var(--ctrl-fg);border-color:var(--ctrl-border)}
+.linkbtn{border-color:var(--ctrl-border);color:var(--read)}
+.linkbtn:disabled{color:var(--muted);opacity:.7}
+.field .verr{color:var(--err)} .field.warn .verr{color:var(--warn)}
+.field.invalid input,.field.invalid select{border-color:var(--err)} .field.warn input{border-color:var(--warn)}
+.transport button{border-color:var(--ctrl-border)}
+.seg{border-color:var(--ctrl-border)} .seg button{color:var(--muted)}
+.toast.err{border-color:var(--err)} .toast.ok{border-color:var(--ok)}
+.status-qualitative{color:var(--warn)!important}
+[title]{cursor:help}
+
+.settings{position:fixed;left:86px;bottom:16px;z-index:60;padding:14px 16px;width:320px;font-size:12px}
+.settings label{display:block;margin:8px 0;color:var(--read)} .settings input[type=number]{width:90px;margin-left:6px;padding:4px 6px;font-size:12px;border-radius:8px}
+
+.back{background:transparent;border:1px solid transparent;font-family:var(--font);cursor:pointer}
+.cite{font-size:11.5px;color:var(--read);background:var(--ctrl-bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;white-space:pre-wrap;margin:6px 0 14px}
+[inert]{pointer-events:none}
+@media (max-width:1120px), (max-height:720px){ .kpi .v{font-size:19px} .wordmark{font-size:72px} .dash{gap:10px;padding:10px} }

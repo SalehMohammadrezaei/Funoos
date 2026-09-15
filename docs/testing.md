@@ -5,7 +5,7 @@ C++ solvers; the macOS release workflow runs them again with the freshly built
 binaries and then runs the packaged app's self-test. Each suite is a plain script
 (`python tests/<suite>.py`) that prints measured values next to its verdict.
 
-| suite | area (brief §18) | what it establishes |
+| suite | area | what it establishes |
 |---|---|---|
 | `smoke_test.py` | spectral, Euler, RD, porous, quantum | spectral energy drift < 1e-7 with ν = 0 (measured 2e-9); Sod mean density error < 0.01 (measured 0.003); Gray–Scott bounded (clipping is enforced — see note); permeability rises with porosity; quantum norm |
 | `test_numerics.py` | LBM, thermal, coordinates, time, geometry | plane-Poiseuille permeability (analytical, 0.07 %); RB diffusion with buoyancy off; asymmetric-field orientation/vorticity/derivatives; resolution-independent end time; font fallback; dye orientation |

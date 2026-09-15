@@ -204,8 +204,8 @@ def _derived(exhibit, params):
             add("Prandtl number ν/κ", _fmt_ratio(nu, kap))
             add("Rayleigh number  β·ΔT·H³/(ν κ)", _fmt_ratio(b * H ** 3, nu * kap), "",
                 "β·ΔT = buoyancy coefficient, H = layer height in CELLS, so this value changes with the "
-                "resolution setting (a resolution change is not a convergence study here). Onset ≈ 1708 "
-                "applies to rigid no-slip conducting plates.")
+                "resolution setting (a resolution change is not a convergence study here). Onset ≈ 657.5 for the "
+                "free-slip conducting plates of this solver (1708 is the no-slip value).")
     elif exhibit == "Detonation":
         nx = ny = int(420 * s); ratio = float(p["pressure"]); p_amb = 0.1
         add("grid", f"{nx} × {ny}", "cells"); add("ambient pressure", f"{p_amb}", "code")

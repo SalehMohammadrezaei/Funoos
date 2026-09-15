@@ -227,7 +227,7 @@ SCENES = [
                "solver (a Boussinesq-like approximation). Quantitative large-Atwood growth rates need a "
                "variable-density formulation and are not claimed.",
      "refs": [R["sharp"]]},
-    {"method": NS, "exhibit": "Mushroom Clouds", "key": "ns_rt_single", "name": "Rayleigh–Taylor, Single Mode",
+    {"method": NS, "exhibit": "Mushroom Clouds", "key": "ns_rt_single", "override": {"ic": 'Heavy over light with a single cosine ripple of the chosen wavenumber and small amplitude (2 % of the height); at rest.', "bc": 'Closed no-penetration top and bottom; free-slip side walls.'}, "name": "Rayleigh–Taylor, Single Mode",
      "phenomenon": "Buoyancy & convection", "preset": {"atwood": 0.5, "modes": 2, "perturbation": 1.0}, "status": "numerical",
      "question": "Can the early growth of one interface mode be measured consistently?",
      "blurb": "A single small-amplitude cosine ripple with two wavelengths across the box. One bubble and one "
@@ -261,10 +261,12 @@ SCENES = [
              "Change the viscosity: the Rayleigh number in the derived quantities changes with it."],
      "observe": "The temperature profile flattening in the core and the heat-flux budget with its Nusselt number.",
      "checks": "Numerical check: with buoyancy off the diffusion step preserves the conduction profile (tests/). "
-               "The Rayleigh number is computed from β·ΔT, H, ν and κ; at this grid it is far above the onset "
-               "value 1708 of rigid conducting plates, so the near-onset regime is not reachable here.",
+               "The Rayleigh number is computed from β·ΔT, H, ν and κ. This solver's plates are free-slip "
+               "(no-penetration, no shear) and conducting, for which linear theory gives onset at Ra ≈ 657.5 "
+               "(27π⁴/4); the often-quoted 1708 is for no-slip plates. At this grid Ra is far above both, so the "
+               "onset regime is not reachable here.",
      "refs": [R["chandra"]]},
-    {"method": NS, "exhibit": "Rayleigh-Benard", "key": "ns_rb_conduction", "name": "Heated Layer: Conduction Baseline",
+    {"method": NS, "exhibit": "Rayleigh-Benard", "key": "ns_rb_conduction", "override": {"ic": 'Linear hot-to-cold temperature profile at rest with a small seed ripple.', "bc": 'Fixed plate temperatures below and above; free-slip (no-penetration) plates; insulating side walls; buoyancy switched off.'}, "name": "Heated Layer: Conduction Baseline",
      "phenomenon": "Buoyancy & convection", "preset": {"buoyancy": 0.0, "viscosity": 0.0006}, "cmap": "Ember (fire)",
      "status": "analytical", "question": "What does pure conduction look like?",
      "blurb": "The same layer with the buoyancy switched off. Nothing moves; heat crosses the layer by "
@@ -315,7 +317,7 @@ SCENES = [
      "checks": "Qualitative demonstration.",
      "refs": [R["briggs"]]},
     # ═════════ shocks & compressible flow ═════════
-    {"method": EU, "exhibit": "Shock Tube", "key": "euler_sod", "name": "Sod Shock Tube",
+    {"method": EU, "exhibit": "Shock Tube", "key": "euler_sod", "override": {"ic": 'Left state (ρ, u, p) = (1, 0, 1), right state (0.125, 0, 0.1), membrane at x = 0.5, gas at rest.', "bc": 'Zero-gradient ends (the waves have not reached them at the reference time 0.2).'}, "name": "Sod Shock Tube",
      "phenomenon": "Shocks & compressible flow", "preset": {}, "status": "analytical",
      "question": "Where are the shock, the contact and the rarefaction, and how large is the error?",
      "blurb": "Two gases at different pressures separated by a membrane that bursts at t = 0. A shock runs "
@@ -339,18 +341,19 @@ SCENES = [
      "checks": "Numerical check: the front radius decelerates toward the Sedov–Taylor similarity exponent ½ of a "
                "2-D point blast; the same solver passes the Sod comparison. This is not a detonation model.",
      "refs": [R["sedov"], R["toro"]]},
-    {"method": EU, "exhibit": "Detonation", "key": "euler_city", "name": "Blast and Buildings (rigid walls)",
+    {"method": EU, "exhibit": "Detonation", "key": "euler_city", "name": "Blast and Buildings (held obstacles)",
      "phenomenon": "Shocks & compressible flow", "preset": {"scene": "Shock hits a city", "pressure": 160, "structure": "Rigid walls"},
      "status": "qualitative", "question": "How do boundaries alter shock propagation?",
-     "blurb": "A ground burst beside two towers held as rigid obstacles. The blast reflects off the walls, "
-              "diffracts around the corners and leaves a sheltered zone in the lee of each building.",
+     "blurb": "A ground burst beside two towers whose cells are held at a fixed dense state (an approximate reflecting "
+              "obstacle, not an impermeable wall flux). The blast reflects off them, diffracts around the corners and "
+              "leaves a sheltered zone in the lee of each building.",
      "try": ["Open the Erosion variant to see the simplified structural-failure model.",
              "Move to a lower pressure ratio to weaken the reflected fronts."],
      "observe": "Mach-stem-like merging near the ground and the shadow zones behind the towers.",
      "checks": "Qualitative demonstration: the towers are cells held at a fixed dense state each stage, an "
                "approximate reflecting boundary rather than a true wall-flux condition.",
      "refs": [R["toro"]]},
-    {"method": EU, "exhibit": "Detonation", "key": "euler_city_erosion", "name": "Blast and Buildings (erosion, experimental)",
+    {"method": EU, "exhibit": "Detonation", "key": "euler_city_erosion", "override": {"bc": 'Zero-gradient edges (weakly reflecting); towers held at a fixed dense state; a block is removed when the overpressure on an exposed face exceeds its strength (experimental rule).'}, "name": "Blast and Buildings (erosion, experimental)",
      "phenomenon": "Shocks & compressible flow", "preset": {"scene": "Shock hits a city", "pressure": 160, "structure": "Erodes (experimental)", "strength": 1.0},
      "status": "qualitative", "question": "What does a simplified erosion rule do to the towers?",
      "blurb": "The same burst with an experimental rule: a solid block is removed when the overpressure on an "
@@ -389,7 +392,7 @@ SCENES = [
      "checks": "Qualitative demonstration.",
      "refs": [R["haas"]]},
     # ═════════ free surfaces & waves ═════════
-    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_rest", "name": "Still Water (hydrostatic baseline)",
+    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_rest", "override": {"ic": 'A tank filled to 42 % of its height with water at rest, on a regular particle lattice; gravity eased in over 0.4 s.', "bc": 'Fixed boundary particles for the floor and side walls; free surface open to the air; no wavemaker motion.'}, "name": "Still Water (hydrostatic baseline)",
      "phenomenon": "Free surfaces & waves", "preset": {"scene": "Still water (hydrostatic)"}, "status": "numerical",
      "question": "Does water at rest stay at rest?",
      "blurb": "A tank of water with nothing to disturb it. A good particle method keeps the surface flat and the "
@@ -410,7 +413,7 @@ SCENES = [
      "checks": "Numerical check: the front lags the Ritter dry-bed limit as a collapsing column should; the classic "
                "Martin & Moyce data are the documented reference for a quantitative comparison (not automated).",
      "refs": [R["ritter"], R["martin"], R["monaghan"]]},
-    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_drop", "name": "Water-Blob Impact",
+    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_drop", "override": {"ic": 'A pool 30 % deep at rest and a round parcel of water released from the chosen height with zero velocity.', "bc": 'Fixed boundary particles for the floor and walls; free surface; no surface tension in the model.'}, "name": "Water-Blob Impact",
      "phenomenon": "Free surfaces & waves", "preset": {"scene": "Drop & splash"}, "status": "qualitative",
      "question": "How do impact speed and size change the splash?",
      "blurb": "A round parcel of water falls into a pool and throws up a crown-like sheet and a central jet. "
@@ -419,7 +422,7 @@ SCENES = [
      "observe": "The crown height curve in the diagnostics.",
      "checks": "Qualitative demonstration: no surface tension, 2-D, weakly compressible.",
      "refs": [R["monaghan"]]},
-    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_slosh", "name": "Sloshing Tank",
+    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_slosh", "override": {"ic": 'A tank filled to 42 % at rest.', "bc": 'Fixed boundary particles for the tank; a horizontal oscillating body force of the chosen strength and period (the whole tank rocks).'}, "name": "Sloshing Tank",
      "phenomenon": "Free surfaces & waves", "preset": {"scene": "Sloshing tank"}, "status": "qualitative",
      "question": "How does the response depend on the forcing frequency?",
      "blurb": "A tank rocked by an oscillating sideways acceleration. Near the tank's natural period the wave "
@@ -430,7 +433,7 @@ SCENES = [
      "checks": "Qualitative demonstration; the linear natural period of a rectangular tank (Ibrahim 2005) is the "
                "documented reference for the sweep.",
      "refs": [R["ibrahim"], R["monaghan"]]},
-    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_pour", "name": "Pouring a Glass",
+    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_pour", "override": {"ic": 'An empty glass; particles are emitted at the spout with the pour speed.', "bc": 'Fixed boundary particles for the glass; continuous emission at the spout (capped at 22 000 particles).'}, "name": "Pouring a Glass",
      "phenomenon": "Free surfaces & waves", "preset": {"scene": "Pour into a glass"}, "status": "qualitative",
      "question": "How does a continuous stream fill a container?",
      "blurb": "Particles are emitted at a spout and fall into a tall glass, splashing as they land and settling "
@@ -439,7 +442,7 @@ SCENES = [
      "observe": "The fill-level curve.",
      "checks": "Qualitative demonstration.",
      "refs": [R["monaghan"]]},
-    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_waves", "name": "Wave Tank",
+    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_waves", "override": {"ic": 'A flat-bottomed tank filled to 40 % at rest.', "bc": 'The left wall layer moves as the wavemaker paddle (stroke and period as set); fixed floor and right wall; free surface; no beach, so waves reflect.'}, "name": "Wave Tank",
      "phenomenon": "Free surfaces & waves", "preset": {"scene": "Wave tank"}, "status": "qualitative",
      "question": "What wavelength, amplitude and reflection does the wavemaker produce?",
      "blurb": "A paddle (a moving wall of boundary particles) drives a train of waves along a flat-bottomed tank. "
@@ -450,7 +453,7 @@ SCENES = [
      "checks": "Qualitative demonstration; the deep-water dispersion relation (Dean & Dalrymple) is the documented "
                "reference for the gauge-derived wavelength.",
      "refs": [R["dean"], R["monaghan"]]},
-    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_ship_still", "name": "Floating Hull: Still Water",
+    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_ship_still", "override": {"ic": 'Still water at 40 % fill with the rigid hull placed at the surface.', "bc": 'Fixed walls, the paddle held still (stroke 0); hull driven by contact forces from the water, gravity and damping, with motion limits.'}, "name": "Floating Hull: Still Water",
      "phenomenon": "Free surfaces & waves", "preset": {"scene": "Ship on waves", "waveA": 0.0}, "status": "numerical",
      "question": "Are flotation and motion consistent with the body parameters?",
      "blurb": "The rigid hull is placed on still water with the wavemaker stopped. It should settle to its "
@@ -460,7 +463,7 @@ SCENES = [
      "checks": "Numerical check: free-decay behaviour; the hull is driven by contact forces from the water, gravity "
                "and damping, with limits on its motion — not by a pressure integration over the hull.",
      "refs": [R["monaghan"]]},
-    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_ship", "name": "Floating Hull on Waves",
+    {"method": SPH, "exhibit": "The Big Splash", "key": "sph_ship", "override": {"ic": 'Water at 40 % fill at rest with the hull at the surface.', "bc": 'Moving paddle wall (wavemaker), fixed floor and right wall; hull driven by contact forces, gravity and damping, with motion limits.'}, "name": "Floating Hull on Waves",
      "phenomenon": "Free surfaces & waves", "preset": {"scene": "Ship on waves"}, "status": "qualitative",
      "question": "How does the hull respond to the wave train?",
      "blurb": "The rigid hull rides the wavemaker's waves, heaving and rolling as the surface moves beneath it.",
@@ -481,7 +484,7 @@ SCENES = [
                "energy is conserved to truncation error (measured drift ≈ 2×10⁻⁹ over 200 steps in CI), not to "
                "round-off. The Taylor–Green scene gives the analytical check of the viscous decay.",
      "refs": [R["canuto"], R["boffetta"]]},
-    {"method": SP, "exhibit": "Cloud Billows", "key": "spec_decay", "name": "Decaying Turbulence",
+    {"method": SP, "exhibit": "Cloud Billows", "key": "spec_decay", "override": {"ic": 'A random vorticity field with a peaked spectrum around wavenumber 14, drawn on a fixed 256² reference grid from the seed and truncated or zero-padded to the chosen resolution, so the same seed gives the same initial field at every resolution.', "bc": 'Periodic in both directions (pseudo-spectral).'}, "name": "Decaying Turbulence",
      "phenomenon": "Vortices & mixing", "preset": {"init": "Random turbulence"}, "status": "numerical",
      "question": "Why do two-dimensional eddies grow as the flow decays?",
      "blurb": "A random swirl of vorticity left to evolve. Like-signed vortices merge into larger ones — the "
@@ -490,7 +493,7 @@ SCENES = [
      "observe": "Energy nearly conserved, enstrophy decaying.",
      "checks": "Numerical check (energy/enstrophy budgets).",
      "refs": [R["boffetta"]]},
-    {"method": SP, "exhibit": "Cloud Billows", "key": "spec_tg", "name": "Taylor–Green Vortex",
+    {"method": SP, "exhibit": "Cloud Billows", "key": "spec_tg", "override": {"physics": 'The Taylor–Green vortex is a periodic array of counter-rotating cells, ψ = sin x sin y, that is an exact solution of the two-dimensional Navier–Stokes equations: the nonlinear term vanishes for this field, so the pattern keeps its shape and every mode decays at the viscous rate 2νk² — for wavenumber 1 in a 2π box, the energy decays as exp(−4νt). That makes it a clean check of the viscous term and of the time integrator, not a demonstration of instability.', "ic": 'ω = 2 sin x sin y (wavenumber 1) at t = 0; no perturbation, no randomness.', "bc": 'Periodic in both directions (pseudo-spectral).'}, "name": "Taylor–Green Vortex",
      "phenomenon": "Vortices & mixing", "preset": {"init": "Taylor–Green vortex", "viscosity": 4e-4}, "status": "analytical",
      "question": "Does the solver reproduce the exact viscous decay, and does it improve with refinement?",
      "blurb": "A regular array of counter-rotating vortices that is an exact solution of the 2-D Navier–Stokes "
@@ -511,7 +514,7 @@ SCENES = [
      "checks": "Qualitative demonstration: the semi-Lagrangian scheme adds numerical diffusion once filaments "
                "reach the grid scale; the three scenes separate the contributions.",
      "refs": [R["ottino"]]},
-    {"method": SP, "exhibit": "Ink in Motion", "key": "mix_diffusion", "name": "Dye: Diffusion Only",
+    {"method": SP, "exhibit": "Ink in Motion", "key": "mix_diffusion", "override": {"physics": 'With the stirring switched off the dye simply diffuses: each band decays at the rate κ·m² of its wavenumber m, so the fundamental of the stripes decays as exp(−κm²t) and the variance as exp(−2κm²t). This scene isolates physical diffusion from the stretching and folding of the stirred scenes.', "ic": 'Alternating horizontal dye bands (0/1) with the chosen number of stripes; no flow.', "bc": 'Periodic in both directions; the stirring velocity is zero.'}, "name": "Dye: Diffusion Only",
      "phenomenon": "Vortices & mixing", "preset": {"bands": 6, "stir": 0.0, "diffusion": 4e-4}, "status": "analytical",
      "question": "How fast does diffusion alone smooth the bands?",
      "blurb": "The same bands with the stirring switched off. Each band decays as a pure diffusion problem whose "
@@ -521,7 +524,7 @@ SCENES = [
      "checks": "Analytical comparison: for stripes with wavenumber m the variance decays as exp(−2κ m² t) "
                "(tested in tests/).",
      "refs": [R["ottino"]]},
-    {"method": SP, "exhibit": "Ink in Motion", "key": "mix_stir", "name": "Dye: Stirring Only",
+    {"method": SP, "exhibit": "Ink in Motion", "key": "mix_stir", "override": {"physics": 'With κ = 0 the dye is a conserved passive scalar: stirring stretches and folds it into finer filaments without changing its variance in exact arithmetic. The decay seen is the numerical diffusion of the bilinear semi-Lagrangian advection once filaments reach the grid scale — a floor of the scheme, reported rather than hidden.', "ic": 'Alternating dye bands in the random stirring flow of the chosen seed.', "bc": 'Periodic in both directions; molecular diffusion switched off.'}, "name": "Dye: Stirring Only",
      "phenomenon": "Vortices & mixing", "preset": {"bands": 6, "diffusion": 0.0}, "status": "numerical",
      "question": "How much variance does the numerical scheme lose without physical diffusion?",
      "blurb": "The same stirring with κ = 0. A conserved dye should keep its variance; the decay seen is numerical "
@@ -718,24 +721,41 @@ def counts():
 
 
 def scene_layers(key):
-    """The full layered explanation of a scene (see the module docstring)."""
+    """The full layered explanation of a scene, in reading order:
+    question → what the colours and motion show → one change to try → what to measure
+    (interval, what stays fixed) → physics → equations → actual initial/boundary
+    conditions for THIS preset → numerical method, checks and limitations → references.
+    Per-scene overrides replace the exhibit's generic text where it would not apply."""
     from . import engine, content
     s = scene(key)
     if not s:
         return None
     ex = s["exhibit"]; m = engine.META.get(ex, {}); d = content.DETAIL.get(ex, {}); setup = content.SETUP.get(ex, {})
+    ov = s.get("override", {})
+    e = experiment_of(key)
     return {"key": key, "name": s["name"], "exhibit": ex, "method": s["method"], "phenomenon": s["phenomenon"],
             "question": s["question"], "status": s["status"], "status_label": STATUS_LABEL[s["status"]],
+            "experiment": e["name"] if e else None, "preset_label": preset_label(key),
             "layers": [
-                {"id": "see", "title": "What you are seeing", "text": s["blurb"]},
-                {"id": "try", "title": "Try changing this", "items": s.get("try", [])},
-                {"id": "observe", "title": "What to observe", "text": s.get("observe", "")},
-                {"id": "physics", "title": "Physical explanation", "text": d.get("physics", m.get("blurb", ""))},
-                {"id": "model", "title": "Mathematical model", "eq": m.get("eq"), "text": d.get("terms", "")},
-                {"id": "setup", "title": "Initial and boundary conditions", "ic": setup.get("ic", ""), "bc": setup.get("bc", ""),
-                 "preset": s["preset"]},
-                {"id": "numerics", "title": "Numerical method", "text": m.get("numerics", "")},
-                {"id": "checks", "title": "Checks and limitations", "text": s.get("checks", m.get("validation", "")),
+                {"id": "question", "title": "The question", "text": s["question"]},
+                {"id": "see", "title": "What the colours and motion show", "text": s["blurb"]},
+                {"id": "try", "title": "One change to try", "items": s.get("try", [])[:1]},
+                {"id": "observe", "title": "What to measure", "text": s.get("observe", ""),
+                 "fixed": _held_fixed(s), "more": s.get("try", [])[1:]},
+                {"id": "physics", "title": "Physical explanation", "text": ov.get("physics", d.get("physics", m.get("blurb", "")))},
+                {"id": "model", "title": "Equations, symbols and assumptions", "eq": m.get("eq"), "text": d.get("terms", "")},
+                {"id": "setup", "title": "Initial and boundary conditions (this preset)", "ic": ov.get("ic", setup.get("ic", "")),
+                 "bc": ov.get("bc", setup.get("bc", "")), "preset": s["preset"]},
+                {"id": "numerics", "title": "Numerical method, checks and limitations",
+                 "text": ov.get("numerics", m.get("numerics", "")), "checks": s.get("checks", m.get("validation", "")),
                  "status": STATUS_LABEL[s["status"]]},
-                {"id": "refs", "title": "Further reading", "items": s.get("refs", [])},
+                {"id": "refs", "title": "References", "items": s.get("refs", [])},
             ]}
+
+
+def _held_fixed(s):
+    """What stays fixed while the suggested change is made (from the exhibit's control notes)."""
+    from . import engine
+    spec = engine.EXHIBITS[s["exhibit"]]["params"]
+    fixed = [f"{q.get('label', q['name'])}: {q['fixed']}" for q in spec if q.get("fixed")]
+    return fixed

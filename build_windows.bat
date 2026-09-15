@@ -30,6 +30,7 @@ python -m pip install -r requirements.txt pyinstaller || goto :err
 echo === [3/4] Rendering gallery clips if missing (first build only; ~20-40 min) ===
 if not exist results\gallery\spec_kh.mp4 python render_gallery.py High 1.8 || goto :err
 
+for /f %%r in ('git rev-parse --short HEAD 2^>nul') do echo REVISION = "%%r" > flowzoo\_build.py
 echo === [4/4] Bundling the app with PyInstaller ===
 set FF=
 if exist bin\ffmpeg.exe set FF=--add-binary "bin\ffmpeg.exe;."
@@ -39,7 +40,8 @@ pyinstaller --noconfirm --onedir --windowed --name Funoos ^
   --add-data "index.html;." --add-data "web;web" ^
   --add-data "solvers\lbm\lbm2d.exe;solvers\lbm" --add-data "solvers\incompressible\ins2d.exe;solvers\incompressible" ^
   --add-data "solvers\compressible\euler2d.exe;solvers\compressible" --add-data "solvers\sph\sph2d.exe;solvers\sph" ^
-  --add-data "docs\eq;docs\eq" --add-data "results\gallery\*.mp4;results\gallery" ^
+  --add-data "docs\eq;docs\eq" --add-data "results\gallery\*.mp4;results\gallery" --add-data "results\gallery\*.jpg;results\gallery" ^
+  --add-data "LICENSE;." --add-data "THIRD_PARTY_NOTICES.md;." --add-data "CITATION.cff;." ^
   --collect-all webview --collect-all imageio_ffmpeg ^
   %FF% funoos_app.py || goto :err
 

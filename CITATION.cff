@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use Funoos in teaching or research, please cite it as below."
+title: "Funoos — fluid simulation laboratory"
+type: software
+version: 1.1.0
+date-released: 2026-09-15
+license: MIT
+repository-code: "https://github.com/SalehMohammadrezaei/Funoos"
+authors:
+  - family-names: Mohammadrezaei
+    given-names: Saleh
+    email: salehmrezaee@gmail.com
+abstract: >-
+  A desktop application for exploring two-dimensional fluid motion and pattern
+  formation with five from-scratch solvers (lattice Boltzmann, incompressible
+  projection, compressible finite volume, SPH, pseudo-spectral) and a
+  reaction–diffusion model, with documented models, checks and limitations.

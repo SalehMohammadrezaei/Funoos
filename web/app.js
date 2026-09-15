@@ -5,7 +5,7 @@ let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS =
 // counters — a response is applied only if its token is still the latest of its
 // kind, so an older render/detail/diagnostics reply can never overwrite a newer one.
 let JOB = null, ADV = false;                                 // ADV: advanced mode (extra controls, soft limits allowed)
-let CMP = null;                                              // comparison display state {a, b, view, times, unit, vmin, vmax, note}
+let CMP = null, JOB_SCENE = null;                                              // comparison display state {a, b, view, times, unit, vmin, vmax, note}
 const REQ = { run: 0, view: 0, detail: 0, diag: 0, est: 0, der: 0, probe: 0, cmp: 0 };
 const nextReq = k => ++REQ[k];
 const isCurrent = (k, t) => REQ[k] === t;
@@ -54,16 +54,18 @@ window.onProgress = (m, jobId) => {
 let GAL_SCROLL = 0;
 function show(v) {
   if (CUR === "gallery") { const r = $("#gallery-scroll"); if (r) GAL_SCROLL = r.scrollTop; }   // remember position
-  document.querySelectorAll(".view").forEach(x => x.classList.remove("active"));
-  $("#" + v).classList.add("active");
+  document.querySelectorAll(".view").forEach(x => { x.classList.remove("active"); x.inert = true; x.setAttribute("aria-hidden", "true"); });
+  $("#" + v).classList.add("active"); $("#" + v).inert = false; $("#" + v).removeAttribute("aria-hidden");
   document.querySelectorAll(".railbtn").forEach(b => b.classList.toggle("on", b.dataset.view === v));
   CUR = v;
   $("#heroCanvas").style.opacity = v === "intro" ? 0.5 : 0.1;
   if (v !== "studio") { const sv = $("#s-video"); if (sv) sv.pause(); }
-  if (v !== "gallery") document.querySelectorAll("#gallery-grid video").forEach(x => x.pause());   // hidden clips stay paused
-  else document.querySelectorAll("#gallery-grid video").forEach(x => { if (_visible.has(x)) x.play().catch(() => {}); });
-  if (v !== "detail") { const dv = $("#d-video"); if (dv) dv.pause(); } else { const dv = $("#d-video"); if (dv) dv.play().catch(() => {}); }
+  _reconcilePlayback();                                                   // hidden clips stay paused
+  const dvids = document.querySelectorAll("#d-video, #d-text video");
+  if (v !== "detail") dvids.forEach(x => x.pause());
+  else if (!REDUCED && _lsGet("funoos.autoplay", true)) dvids.forEach(x => x.play().catch(() => {}));
   if (v === "intro") { revealAll($("#intro")); runCounters(); }
+  if (v === "about") fillAbout();
   if (v === "gallery") { const r = $("#gallery-scroll"); if (r) r.scrollTop = GAL_SCROLL; }
   heroActive(v === "intro" && !JOB && !REDUCED);
 }
@@ -113,74 +115,100 @@ const SCHEME = {
   "Pseudo-spectral": "FFT", "Reaction–Diffusion": "Gray–Scott"
 };
 // play only the cards currently on screen (keeps 29 clips light)
-const _visible = new Set();
-const _vio = new IntersectionObserver(es => es.forEach(e => {
-  const v = e.target;
-  if (e.isIntersecting) { _visible.add(v); if (CUR === "gallery") v.play().catch(() => {}); }
-  else { _visible.delete(v); v.pause(); }
-}), { root: null, threshold: 0.15 });
+const _visible = new Set(), MAX_PLAYING = 6;
+function _reconcilePlayback() {
+  let playing = 0;
+  for (const v of _visible) { if (CUR === "gallery" && playing < MAX_PLAYING && _lsGet("funoos.autoplay", true) && !REDUCED) { v.play().catch(() => {}); playing++; } else v.pause(); }
+}
+const _vio = new IntersectionObserver(es => { es.forEach(e => { const v = e.target; if (e.isIntersecting) _visible.add(v); else { _visible.delete(v); v.pause(); } }); _reconcilePlayback(); },
+  { root: null, threshold: 0.15 });
+function _releaseGalleryVideos() {
+  document.querySelectorAll("#gallery-grid video").forEach(v => { _vio.unobserve(v); v.pause(); v.removeAttribute("src"); v.load(); });
+  _visible.clear();
+}
 
-let GAL_METHODS = [], FILTER = { method: "", q: "", fav: false, quick: false };
+let GAL_METHODS = [], FILTER = { method: "", q: "", fav: false, quick: false }, S2E = {}, EXPS = [];
 async function buildGallery() {
-  const r = await call("catalog"); GAL = r.groups; GAL_METHODS = r.methods || [];
+  const r = await call("catalog"); GAL = r.groups; GAL_METHODS = r.methods || []; S2E = r.scene_to_experiment || {};
+  EXPS = GAL.flatMap(g => g.experiments);
+  migrateStoredKeys();
   fillCounts(r.counts || {});
   const ms = $("#g-method"); if (ms) { ms.innerHTML = ""; const o = elt("option", null, "all methods"); o.value = ""; ms.append(o);
     for (const m of GAL_METHODS) { const x = elt("option", null, SHORT[m] || m); x.value = m; ms.append(x); } }
   renderGallery();
 }
+// Favourites and recents were stored as scene keys; they now refer to experiments but keep
+// the original preset so reopening lands on what the user had selected.
+function migrateStoredKeys() {
+  const favRaw = _lsGet("funoos.favs", []); const favs = {};
+  for (const k of favRaw) { if (typeof k === "string") { const e = S2E[k]; if (e) favs[e] = k; } }
+  const favObj = _lsGet("funoos.favs2", null);
+  if (!favObj) _lsSet("funoos.favs2", favs);
+  const rec = _lsGet("funoos.recents", []);
+  if (rec.length && typeof rec[0] === "string") _lsSet("funoos.recents", rec.map(k => ({ exp: S2E[k], key: k })).filter(x => x.exp));
+}
 function fillCounts(c) {
-  for (const [k, id] of [["methods", "#n-methods"], ["scenes", "#n-scenes"], ["solvers", "#n-solvers"]]) {
+  for (const [k, id] of [["methods", "#n-methods"], ["experiments", "#n-scenes"], ["solvers", "#n-solvers"], ["presets", "#n-presets"]]) {
     const e = $(id); if (e && c[k] != null) { e.dataset.count = c[k]; e.textContent = countersDone ? c[k] : 0; }
   }
-  const sub = $("#gal-sub"); if (sub && c.scenes) sub.textContent = `${c.scenes} experiments across ${c.methods} numerical methods.`;
+  const sub = $("#gal-sub"); if (sub && c.experiments) sub.textContent = `${c.experiments} experiments with ${c.presets} presets across ${c.methods} numerical methods.`;
 }
-function favs() { return new Set(_lsGet("funoos.favs", [])); }
-function toggleFav(key, ev) { if (ev) ev.stopPropagation(); const f = favs(); f.has(key) ? f.delete(key) : f.add(key); _lsSet("funoos.favs", [...f]); renderGallery(); }
-function recents() { return _lsGet("funoos.recents", []); }
-function noteRecent(key) { const r = recents().filter(k => k !== key); r.unshift(key); _lsSet("funoos.recents", r.slice(0, 8)); }
+function favs() { return _lsGet("funoos.favs2", {}); }            // {experimentId: presetKey}
+function toggleFav(expId, key, ev) { if (ev) { ev.stopPropagation(); ev.preventDefault(); } const f = favs(); if (f[expId]) delete f[expId]; else f[expId] = key; _lsSet("funoos.favs2", f); renderGallery(); }
+function recents() { return _lsGet("funoos.recents", []); }        // [{exp, key}]
+function noteRecent(key) { const exp = S2E[key]; if (!exp) return; const r = recents().filter(x => x.exp !== exp); r.unshift({ exp, key }); _lsSet("funoos.recents", r.slice(0, 8)); }
 function setFilter(k, v) { FILTER[k] = v; renderGallery(); }
+function expMatches(e, q) {
+  if (!q) return true;
+  const hay = [e.name, e.question, e.phenomenon, ...e.methods, ...e.presets.flatMap(p => [p.label, p.name, p.question, p.status_label])].join(" ").toLowerCase();
+  return hay.includes(q);
+}
 function renderGallery() {
-  const root = $("#gallery-grid"); root.innerHTML = "";
+  const root = $("#gallery-grid"); _releaseGalleryVideos(); root.innerHTML = "";
   const f = favs(), q = FILTER.q.trim().toLowerCase(), rec = recents();
-  const match = s => (!FILTER.method || s.method === FILTER.method) && (!FILTER.fav || f.has(s.key))
-    && (!FILTER.quick || (s.estimate_s != null && s.estimate_s <= 60))
-    && (!q || (s.name + " " + s.question + " " + s.blurb + " " + s.method + " " + s.status_label).toLowerCase().includes(q));
+  const match = e => (!FILTER.method || e.methods.includes(FILTER.method)) && (!FILTER.fav || f[e.id])
+    && (!FILTER.quick || (e.estimate_s != null && e.estimate_s <= 60)) && expMatches(e, q);
   let shown = 0;
   if (rec.length && !q && !FILTER.method && !FILTER.fav && !FILTER.quick) {
-    const all = GAL.flatMap(g => g.scenes); const rs = rec.map(k => all.find(s => s.key === k)).filter(Boolean);
-    if (rs.length) { root.append(groupHead("Recent experiments", "")); for (const s of rs) root.append(sceneCard(s, f)); }
+    const rs = rec.map(x => ({ e: EXPS.find(e => e.id === x.exp), key: x.key })).filter(x => x.e);
+    if (rs.length) { root.append(groupHead("Recent experiments", "")); for (const x of rs) root.append(expCard(x.e, f, x.key)); }
   }
   for (const g of GAL) {
-    const items = g.scenes.filter(match); if (!items.length) continue;
-    root.append(groupHead(g.phenomenon, items.length + (items.length === 1 ? " scene" : " scenes")));
-    for (const s of items) { root.append(sceneCard(s, f)); shown++; }
+    const items = g.experiments.filter(match); if (!items.length) continue;
+    root.append(groupHead(g.phenomenon, items.length + (items.length === 1 ? " experiment" : " experiments")));
+    for (const e of items) { root.append(expCard(e, f, f[e.id] || null)); shown++; }
   }
-  if (!shown) root.append(elt("div", "muted", "No scenes match this filter."));
+  if (!shown) root.append(elt("div", "muted", "No experiments match this filter."));
 }
 function groupHead(title, sub) {
   const h = el("div", "ghead"); h.append(elt("h2", null, title)); if (sub) h.append(elt("span", "muted", sub)); return h;
 }
-function sceneCard(s, favset) {
-  const acc = ACC[s.method] || "#5b86f0", method = SHORT[s.method] || s.method, scheme = SCHEME[s.method] || "";
-  const c = el("div", "gcard"); c.tabIndex = 0; c.setAttribute("role", "button"); c.setAttribute("aria-label", s.name + " — " + s.question);
+function expCard(e, favset, openKey) {
+  const method = SHORT[e.method] || e.method, acc = ACC[e.method] || "#5b86f0";
+  const c = el("div", "gcard"); c.tabIndex = 0; c.setAttribute("role", "button"); c.setAttribute("aria-label", e.name + " — " + e.question);
   const media = el("div", "media");
-  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; v.preload = "metadata"; v.setAttribute("aria-hidden", "true"); media.append(v); _vio.observe(v); }
+  const auto = _lsGet("funoos.autoplay", true) && !REDUCED;
+  if (e.clip) { const v = el("video"); v.src = e.clip; v.loop = v.muted = true; v.playsInline = true; v.preload = "metadata"; if (e.poster) v.poster = e.poster; v.setAttribute("aria-hidden", "true"); media.append(v); if (auto) _vio.observe(v); }
+  else if (e.poster) { const im = el("img"); im.src = e.poster; im.alt = ""; media.append(im); }
   else { media.append(elt("div", "noclip", "no preview clip yet")); }
   const pl = el("div", "pill left"); const dot = el("span", "dot"); dot.style.background = acc;
-  pl.append(dot, document.createTextNode(method));
-  const st = elt("div", "pill right status-" + s.status, s.status_label);
-  media.append(pl, st);
-  const fav = elt("button", "favbtn" + (favset.has(s.key) ? " on" : ""), favset.has(s.key) ? "★" : "☆");
-  fav.setAttribute("aria-label", (favset.has(s.key) ? "Remove from" : "Add to") + " favourites: " + s.name); fav.onclick = e => toggleFav(s.key, e);
+  pl.append(dot, document.createTextNode(e.methods.length > 1 ? e.methods.map(m => SHORT[m] || m).join(" · ") : method));
+  media.append(pl, elt("div", "pill right status-" + e.status, e.n_presets > 1 ? e.n_presets + " presets" : e.status_label));
+  const isFav = !!favset[e.id];
+  const fav = elt("button", "favbtn" + (isFav ? " on" : ""), isFav ? "★" : "☆");
+  fav.setAttribute("aria-label", (isFav ? "Remove from" : "Add to") + " favourites: " + e.name);
+  fav.onclick = ev => toggleFav(e.id, openKey || e.representative, ev);
+  fav.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") { ev.stopPropagation(); ev.preventDefault(); toggleFav(e.id, openKey || e.representative, ev); } };
   media.append(fav);
   const body = el("div", "gbody");
-  body.append(elt("div", "ttl", s.name));
+  body.append(elt("div", "ttl", e.name));
   const foot = el("div", "foot");
-  foot.append(elt("div", "sub", s.question), elt("div", "go", "↗"));
+  foot.append(elt("div", "sub", e.question), elt("div", "go", "↗"));
   body.append(foot);
   c.append(media, body);
-  c.onclick = () => openDetail(s.key);
-  c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(s.key); } };
+  const key = openKey || e.representative;
+  c.onclick = () => openDetail(key);
+  c.onkeydown = ev => { if ((ev.key === "Enter" || ev.key === " ") && ev.target === c) { ev.preventDefault(); openDetail(key); } };
   return c;
 }
 
@@ -211,8 +239,12 @@ async function openDetail(key) {
   try { d = await call("scene_detail", key, t); } catch (e) { toast("Could not open scene: " + errText(e), "err"); return; }
   if (!isCurrent("detail", t)) return;                         // a newer scene was opened meanwhile
   noteRecent(key);
-  $("#d-method").textContent = d.phenomenon + " · " + d.method; $("#d-title").textContent = d.name;
-  const dv = $("#d-video"); if (d.clip) { dv.src = d.clip; dv.style.display = "block"; } else { dv.removeAttribute("src"); dv.style.display = "none"; }
+  const ex = d.experiment;
+  $("#d-method").textContent = d.phenomenon + " · " + d.method; $("#d-title").textContent = ex ? ex.name : d.name;
+  fillPresetSelector($("#d-preset"), ex, key, k => openDetail(k));
+  const pl = $("#d-presetname"); if (pl) pl.textContent = ex && ex.presets.length > 1 ? "Preset: " + (ex.preset_label || d.name) : "";
+  const cmpBox = $("#d-compare"); if (cmpBox) { cmpBox.innerHTML = ""; if (ex && ex.compare && ex.compare.length) { cmpBox.append(elt("div", "kicker", "GUIDED COMPARISONS")); for (const c of ex.compare) { const row = el("div", "gcmp"); row.append(elt("div", "read small", c.text)); if (c.b) { const b = elt("button", "linkbtn", "run both & compare"); b.onclick = () => guidedCompare(c.a, c.b); row.append(b); } else { const b = elt("button", "linkbtn", "open in Studio"); b.onclick = async () => { const dd = await call("scene_detail", c.a, nextReq("detail")); openStudio(dd); }; row.append(b); } cmpBox.append(row); } } }
+  const dv = $("#d-video"); if (d.clip) { dv.src = d.clip; dv.style.display = "block"; dv.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); if (!dv.autoplay) { dv.pause(); dv.controls = true; } } else { dv.removeAttribute("src"); dv.style.display = "none"; }
   const q = $("#d-question"); if (q) q.textContent = d.question;
   const sb = $("#d-status"); if (sb) { sb.textContent = d.status_label; sb.className = "statusbadge status-" + d.status; }
   const box = $("#d-text"); box.innerHTML = "";
@@ -222,31 +254,44 @@ async function openDetail(key) {
   $("#d-open").onclick = () => openStudio(d);
   show("detail");
 }
-// Layered explanation: the first layers are open, the mathematical detail is collapsed.
+// Layered explanation in reading order; the first layers are open, the mathematical detail is collapsed.
 function renderLayers(box, layers, d) {
   for (const L of layers) {
     const sec = el("details", "layer"); sec.id = "layer-" + L.id;
-    if (["see", "try", "observe", "checks"].includes(L.id)) sec.open = true;
+    if (["question", "see", "try", "observe", "numerics"].includes(L.id)) sec.open = true;
     const sum = el("summary"); sum.append(elt("span", "kicker", L.title));
-    if (L.id === "checks" && L.status) sum.append(elt("span", "statusbadge status-" + d.status, L.status));
+    if (L.id === "numerics" && L.status) sum.append(elt("span", "statusbadge status-" + d.status, L.status));
     sec.append(sum);
     if (L.text) sec.append(elt("div", "read body", L.text));
     if (L.items && L.items.length) { const ul = el("ul", "tries"); for (const it of L.items) ul.append(elt("li", null, it)); sec.append(ul); }
+    if (L.id === "observe") {
+      if (L.fixed && L.fixed.length) { sec.append(elt("div", "kicker small", "held fixed")); const ul = el("ul", "tries"); for (const f of L.fixed) ul.append(elt("li", null, f)); sec.append(ul); }
+      if (L.more && L.more.length) { sec.append(elt("div", "kicker small", "further experiments")); const ul = el("ul", "tries"); for (const it of L.more) ul.append(elt("li", null, it)); sec.append(ul); }
+    }
     if (L.id === "model") {
       if (L.eq && d.eq) { const b = el("div", "eqbox"); const im = el("img"); im.src = d.eq; im.alt = "governing equation"; b.append(im); sec.append(b); }
-      if (L.text) { sec.lastChild.classList.add("terms"); }
-      sec.append(elt("div", "muted small", "Symbols are read out term by term above; see the glossary (?) for the shared notation."));
+      if (L.text) { sec.querySelector(".body").classList.add("terms"); }
+      sec.append(elt("div", "muted small", "The symbols are read out term by term above; units and conventions are stated in the numerical-method layer and docs/theory.md."));
     }
     if (L.id === "setup") {
       const s = el("div", "setup");
       if (L.ic) s.append(sline("Initial", L.ic)); if (L.bc) s.append(sline("Boundary", L.bc));
       const pre = Object.keys(L.preset || {}).length ? Object.entries(L.preset).map(([k, v]) => k + " = " + v).join(", ") : "exhibit defaults";
-      s.append(sline("This scene", pre)); sec.append(s);
+      s.append(sline("This preset", pre)); sec.append(s);
     }
+    if (L.id === "numerics" && L.checks) { sec.append(elt("div", "kicker small", "checks and limitations")); sec.append(elt("div", "read body", L.checks)); }
     box.append(sec);
   }
 }
 function sline(k, v) { const r = el("div", "sline"); r.append(elt("b", null, k), elt("span", null, v)); return r; }
+function fillPresetSelector(sel, ex, key, onpick) {
+  if (!sel) return;
+  sel.innerHTML = "";
+  if (!ex || ex.presets.length < 2) { sel.style.display = "none"; return; }
+  sel.style.display = "";
+  for (const p of ex.presets) { const o = elt("option", null, p.label); o.value = p.key; if (p.key === key) o.selected = true; sel.append(o); }
+  sel.onchange = () => onpick(sel.value);
+}
 function buildRelated(t, key) {
   let group = null;
   for (const g of GAL) if (g.scenes.some(s => s.key === key)) group = g;
@@ -256,7 +301,7 @@ function buildRelated(t, key) {
   for (const s of group.scenes) {
     if (s.key === key) continue;
     const m = el("div", "rel"); m.tabIndex = 0; m.setAttribute("role", "button"); m.setAttribute("aria-label", s.name);
-    if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = v.autoplay = true; v.playsInline = true; m.append(v); }
+    if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); v.playsInline = true; if (s.poster) v.poster = s.poster; v.preload = "metadata"; m.append(v); }
     m.append(elt("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); m.onkeydown = e => { if (e.key === "Enter") openDetail(s.key); }; rail.append(m);
   }
   sec.append(rail); t.append(sec);
@@ -265,6 +310,7 @@ function section(head, body) { const s = el("div", "section"); s.append(el("div"
 
 /* ───────── studio ───────── */
 let CUR_PRESET = null, CUR_SCENE = null, CUR_DETAIL = null, PENDING_PRES = null;   // presentation to apply after the next run
+const DRAFTS = {};                                            // per-experiment draft settings kept while browsing
 async function studioPick(sel) {
   const key = sel.value; if (!key) return;
   const t = nextReq("detail"); let d;
@@ -274,9 +320,29 @@ async function studioPick(sel) {
 }
 function fillStudioPicker() {
   const sel = $("#s-scene"); if (!sel || !GAL.length) return; sel.innerHTML = "";
-  const o = elt("option", null, "choose a scene…"); o.value = ""; sel.append(o);
-  for (const g of GAL) { const og = el("optgroup"); og.label = g.phenomenon; for (const s of g.scenes) { const x = elt("option", null, s.name); x.value = s.key; og.append(x); } sel.append(og); }
-  if (CUR_SCENE) sel.value = CUR_SCENE;
+  const o = elt("option", null, "choose an experiment…"); o.value = ""; sel.append(o);
+  for (const g of GAL) { const og = el("optgroup"); og.label = g.phenomenon; for (const e of g.experiments) { const x = elt("option", null, e.name); x.value = e.id; og.append(x); } sel.append(og); }
+  if (CUR_SCENE && S2E[CUR_SCENE]) sel.value = S2E[CUR_SCENE];
+  const ex = CUR_DETAIL && CUR_DETAIL.experiment;
+  fillPresetSelector($("#s-preset"), ex, CUR_SCENE, async k => { const dd = await call("scene_detail", k, nextReq("detail")); if (dd.key === k) openStudio(dd); });
+  markCustom();
+}
+async function studioPickExperiment(sel) {
+  const id = sel.value; if (!id) return;
+  const e = EXPS.find(x => x.id === id); if (!e) return;
+  const key = (favs()[id]) || e.representative;
+  const t = nextReq("detail"); let d;
+  try { d = await call("scene_detail", key, t); } catch (err) { toast(errText(err), "err"); return; }
+  if (!isCurrent("detail", t) || d.key !== key) return;
+  openStudio(d);
+}
+// "Custom setup" once the controls differ from the preset that was opened
+function markCustom() {
+  const nm = $("#s-name"); if (!nm || !CUR_DETAIL) return;
+  const base = sceneDefaults(); const custom = SPEC.some(q => visible(q) && String(fmtNum(base[q.name])) !== String(fmtNum(PSTATE[q.name])));
+  const ex = CUR_DETAIL.experiment; const presetName = ex && ex.presets.length > 1 ? (ex.preset_label || CUR_DETAIL.name) : CUR_DETAIL.name;
+  nm.textContent = ((ex ? ex.name : CUR_DETAIL.name) + " · " + (custom ? "Custom setup" : presetName)).toUpperCase();
+  const ps = $("#s-preset"); if (ps && ps.style.display !== "none") { ps.dataset.custom = custom ? "1" : "0"; }
 }
 function toggleHelp() {
   const h = $("#s-help"); if (!h) return;
@@ -287,15 +353,18 @@ function toggleHelp() {
   h.style.display = "block";
 }
 function openStudio(d) {
-  if (JOB) { cancelSim(); JOB = null; }                        // leaving the scene abandons its run
-  nextReq("run"); nextReq("view"); nextReq("diag");            // responses for the old scene are stale now
-  $("#s-skel").classList.remove("on");
+  // a running job keeps running (its result lands in the history); only the view state is reset
+  if (CUR_EXH && CUR_SCENE) DRAFTS[CUR_SCENE] = { ...PSTATE };  // keep this scene's draft while browsing
+  nextReq("view"); nextReq("diag");                            // render/diagnostic replies for the old scene are stale now
+  if (!JOB) $("#s-skel").classList.remove("on");
   CUR_EXH = d.exhibit; CUR_CMAP = d.cmap || null; SPEC = d.params; PSTATE = {}; CUR_PRESET = d.preset || null; CUR_SCENE = d.key || null; CUR_DETAIL = d;
   if (d.key) noteRecent(d.key); fillStudioPicker(); const hp = $("#s-help"); if (hp) hp.style.display = "none";
   UNDO = []; REDO = []; updateUndoButtons();
   for (const q of SPEC) PSTATE[q.name] = q.default;
   if (d.preset) for (const k in d.preset) PSTATE[k] = d.preset[k];
+  if (DRAFTS[d.key]) PSTATE = { ...PSTATE, ...DRAFTS[d.key] };   // restore an unsaved draft of this scene
   $("#s-name").textContent = (d.name || "parameters").toUpperCase();
+  DRAFTS[d.exhibit] = DRAFTS[d.exhibit] || null;
   renderParams(); refreshEstimate(); refreshPresetMenu(); refreshHistory(); zoomReset();
   RUN = null; $("#s-video").style.display = "none"; $("#s-hint").style.display = "block"; hideStill();
   $("#s-views").innerHTML = ""; $("#s-cmap").innerHTML = ""; $("#s-plotpanel").style.display = "none";
@@ -408,7 +477,7 @@ function validateOne(q, f) {
   const inp = f.querySelector("input,select"); if (inp) inp.setAttribute("aria-invalid", msg && !/^warn:/.test(msg) ? "true" : "false");
 }
 function validateAll() {
-  markMatch();
+  markMatch(); markCustom();
   let bad = 0;
   document.querySelectorAll("#s-params .field").forEach(f => { const q = SPEC.find(x => x.name === f.dataset.name); if (q) { validateOne(q, f); if (f.classList.contains("invalid")) bad++; } });
   const btn = $("#s-run"); if (btn && !JOB) { btn.disabled = bad > 0; btn.title = bad ? "Fix the highlighted values first" : ""; }
@@ -429,7 +498,7 @@ function resetAll() { pushUndo(); PSTATE = sceneDefaults(); renderParams(); refr
 async function runSim() {
   if (JOB || !CUR_EXH) return;                                 // one job at a time (button is disabled anyway)
   if (!validateAll()) { toast("Fix the highlighted values first", "err"); return; }
-  const t = nextReq("run");
+  const t = nextReq("run"); JOB_SCENE = CUR_SCENE;
   JOB = { id: newId(), exhibit: CUR_EXH, params: Object.freeze({ ...PSTATE }), cancelling: false, token: t };
   setRunning(true);
   $("#s-skel").classList.add("on"); $("#s-hint").style.display = "none"; $("#s-plotpanel").style.display = "none";
@@ -439,8 +508,11 @@ async function runSim() {
   let r = null, err = null;
   try { r = await api().run(JOB.exhibit, JOB.params, view, cmap, 26, JOB.id, ADV); }
   catch (e) { err = errText(e); }
-  if (!isCurrent("run", t)) return;                            // scene changed / newer run: this reply is stale
+  if (!isCurrent("run", t)) return;                            // newer run: this reply is stale
   JOB = null; setRunning(false); $("#s-skel").classList.remove("on"); hideStill(); heroActive(CUR === "intro" && !REDUCED);
+  if (r && r.ok && JOB_SCENE && JOB_SCENE !== CUR_SCENE) {     // the user browsed elsewhere: keep it in the history only
+    toast("Run finished for " + JOB_SCENE + " — open it from the run history", "ok"); refreshHistory(); return;
+  }
   if (r && r.ok) {                                             // the previous RUN is replaced only now
     RUN = r; FPS = 26; leaveCompare(); markMatch();
     buildViewbar(r); setVideo(r.video, false); renderKPIs(r.stats || []);
@@ -518,7 +590,7 @@ async function switchView(v, force) {
   try {
     const r = await call("render_view", rid, v, $("#s-cmap").value, 26, t, $("#x-vmin").value, $("#x-vmax").value);   // manual limits stay across views
     if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;   // stale: a newer view/run won
-    hideStill(); RUN.view = r.view; setVideo(r.video, true);
+    hideStill(); RUN.view = r.view; RUN.field_rect = r.field_rect || null; setVideo(r.video, true);
     document.querySelectorAll("#s-views button").forEach(b => b.classList.toggle("on", b.textContent === r.view));
     $("#s-status").textContent = "✓ " + RUN.info;
   } catch (e) { if (isCurrent("view", t) && !/superseded/.test(errText(e))) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
@@ -530,6 +602,7 @@ async function recolor() {
   const idx = curFrame(), frac = idx == null ? 1.0 : { index: idx, frac: 1.0 };
   // 1) instant: re-map the frame on screen with the new palette (one PNG, no encoding)
   try {
+    if (!_lsGet("funoos.preview", true)) throw new Error("previews off");
     const p = await call("preview_frame", rid, RUN.view, cmap, frac, t);
     if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;
     showStill(p.img, "palette preview · encoding clip…", false);
@@ -865,13 +938,31 @@ function initStage() {
   sc.addEventListener("click", stageClick);
 }
 document.addEventListener("keydown", e => {
-  if (CUR !== "studio" || e.target.matches("input,select,textarea")) return;
+  if (CUR !== "studio" || e.target.matches("input,select,textarea,button,a,[role=button],summary")) return;
   if (e.key === " ") { e.preventDefault(); vToggle(); }
   else if (e.key === "ArrowLeft") { vStep(-1); } else if (e.key === "ArrowRight") { vStep(1); }
   else if (e.key === "+" || e.key === "=") { zoomBy(1.15); } else if (e.key === "-") { zoomBy(1 / 1.15); } else if (e.key === "0") { zoomReset(); }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redoParams(); else undoParams(); }
   else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { runSim(); }
 });
+
+/* settings: memory, threads, previews, autoplay */
+async function openSettings() {
+  const box = $("#settings"); if (!box) return;
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  try { const r = await call("runs"); $("#st-maxruns").value = r.max_runs; $("#st-mem").value = Math.round(r.max_bytes / 1048576); $("#st-usage").textContent = `${r.runs.length} runs · ${(r.bytes / 1048576).toFixed(0)} MB in memory · ${(r.disk_bytes / 1048576).toFixed(0)} MB on disk`; } catch (e) { /* advisory */ }
+  try { const s = await call("settings"); $("#st-threads").value = s.threads; $("#st-threads").max = s.cpus; $("#st-threadnote").textContent = `of ${s.cpus} logical CPUs`; } catch (e) { /* advisory */ }
+  $("#st-autoplay").checked = _lsGet("funoos.autoplay", true); $("#st-preview").checked = _lsGet("funoos.preview", true);
+  box.style.display = "block";
+}
+async function applySettings() {
+  try {
+    await call("set_budget", +$("#st-maxruns").value || 3, +$("#st-mem").value || 1024);
+    await call("set_threads", +$("#st-threads").value || 0);
+    _lsSet("funoos.autoplay", $("#st-autoplay").checked); _lsSet("funoos.preview", $("#st-preview").checked);
+    _reconcilePlayback(); toast("Settings applied", "ok");
+  } catch (e) { toast(errText(e), "err"); }
+}
 
 /* transport */
 const sv = () => $("#s-video");
@@ -937,3 +1028,34 @@ function toast(msg, kind) {
   }
   if (active) raf = requestAnimationFrame(frame);
 })();
+
+/* guided comparison: run two presets of one experiment in sequence, then show them side by side */
+async function guidedCompare(a, b) {
+  if (JOB) { toast("A run is in progress", "err"); return; }
+  let da; try { da = await call("scene_detail", a, nextReq("detail")); } catch (e) { toast(errText(e), "err"); return; }
+  openStudio(da); show("studio");
+  const run = async (key) => {
+    const d = await call("scene_detail", key, nextReq("detail")); const params = { ...Object.fromEntries(d.params.map(q => [q.name, q.default])), ...(d.preset || {}) };
+    const t = nextReq("run"); JOB = { id: newId(), exhibit: d.exhibit, params: Object.freeze(params), cancelling: false, token: t };
+    setRunning(true); $("#s-skel").classList.add("on"); $("#s-status").textContent = "⏳ " + d.name + "…";
+    let r = null; try { r = await api().run(d.exhibit, params, null, d.cmap || $("#s-cmap").value, 26, JOB.id, false); } catch (e) { r = { ok: false, error: errText(e) }; }
+    JOB = null; setRunning(false); $("#s-skel").classList.remove("on"); hideStill();
+    if (!r || !r.ok) throw new Error((r && r.error) || "run failed");
+    RUN = r; buildViewbar(r); setVideo(r.video, false); renderKPIs(r.stats || []); refreshHistory(); return r.run_id;
+  };
+  try {
+    const ra = await run(a); const rb = await run(b);
+    await compareWith(ra);
+  } catch (e) { toast("Guided comparison stopped: " + errText(e), "err"); }
+}
+
+async function openUrl(u) { try { await call("open_url", u); } catch (e) { toast(errText(e), "err"); } }
+async function fillAbout() {
+  try { const a = await call("about"); const box = $("#about-body"); if (!box) return; box.innerHTML = "";
+    const row = (k, v) => { const r = el("div", "sline"); r.append(elt("b", null, k), elt("span", null, v)); return r; };
+    const s = el("div", "setup"); s.append(row("Author", a.author), row("Version", a.version + (a.build ? " · build " + a.build : "")), row("Licence", a.license), row("Python", a.python)); box.append(s);
+    const links = el("div", "ptools"); for (const [label, url] of a.links) { const b = elt("button", "linkbtn", label); b.onclick = () => openUrl(url); links.append(b); } box.append(links);
+    box.append(elt("div", "kicker", "citation")); const cit = el("pre", "cite"); cit.textContent = a.citation; box.append(cit);
+    box.append(elt("div", "kicker", "acknowledgements")); box.append(elt("div", "read small", a.acknowledgements));
+  } catch (e) { /* about is static; ignore */ }
+}

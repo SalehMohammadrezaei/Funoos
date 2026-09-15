@@ -47,9 +47,15 @@ def test_registry_complete():
         assert s["status"] in catalog.STATUS_LABEL and s["phenomenon"] in catalog.PHENOMENA
         assert s["exhibit"] in engine.EXHIBITS, s["key"]
         L = catalog.scene_layers(s["key"])["layers"]
-        assert [x["id"] for x in L] == ["see", "try", "observe", "physics", "model", "setup", "numerics", "checks", "refs"]
+        assert [x["id"] for x in L] == ["question", "see", "try", "observe", "physics", "model", "setup", "numerics", "refs"]
+        assert L[6]["ic"] and L[6]["bc"], (s["key"], "initial and boundary conditions must be stated")
     c = catalog.counts()
-    assert c["scenes"] == len(catalog.SCENES) and c["methods"] == 6
+    assert c["presets"] == len(catalog.SCENES) and c["methods"] == 6 and c["experiments"] == len(catalog.EXPERIMENTS) == 27
+    assert catalog.check_experiments() == [], catalog.check_experiments()
+    assert sum(len(e["presets"]) for e in catalog.EXPERIMENTS) == len(catalog.SCENES), "every scene is in exactly one experiment"
+    ex = catalog.experiments()
+    assert all(e["n_presets"] >= 1 and e["question"] and e["phenomenon"] in catalog.PHENOMENA for e in ex)
+    assert catalog.experiment_of("lbm_airfoil_neg")["id"] == "airfoil_lift" and catalog.preset_label("lbm_airfoil_neg") == "−14°"
 
 
 def test_sod_density_and_velocity_errors():

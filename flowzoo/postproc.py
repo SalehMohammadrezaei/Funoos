@@ -623,7 +623,9 @@ def _blast(result):
              "Radius of the steepest rise of the azimuthally averaged density around the burst point, per "
              "saved frame (cells; time in code units with the actual adaptive time step). A strong 2-D "
              "point blast follows the Sedov–Taylor law R ∝ t^½; this finite-pressure charge starts faster "
-             "and bends toward that exponent as it sweeps up gas — the late-time fit is shown." + city)]
+             "and bends toward that exponent as it sweeps up gas — the late-time fit is shown. Caveat: the "
+             "gradient-based estimate can lock onto a strong contact surface or a reflected front instead of the "
+             "leading shock; treat isolated jumps in the curve as detection artefacts." + city)]
 
 
 def _sod(result):
@@ -816,6 +818,15 @@ def plots(result):
             return _particles(result)
         if k == "field":
             return _field(result)
-    except Exception:                       # noqa: BLE001 — a failed diagnostic must not break the app
-        pass
-    return []
+    except Exception as e:                  # noqa: BLE001 — a failed diagnostic must not break the app
+        return [("Diagnostics unavailable", _unavailable_plot(f"{type(e).__name__}: {e}"),
+                 f"The diagnostic for this run could not be computed ({type(e).__name__}: {e}). The simulation "
+                 "result itself is unaffected; probes, profiles and exports still work.")]
+    return [("No diagnostics", _unavailable_plot("no diagnostic is defined for this kind of result"),
+             "No measurement is defined for this kind of result yet; use the probe and profile tools.")]
+
+
+def _unavailable_plot(msg):
+    fig, ax, plt = _new_ax("", "", "Diagnostics unavailable")
+    ax.text(0.5, 0.5, msg, transform=ax.transAxes, color=_WARN, ha="center", va="center", fontsize=9, wrap=True)
+    return _rgb(fig, plt)

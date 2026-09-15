@@ -170,7 +170,7 @@ DETAIL = {
 "pouring water into a glass, a wavemaker driving an ocean of waves, and a "
 "rigid ship floating on those waves. Each scene exposes its own controls (drop "
 "size and release height, slosh strength and period, spout width and pour speed, "
-"wave height and period, ship size), so you can dial in the physics that matters "
+"wavemaker stroke and period, ship size), so you can dial in the physics that matters "
 "for that scenario.\n\n"
 "Take the dam break: hold back a column of water with a wall, remove the wall "
 "instantly, and gravity converts the column's potential energy into a fast "
@@ -464,7 +464,7 @@ DETAIL["Candle Flame"] = {
 "plus-buoyancy picture. This scene reproduces it with a simplified model — a mixture variable, "
 "a prescribed wick inflow, a temperature proxy and buoyancy — without chemistry or heat release."),
 "terms": (
-"• Z — mixture fraction: 1 in the fuel from the wick, 0 in the ambient air, conserved as it mixes\n"
+"• Z — mixture variable: 1 in the fuel from the wick, 0 in the ambient air; advected and diffused, with a model decay away from the source (not conserved)\n"
 "• Z = Z_st — the stoichiometric surface where fuel and air meet in burning proportion (the sheet)\n"
 "• T(Z) — temperature: peaks on the sheet (fast 'Burke–Schumann' chemistry) and falls either side\n"
 "• f_b = β·T·ŷ — Boussinesq buoyancy: the hot sheet is light and rises\n"

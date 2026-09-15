@@ -18,17 +18,30 @@ def field_shape(res):
     return None
 
 
-def panel_fraction(res, view=None):
-    """Width fraction of the rendered frame occupied by the colourbar panel (right side)."""
-    fr = res.frame(0, view)
-    W = fr.shape[1]
+def field_rect(res, view=None):
+    """Where the field sits inside the rendered frame of `view`, as fractions
+    {x0, y0, w, h} of the frame (y from the bottom), plus the field's cell shape.
+    Uses the actual rendered frame size and the view's own field shape/upscale, so
+    streamline upscaling and the SPH raster grid are represented correctly."""
+    view = res.view_name(view)
+    fr = res.frame(res.nframes - 1, view)                # one frame (cached derived fields; cheap)
+    H, W = fr.shape[:2]
     d = res.derived(view)
-    up = d.get("upscale", 1) if res.kind != "particles" else 1
-    shp = field_shape(res)
-    if shp is None:
-        return 0.0
-    field_w = shp[1] * up
-    return max(0.0, 1.0 - field_w / W)
+    f = d.get("fields")
+    if f is None:                                        # particle scatter views: the whole image is the tank
+        return {"x0": 0.0, "y0": 0.0, "w": 1.0, "h": 1.0, "shape": None}
+    fy, fx = np.asarray(f[len(f) - 1]).shape[:2]
+    if view == "Streamlines":
+        up = 2                                           # streamlines_fast renders at 2×
+    else:
+        up = d.get("upscale", 1)
+    fw, fh = fx * up, fy * up
+    return {"x0": 0.0, "y0": max(0.0, 1.0 - fh / H), "w": min(1.0, fw / W), "h": min(1.0, fh / H), "shape": [fy, fx]}
+
+
+def panel_fraction(res, view=None):
+    """Width fraction of the rendered frame NOT covered by the field (the colourbar panel)."""
+    return 1.0 - field_rect(res, view)["w"]
 
 
 def frame_index(res, when):

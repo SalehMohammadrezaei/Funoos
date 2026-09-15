@@ -46,13 +46,13 @@ build_solver sph            sph2d
 
 echo "=== [2/4] Installing Python dependencies ==="
 python3 -m pip install --upgrade pip >/dev/null
-python3 -m pip install numpy scipy matplotlib pillow pywebview imageio-ffmpeg pyinstaller
+python3 -m pip install -r requirements.txt pyinstaller
 
 echo "=== [3/4] Bundling the app with PyInstaller ==="
 rm -rf build dist
 python3 -m PyInstaller --noconfirm --onedir --windowed --name Funoos \
   --add-data "index.html:." --add-data "web:web" \
-  --add-data "solvers/lbm/lbm2d:solvers/lbm" --add-data "solvers/incompressible/ins2d:solvers/incompressible" --add-data "solvers/compressible/euler2d:solvers/compressible" --add-data "solvers/sph/sph2d:solvers/sph" --add-data "docs/eq:docs/eq" --add-data "results/gallery/*.mp4:results/gallery" \
+  --add-data "solvers/lbm/lbm2d:solvers/lbm" --add-data "solvers/incompressible/ins2d:solvers/incompressible" --add-data "solvers/compressible/euler2d:solvers/compressible" --add-data "solvers/sph/sph2d:solvers/sph" --add-data "docs/eq:docs/eq" --add-data "results/gallery/*.mp4:results/gallery" --add-data "results/gallery/*.jpg:results/gallery" --add-data "LICENSE:." --add-data "THIRD_PARTY_NOTICES.md:." --add-data "CITATION.cff:." \
   --collect-all webview --collect-all imageio_ffmpeg \
   funoos_app.py
 APP=dist/Funoos.app
