@@ -22,7 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 WORK = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("FUNOOS_PROMO_WORK", ROOT / "results" / "_demo"))
 PORT = 8137
-W, H = 2560, 1440
+W, H = 1600, 900                        # CSS window (MacBook-like), rendered at 1.6x
+DPR = 1.6
+VW, VH = 2560, 1440                      # recorded video size
 SCENE = "lbm_cylinder"
 RESOLUTION = "High"
 VIEWS_TO_SHOW = ["Speed", "Streamlines", "Vorticity"]
@@ -31,10 +33,10 @@ PALETTES = ["Inferno"]
 HEADLINE = """
 (() => {
   const hl = document.createElement('div'); hl.id = 'promoHL';
-  hl.style.cssText = 'position:fixed;top:40px;left:50%;transform:translateX(-50%);z-index:99999;'
-    + 'padding:14px 34px;border-radius:999px;background:rgba(10,19,34,.80);'
+  hl.style.cssText = 'position:fixed;top:26px;left:50%;transform:translateX(-50%);z-index:99999;'
+    + 'padding:10px 24px;border-radius:999px;background:rgba(10,19,34,.80);'
     + 'border:1px solid rgba(126,155,255,.42);color:#eaf0fb;pointer-events:none;'
-    + 'font:600 34px/1 "DejaVu Sans",system-ui,sans-serif;letter-spacing:.3px;'
+    + 'font:600 24px/1 "DejaVu Sans",system-ui,sans-serif;letter-spacing:.3px;'
     + 'opacity:0;transition:opacity .45s ease;box-shadow:0 14px 50px rgba(0,0,0,.45);white-space:nowrap';
   document.body.appendChild(hl);
   window.__hl = t => { const e = document.getElementById('promoHL'); if (t === null) e.style.opacity = 0; else { e.textContent = t; e.style.opacity = 1; } };
@@ -103,8 +105,8 @@ def main():
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, args=["--autoplay-policy=no-user-gesture-required", "--no-sandbox",
                                                            "--force-color-profile=srgb"])
-        ctx = browser.new_context(viewport={"width": W, "height": H}, record_video_dir=str(WORK / "rec"),
-                                  record_video_size={"width": W, "height": H})
+        ctx = browser.new_context(viewport={"width": W, "height": H}, device_scale_factor=DPR, record_video_dir=str(WORK / "rec"),
+                                  record_video_size={"width": VW, "height": VH})
         ctx.add_init_script("try { localStorage.clear(); } catch (e) {}")
         pg = ctx.new_page(); pg.add_init_script(BRIDGE)
         pg.goto(f"http://127.0.0.1:{PORT}/index.html")
