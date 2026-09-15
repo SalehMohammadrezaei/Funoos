@@ -1,11 +1,32 @@
 /* Funoos — frontend (talks to the Python backend via pywebview.api) */
 "use strict";
 let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS = 26, CUR = "intro", GAL = [];
+// JOB: the simulation currently in flight (null when idle). REQ: per-request-type
+// counters — a response is applied only if its token is still the latest of its
+// kind, so an older render/detail/diagnostics reply can never overwrite a newer one.
+let JOB = null;
+const REQ = { run: 0, view: 0, detail: 0, diag: 0 };
+const nextReq = k => ++REQ[k];
+const isCurrent = (k, t) => REQ[k] === t;
 
 const api = () => window.pywebview.api;
 const $ = s => document.querySelector(s);
 const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
-window.onProgress = m => {
+const elt = (t, c, text) => { const e = document.createElement(t); if (c) e.className = c; if (text != null) e.textContent = text; return e; };
+// Backend calls return envelopes: {ok:true, ...} or {ok:false, error}. `call` turns the
+// latter (and any bridge rejection) into a thrown Error, so a failure is never used as data.
+async function call(name, ...args) {
+  let r;
+  try { r = await api()[name](...args); }
+  catch (e) { throw new Error(errText(e)); }
+  if (r && typeof r === "object" && r.ok === false) throw new Error(r.error || "backend error");
+  return r;
+}
+const errText = e => (e && e.message) ? e.message : (typeof e === "string" ? e : (e && e.error) || String(e));
+const newId = () => "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+window.onProgress = (m, jobId) => {
+  if (jobId && !(JOB && JOB.id === jobId)) return;            // progress from a superseded/cancelled job
+  if (JOB && JOB.cancelling) return;                           // keep "cancelling…" on screen
   const s = $("#s-status"); if (s) s.textContent = "⏳ " + m;
   const k = $("#s-skelmsg"); if (k) k.textContent = m;
   const pm = /(\d+)\s*%/.exec(m), f = $("#s-pfill");           // drive the progress bar from "… N%"
@@ -85,7 +106,7 @@ function sceneCard(s, acc, method, scheme) {
   pl.append(dot, document.createTextNode(method));
   media.append(pl, el("div", "pill right", scheme));
   const body = el("div", "gbody");
-  body.append(el("div", "ttl", s.name));
+  body.append(elt("div", "ttl", s.name));
   const foot = el("div", "foot");
   const teaser = (s.blurb || "").split(/[.;—]/)[0].trim();
   foot.append(el("div", "sub", teaser.length > 46 ? teaser.slice(0, 44).trim() + "…" : teaser),
@@ -119,7 +140,9 @@ async function morphToDetail(card, key) {
   setTimeout(() => clone.remove(), 700);
 }
 async function openDetail(key) {
-  const d = await api().scene_detail(key);
+  const t = nextReq("detail"); let d;
+  try { d = await call("scene_detail", key, t); } catch (e) { toast("Could not open scene: " + errText(e), "err"); return; }
+  if (!isCurrent("detail", t)) return;                         // a newer scene was opened meanwhile
   $("#d-method").textContent = d.method; $("#d-title").textContent = d.name; $("#d-video").src = d.clip;
   const t = $("#d-text"); t.innerHTML = "";
   t.append(section("this scene", d.blurb), section("the physics", d.physics));
@@ -148,7 +171,7 @@ function buildRelated(t, key) {
   for (const s of group.scenes) {
     if (s.key === key) continue;
     const m = el("div", "rel"); if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = v.autoplay = true; v.playsInline = true; m.append(v); }
-    m.append(el("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); rail.append(m);
+    m.append(elt("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); rail.append(m);
   }
   sec.append(rail); t.append(sec);
 }
@@ -156,6 +179,9 @@ function section(head, body) { const s = el("div", "section"); s.append(el("div"
 
 /* ───────── studio ───────── */
 function openStudio(d) {
+  if (JOB) { cancelSim(); JOB = null; }                        // leaving the scene abandons its run
+  nextReq("run"); nextReq("view"); nextReq("diag");            // responses for the old scene are stale now
+  $("#s-skel").classList.remove("on");
   CUR_EXH = d.exhibit; CUR_CMAP = d.cmap || null; SPEC = d.params; PSTATE = {};
   for (const q of SPEC) PSTATE[q.name] = q.default;
   if (d.preset) for (const k in d.preset) PSTATE[k] = d.preset[k];
@@ -164,7 +190,7 @@ function openStudio(d) {
   RUN = null; $("#s-video").style.display = "none"; $("#s-hint").style.display = "block";
   $("#s-views").innerHTML = ""; $("#s-cmap").innerHTML = ""; $("#s-plotpanel").style.display = "none";
   $("#s-kpis").innerHTML = '<div class="muted" style="font-size:12px">Run a simulation to see live readouts.</div>';
-  $("#s-status").textContent = "Ready."; show("studio");
+  $("#s-status").textContent = "Ready."; setRunning(false); show("studio");
 }
 function visible(q) { return !q.when || q.when[1].includes(PSTATE[q.when[0]]); }
 function renderParams() {
@@ -191,18 +217,46 @@ function field(q) {
   f.append(inp); return f;
 }
 async function runSim() {
-  const btn = $("#s-run"); btn.disabled = true; btn.textContent = "●  Simulating…";
+  if (JOB || !CUR_EXH) return;                                 // one job at a time (button is disabled anyway)
+  const t = nextReq("run");
+  JOB = { id: newId(), exhibit: CUR_EXH, params: Object.freeze({ ...PSTATE }), cancelling: false, token: t };
+  setRunning(true);
   $("#s-skel").classList.add("on"); $("#s-hint").style.display = "none"; $("#s-plotpanel").style.display = "none";
-  const pf = $("#s-pfill"); if (pf) { pf.style.width = "0%"; } $("#s-skelmsg").textContent = "simulating…";
-  const params = { ...PSTATE }; const view = (RUN && RUN.view) || null;
-  try {
-    const r = await api().run(CUR_EXH, params, view, CUR_CMAP); RUN = r; FPS = 26;
-    buildViewbar(r); setVideo(r.video); renderKPIs(r.stats || []);
+  const pf = $("#s-pfill"); if (pf) { pf.style.width = "0%"; } $("#s-skelmsg").textContent = "preparing…";
+  $("#s-status").textContent = "⏳ preparing…";
+  const view = (RUN && RUN.view) || null, cmap = $("#s-cmap").value || CUR_CMAP;   // keep the user's colour choice
+  let r = null, err = null;
+  try { r = await api().run(JOB.exhibit, JOB.params, view, cmap, 26, JOB.id); }
+  catch (e) { err = errText(e); }
+  if (!isCurrent("run", t)) return;                            // scene changed / newer run: this reply is stale
+  JOB = null; setRunning(false); $("#s-skel").classList.remove("on");
+  if (r && r.ok) {                                             // the previous RUN is replaced only now
+    RUN = r; FPS = 26;
+    buildViewbar(r); setVideo(r.video, false); renderKPIs(r.stats || []);
     $("#s-status").textContent = "✓ " + r.info;
-    const pb = $("#s-plots"); pb.classList.add("ready");          // draw attention to the diagnostics
+    $("#s-plots").classList.add("ready");                       // draw attention to the diagnostics
     toast("Done — open 📊 Diagnostic plots for the analysis", "ok");
-  } catch (e) { $("#s-status").textContent = "⚠ " + e; toast("Run failed: " + e, "err"); }
-  $("#s-skel").classList.remove("on"); btn.disabled = false; btn.textContent = "▶  Run simulation";
+    if (r.evicted && r.evicted.length) toast("Older result" + (r.evicted.length > 1 ? "s" : "") + " released to stay within the memory budget", "");
+  } else if (r && r.state === "cancelled") {
+    $("#s-status").textContent = RUN ? "■ Cancelled — previous result kept." : "■ Cancelled.";
+    if (RUN) $("#s-hint").style.display = "none"; else $("#s-hint").style.display = "block";
+  } else {
+    const msg = err || (r && r.error) || "unknown error";
+    $("#s-status").textContent = "⚠ " + msg; toast("Run failed: " + msg, "err");
+    if (!RUN) $("#s-hint").style.display = "block";
+  }
+}
+async function cancelSim() {
+  if (!JOB || JOB.cancelling) return;
+  JOB.cancelling = true;
+  $("#s-status").textContent = "⏳ cancelling…"; $("#s-skelmsg").textContent = "cancelling…";
+  const cb = $("#s-cancel"); if (cb) cb.disabled = true;
+  try { await api().cancel(JOB.id); } catch (e) { /* the run reply will carry the final state */ }
+}
+function setRunning(on) {
+  const btn = $("#s-run"), cb = $("#s-cancel");
+  btn.disabled = on; btn.textContent = on ? "●  Simulating…" : "▶  Run simulation";
+  if (cb) { cb.style.display = on ? "block" : "none"; cb.disabled = false; }
 }
 function renderKPIs(stats) {
   const k = $("#s-kpis"); k.innerHTML = "";
@@ -211,11 +265,12 @@ function renderKPIs(stats) {
     if (s.frac != null) {
       const t = el("div", "kpi gauge" + (s.accent ? " accent" : ""));
       const dial = el("div", "dial", kpiGauge(s.frac, s.accent));
-      dial.append(el("div", "dval", `${s.v}${s.u ? `<small>${s.u}</small>` : ""}`));
-      t.append(dial, el("div", "l", s.l)); k.append(t);
+      const dv = elt("div", "dval", s.v); if (s.u) dv.append(elt("small", null, s.u)); dial.append(dv);
+      t.append(dial, elt("div", "l", s.l)); k.append(t);
     } else {
       const t = el("div", "kpi" + (s.accent ? " accent" : ""));
-      t.append(el("div", "l", s.l), el("div", "v", s.v + (s.u ? ` <small>${s.u}</small>` : "")));
+      const v = elt("div", "v", s.v); if (s.u) { v.append(" ", elt("small", null, s.u)); }
+      t.append(elt("div", "l", s.l), v);
       k.append(t);
     }
   }
@@ -233,55 +288,76 @@ function kpiGauge(frac, accent) {
 }
 function buildViewbar(r) {
   const seg = $("#s-views"); seg.innerHTML = "";
-  for (const v of r.views) { const b = el("button", v === r.view ? "on" : "", v); b.onclick = () => switchView(v); seg.append(b); }
-  const cm = $("#s-cmap"); cm.innerHTML = "";
-  for (const c of r.cmaps) { const o = el("option", null, c); o.value = c; if (c === r.defcmap) o.selected = true; cm.append(o); }
+  for (const v of r.views) { const b = elt("button", v === r.view ? "on" : "", v); b.onclick = () => switchView(v); seg.append(b); }
+  const cm = $("#s-cmap"), keep = cm.value; cm.innerHTML = "";
+  const sel = r.cmaps.includes(keep) ? keep : r.defcmap;        // colour choice survives a new run
+  for (const c of r.cmaps) { const o = elt("option", null, c); o.value = c; if (c === sel) o.selected = true; cm.append(o); }
 }
 async function switchView(v) {
-  if (!RUN || v === RUN.view) return; setBusy("rendering " + v + "…");
-  try { const r = await api().render_view(RUN.run_id, v, $("#s-cmap").value); RUN.view = v; setVideo(r.video);
-    document.querySelectorAll("#s-views button").forEach(b => b.classList.toggle("on", b.textContent === v)); }
-  catch (e) { toast("" + e, "err"); }
-  $("#s-skel").classList.remove("on");
+  if (!RUN || v === RUN.view) return;
+  const t = nextReq("view"), rid = RUN.run_id; setBusy("rendering " + v + "…");
+  try {
+    const r = await call("render_view", rid, v, $("#s-cmap").value, 26, t);
+    if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;   // stale: a newer view/run won
+    RUN.view = r.view; setVideo(r.video, true);
+    document.querySelectorAll("#s-views button").forEach(b => b.classList.toggle("on", b.textContent === r.view));
+    $("#s-status").textContent = "✓ " + RUN.info;
+  } catch (e) { if (isCurrent("view", t)) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
+  if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 async function recolor() {
-  if (!RUN) return; setBusy("recolouring…");
-  try { const r = await api().render_view(RUN.run_id, RUN.view, $("#s-cmap").value); setVideo(r.video); } catch (e) { toast("" + e, "err"); }
-  $("#s-skel").classList.remove("on");
+  if (!RUN) return;
+  const t = nextReq("view"), rid = RUN.run_id; setBusy("recolouring…");
+  try {
+    const r = await call("render_view", rid, RUN.view, $("#s-cmap").value, 26, t);
+    if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;
+    setVideo(r.video, true); $("#s-status").textContent = "✓ " + RUN.info;
+  } catch (e) { if (isCurrent("view", t)) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
+  if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 function setBusy(msg) { $("#s-skel").classList.add("on"); $("#s-skelmsg").textContent = msg; $("#s-status").textContent = "⏳ " + msg; }
-function setVideo(src) {
-  const v = $("#s-video"); v.src = src; v.style.display = "block"; $("#s-hint").style.display = "none";
-  v.playbackRate = 1; $("#s-rate").textContent = "1×";
-  v.onloadeddata = () => { v.play(); $("#s-play").textContent = "⏸"; };
+function setVideo(src, keepPosition) {
+  const v = $("#s-video");
+  const rate = v.playbackRate || 1, wasPaused = v.style.display === "block" ? v.paused : false;
+  const at = keepPosition ? (v.currentTime || 0) : 0;
+  v.src = src; v.style.display = "block"; $("#s-hint").style.display = "none";
+  v.onloadeddata = () => {
+    v.playbackRate = rate; $("#s-rate").textContent = rate + "×";
+    if (at > 0 && v.duration) v.currentTime = Math.min(at, Math.max(0, v.duration - 0.05));
+    if (wasPaused && keepPosition) { v.pause(); $("#s-play").textContent = "▶"; }
+    else { v.play().catch(() => {}); $("#s-play").textContent = "⏸"; }
+  };
 }
 async function saveClip(fmt) {
   if (!RUN) { toast("Run a simulation first", "err"); return; }
   $("#s-status").textContent = "⏳ rendering " + fmt.toUpperCase() + " to save…";
   try {
-    const path = await api().save_clip(RUN.run_id, RUN.view, $("#s-cmap").value, fmt);
-    if (path) { $("#s-status").textContent = "✓ saved: " + path; toast("Saved " + fmt.toUpperCase(), "ok"); }
+    const r = await call("save_clip", RUN.run_id, RUN.view, $("#s-cmap").value, fmt);
+    if (r.path) { $("#s-status").textContent = "✓ saved: " + r.path; toast("Saved " + fmt.toUpperCase(), "ok"); }
     else { $("#s-status").textContent = "Save cancelled."; }
-  } catch (e) { $("#s-status").textContent = "⚠ " + e; toast("Save failed: " + e, "err"); }
+  } catch (e) { $("#s-status").textContent = "⚠ " + errText(e); toast("Save failed: " + errText(e), "err"); }
 }
 async function togglePlots() {
   if (!RUN) { toast("Run a simulation first", "err"); return; }
   $("#s-plots").classList.remove("ready");           // attention cue consumed
-  const p = $("#s-plotpanel"); if (p.style.display === "block") { p.style.display = "none"; return; }
-  setBusy("computing diagnostics…");
+  const p = $("#s-plotpanel");
+  if (p.style.display === "block") { p.style.display = "none"; return; }
+  const t = nextReq("diag"), rid = RUN.run_id; setBusy("computing diagnostics…");
   try {
-    const plots = await api().diagnostics(RUN.run_id); p.innerHTML = "";
-    if (!plots.length) p.append(el("div", "muted", "No diagnostics for this case."));
-    for (const pl of plots) {
+    const r = await call("diagnostics", rid, t);
+    if (!isCurrent("diag", t) || !RUN || RUN.run_id !== rid) return;   // stale: newer request or run
+    p.innerHTML = ""; p.dataset.run = rid;
+    if (!r.plots.length) p.append(elt("div", "muted", "No diagnostics for this case."));
+    for (const pl of r.plots) {
       const card = el("div", "plot");
-      card.append(el("div", "kicker", pl.title));
+      card.append(elt("div", "kicker", pl.title));
       const i = el("img"); i.src = pl.img; card.append(i);
       if (pl.explain) card.append(el("div", "explain", pl.explain));
       p.append(card);
     }
     p.style.display = "block"; $("#s-status").textContent = "✓ diagnostics ready.";
-  } catch (e) { toast("" + e, "err"); }
-  $("#s-skel").classList.remove("on");
+  } catch (e) { if (isCurrent("diag", t)) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
+  if (isCurrent("diag", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 
 /* transport */
@@ -300,7 +376,7 @@ document.addEventListener("timeupdate", e => {
 
 /* toasts */
 function toast(msg, kind) {
-  const t = el("div", "toast " + (kind || ""), msg); $("#toasts").append(t);
+  const t = elt("div", "toast " + (kind || ""), msg); $("#toasts").append(t);
   requestAnimationFrame(() => t.classList.add("in"));
   setTimeout(() => { t.classList.remove("in"); setTimeout(() => t.remove(), 450); }, 3400);
 }
