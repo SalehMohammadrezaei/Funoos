@@ -160,7 +160,8 @@ int main(int argc,char**argv){
             buf.push_back((float)x[i]); buf.push_back((float)y[i]);
             buf.push_back((float)sqrt(vx[i]*vx[i]+vy[i]*vy[i])); Nw++; }
         char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",A.out.c_str(),nf);
-        std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),buf.size()*sizeof(float));
+        std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),buf.size()*sizeof(float)); of.close();
+        if(!of){ fprintf(stderr,"error: could not write frame %d (disk full or not writable)\n",nf); exit(3); }
         ftimes<<tt<<"\n";
         if(ship){ double ca=cos(th),sa=sin(th); int Nh=hlx.size();
             std::vector<float> hb(2*Nh);

@@ -188,7 +188,8 @@ int main(int argc,char**argv){
         std::vector<float> vb(2*N);                 // velocity field (for Speed/streamlines)
         for(int k=0;k<N;k++){ vb[k]=(float)u[k]; vb[N+k]=(float)v[k]; }
         char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
-        std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
+        std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float)); of.close(); vof.close();
+        if(!of||!vof){ fprintf(stderr,"error: could not write frame %d (disk full or not writable)\n",nf); exit(3); }
         ftimes<<step*a.dt<<"\n"; nf++; last_saved=step;
         if(step%(a.save_every*3)==0) printf("step %d/%d (%d frames)\n",step,a.steps,nf);
     };

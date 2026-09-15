@@ -148,7 +148,8 @@ int main(int argc, char** argv) {
             }
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nframes);
             std::ofstream of(fn,std::ios::binary);
-            of.write((char*)buf.data(), buf.size()*sizeof(float));
+            of.write((char*)buf.data(), buf.size()*sizeof(float)); of.close();
+            if (!of) { fprintf(stderr,"error: could not write %s (disk full or not writable)\n", fn); exit(3); }
             ftimes << step << "\n"; nframes++; last_saved = step;
             if (step % (a.save_every*3)==0)
                 printf("step %d/%d  (%d frames)\n", step, a.steps, nframes);

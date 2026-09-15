@@ -884,11 +884,11 @@ class Api:
                 h.append(f"<h3>{esc(t)}</h3><img src='{img}' alt='{esc(t)}'><p class='small'>{esc(ex)}</p>")
             if lay:
                 for L in lay["layers"]:
-                    if L["id"] in ("checks", "numerics", "setup"):
-                        body = L.get("text") or ""
-                        if L["id"] == "setup":
-                            body = f"Initial: {L.get('ic', '')}  Boundary: {L.get('bc', '')}"
-                        h.append(f"<h2>{esc(L['title'])}</h2><p>{esc(body)}</p>")
+                    if L["id"] == "setup":
+                        h.append(f"<h2>{esc(L['title'])}</h2><p>Initial: {esc(L.get('ic', ''))}<br>Boundary: {esc(L.get('bc', ''))}</p>")
+                    elif L["id"] == "numerics":
+                        h.append(f"<h2>Numerical method</h2><p>{esc(L.get('text') or '')}</p>")
+                        h.append(f"<h2>Checks and limitations</h2><p><b>{esc(L.get('status', ''))}.</b> {esc(L.get('checks') or '')}</p>")
             if rec.get("solver_versions"):
                 h.append("<h2>Provenance</h2><p class='small'>" + esc(json.dumps(rec["solver_versions"])) + "</p>")
             h.append(f"<hr><p class='small'>Generated with Funoos {esc(APP_VERSION)} (https://github.com/SalehMohammadrezaei/Funoos), "

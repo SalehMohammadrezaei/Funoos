@@ -225,7 +225,8 @@ int main(int argc,char**argv){
         std::vector<float> vb(2*N);                  // velocity field (for the Speed view)
         for(int s=0;s<N;s++){ vb[s]=(float)(mx[s]/r[s]); vb[N+s]=(float)(my[s]/r[s]); }
         char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
-        std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
+        std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float)); of.close(); vof.close();
+        if(!of||!vof){ fprintf(stderr,"error: could not write frame %d (disk full or not writable)\n",nf); exit(3); }
         ftimes<<t<<"\n"; nf++; };
     double t_last_saved=-1.0, pmin_run=1e300, rmin_run=1e300;
     for(int step=0; step<a.steps && t<a.tend; step++){
