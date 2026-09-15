@@ -80,12 +80,12 @@ SCENES = [
               "The buoyancy-versus-wind balance sets the plume rise that governs how pollution disperses."},
     # ───────── Compressible Euler (HLLC) ─────────
     {"method": "Compressible Euler", "exhibit": "Detonation", "key": "euler_blast",
-     "name": "Open-Air Blast", "preset": {"scene": "Open air", "pressure": 14},
+     "name": "Open-Air Blast", "preset": {"scene": "Open air", "pressure": 140},
      "blurb": "A high-pressure charge bursts into still air as an almost circular shock wave, "
               "trailed by an expansion that leaves a low-density cavity behind — the textbook "
               "blast-wave problem behind explosion safety and sonic booms."},
     {"method": "Compressible Euler", "exhibit": "Detonation", "key": "euler_city",
-     "name": "Shockwave Hits a City", "preset": {"scene": "Shock hits a city", "pressure": 16, "strength": 1.0},
+     "name": "Shockwave Hits a City", "preset": {"scene": "Shock hits a city", "pressure": 160, "strength": 1.0},
      "blurb": "A ground burst beside two towers. The blast reflects, diffracts around the corners "
               "and leaves a sheltered shadow in their lee — and where the overpressure on an "
               "exposed face exceeds its strength, the masonry fails and is flung off as debris."},

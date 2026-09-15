@@ -76,11 +76,12 @@ def advect_sl(c, u, v, dt, L):
             + c[x0, y1] * (1 - fx) * fy + c[x1, y1] * fx * fy)
 
 
-def double_shear_layer(n, L=2 * np.pi, delta=0.05, amp=0.05):
-    """Classic doubly-periodic shear-layer initial condition (rolls into billows)."""
+def double_shear_layer(n, L=2 * np.pi, delta=1 / 30, amp=0.05):
+    """Classic doubly-periodic shear-layer initial condition (rolls into billows).
+    `delta` is the tanh layer thickness as a fraction of L (default L/30)."""
     x = np.linspace(0, L, n, endpoint=False)
     X, Y = np.meshgrid(x, x, indexing="ij")
-    rho_w = 30.0 / L
+    rho_w = 1.0 / (max(delta, 1e-4) * L)
     u = np.where(Y <= L / 2, np.tanh(rho_w * (Y - L / 4)),
                  np.tanh(rho_w * (3 * L / 4 - Y)))
     v = amp * np.sin(2 * np.pi * X / L)

@@ -509,19 +509,36 @@ class Result:
 
 
 # ---------- parameter descriptors (pre-run only) ----------
-def P_RES(help="Grid resolution. Higher = sharper detail but slower."):
+# Keys: see flowzoo/schema.py. min/max = recommended range; hard_min/hard_max = solver
+# limits; units; advanced (hidden in the approachable mode); fixed (what stays fixed).
+def P_RES(help="Grid resolution. Changes only the grid: the domain, parameters and simulated "
+               "interval stay the same, so results at different resolutions are comparable."):
     return {"name": "resolution", "label": "Resolution", "type": "choice",
             "choices": list(RES), "default": "Medium", "group": "Render", "help": help}
 
 
-def P_DUR(help="Simulation length multiplier — set any value (1.0 = default)."):
+def P_DUR(help="Simulated interval as a multiple of the scene's reference interval (1.0 = default)."):
     return {"name": "duration", "label": "Duration (×)", "type": "float", "default": 1.0,
-            "min": 0.2, "max": 6.0, "group": "Render", "help": help}
+            "min": 0.2, "max": 6.0, "hard_min": 0.05, "hard_max": 20.0, "group": "Render", "help": help}
 
 
-def _f(name, label, default, lo, hi, group, help):
-    return {"name": name, "label": label, "type": "float", "default": default,
-            "min": lo, "max": hi, "group": group, "help": help}
+def _f(name, label, default, lo, hi, group, help, units=None, hard_min=None, hard_max=None,
+       advanced=False, fixed=None):
+    d = {"name": name, "label": label, "type": "float", "default": default,
+         "min": lo, "max": hi, "group": group, "help": help}
+    if units: d["units"] = units
+    if hard_min is not None: d["hard_min"] = hard_min
+    if hard_max is not None: d["hard_max"] = hard_max
+    if advanced: d["advanced"] = True
+    if fixed: d["fixed"] = fixed
+    return d
+
+
+def _i(name, label, default, lo, hi, group, help, units=None, hard_min=None, hard_max=None,
+       advanced=False, fixed=None):
+    d = _f(name, label, int(default), lo, hi, group, help, units, hard_min, hard_max, advanced, fixed)
+    d["type"] = "int"
+    return d
 
 
 def _when(qd, ctrl, vals):
@@ -530,16 +547,17 @@ def _when(qd, ctrl, vals):
 
 
 _H = {
-    "Re": "Reynolds number Re = U·D/ν (inertia ÷ viscosity). Low → smooth steady flow; "
-          "high → vortex shedding and turbulence.",
-    "U": "Inlet flow speed (lattice units). Higher → higher Reynolds and a stronger wake; "
-         "keep ≲ 0.15 for numerical stability.",
+    "Re": "Reynolds number Re = U·D/ν (inertia ÷ viscosity) with D the reference length below. "
+          "Low → smooth steady flow; high → vortex shedding and turbulence.",
+    "U": "Inlet flow speed in lattice units. The Reynolds number is held fixed: the viscosity is "
+         "recomputed as ν = U·D/Re, so a higher speed means a higher lattice Mach number "
+         "(keep ≲ 0.15) and a shorter physical time per step, not a stronger wake.",
     "visc": "Kinematic viscosity ν — how 'thick' the fluid is. Lower → finer, more chaotic "
             "structures; higher → smoother, damped flow.",
-    "buoy": "Buoyancy — how forcefully the hot, dyed fluid rises. Higher → a faster, more "
-            "violent plume.",
+    "buoy": "Buoyancy coefficient: force per unit of the transported scalar (dye/temperature). "
+            "Higher → a faster, more vigorous plume.",
     "conf": "Vorticity confinement — re-injects small-scale swirl lost to numerical "
-            "diffusion. Higher → curlier, more detailed smoke.",
+            "diffusion (a modelling knob, not a physical property). 0 = none.",
     "grav": "Gravity driving the instability. Higher → faster fingering / collapse.",
 }
 
@@ -548,7 +566,7 @@ _H = {
 def _solve_windtunnel(p, pr, tmp):
     s = _res(p); nx, ny = int(900 * s), int(300 * s)
     Re = float(p["reynolds"]); U = float(p["speed"]); obs = p["obstacle"]
-    cx, cy = nx // 4, ny // 2 + 2
+    cx, cy = int(nx * float(p.get("xpos", 0.25))), ny // 2 + 2
     D = max(8.0, ny * float(p["size"]))                     # characteristic length
     if obs == "Your text":
         mask = geometry.text(nx, ny, p["text"], font_frac=0.34, x_frac=0.28, max_w_frac=0.5)
@@ -697,11 +715,13 @@ def _solve_euler(mode, p, pr, tmp):
     if mode == "blast":
         nx = ny = int(420 * s); tend = 70 * _durv(p)
         bld = 1 if p.get("scene") == "Shock hits a city" else 0
-        extra = ["--p0", str(p["pressure"]), "--radius", str(p["charge"]), "--building", str(bld)]
+        p_amb = 0.1                                        # ambient pressure in the solver's code units
+        extra = ["--p0", str(float(p["pressure"]) * p_amb), "--radius", str(p["charge"]), "--building", str(bld)]
         if bld:
             extra += ["--strength", str(p.get("strength", 1.0))]
         hints = {"mode": "blast", "debris": int(p.get("debris", 0)), "nx": nx, "ny": ny,
-                 "building": bld}
+                 "building": bld, "p_ambient": p_amb, "p0": float(p["pressure"]) * p_amb,
+                 "pressure_ratio": float(p["pressure"])}
     else:
         nx, ny = int(620 * s), int(320 * s); tend = 230 * _durv(p)
         nb = 2 if p.get("target") == "Two bubbles" else 1
@@ -795,9 +815,10 @@ def _solve_spectral(p, pr, tmp):
     s = _res(p); n = int(256 * s); nu = float(p["viscosity"]); L = 2 * np.pi
     sim = Spectral2D(n=n, L=L, nu=nu)
     if p.get("init") == "Random turbulence":
-        wh = random_field(n, seed=1); label = "decaying turbulence"
+        wh = random_field(n, seed=int(p.get("seed", 1))); label = "decaying turbulence"
     else:
-        wh = double_shear_layer(n, amp=float(p["perturbation"])); label = "Kelvin–Helmholtz"
+        wh = double_shear_layer(n, amp=float(p["perturbation"]), delta=float(p.get("thickness", 1 / 30)))
+        label = "Kelvin–Helmholtz"
     # The simulated interval belongs to the EXPERIMENT, not the resolution: fix T_end from
     # the duration at the reference grid (n0=256) and take however many CFL-limited steps
     # that needs here. (Before, the step count was fixed while dt ~ 1/n, so "Ultra"
@@ -824,7 +845,8 @@ def _solve_mixing(p, pr, tmp):
     from .spectral import Spectral2D, random_field, advect_sl
     s = _res(p); n = int(256 * s); nu = 4e-4
     n0 = 256; T_end = 2600 * _durv(p) * 0.4 * (2 * np.pi / n0)   # experiment-defined interval (same policy as _solve_spectral)
-    sim = Spectral2D(n=n, nu=nu); wh = random_field(n, seed=3); dt = 0.4 * (2 * np.pi / n); steps = max(1, int(round(T_end / dt)))
+    sim = Spectral2D(n=n, nu=nu); wh = random_field(n, seed=int(p.get("seed", 3))); dt = 0.4 * (2 * np.pi / n); steps = max(1, int(round(T_end / dt)))
+    stir = float(p.get("stir", 1.0))                       # 0 = diffusion only, 1 = full stirring
     L = 2 * np.pi
     # dye: alternating horizontal bands (so stirring shows the folding/filamentation)
     yy = np.linspace(0, L, n, endpoint=False)[None, :] * np.ones((n, 1))
@@ -838,27 +860,34 @@ def _solve_mixing(p, pr, tmp):
             raw.append(c.T.copy()); times.append(st * dt)     # solver is [x,y]; public arrays are [y,x]
         if st % _pp == 0:
             pr(f"simulating… {int(100 * st / steps)}%")
-        c = advect_sl(c, u, v, dt, L)
+        if stir > 0:
+            c = advect_sl(c, stir * u, stir * v, dt, L)
         if kap > 0:                                   # gentle scalar diffusion (spectral)
             c = np.real(np.fft.ifft2(np.exp(-kap * sim.k2 * dt) * np.fft.fft2(c)))
         wh = sim.step(wh, dt)
     return Result("field", raw, f"chaotic mixing  {n}×{n}", times=times,
                   hints={"label": "dye", "dx": L / n, "dt": dt, "T_end": T_end, "nu": nu, "kappa": kap,
-                         "time_unit": "nondimensional (L = 2π)"})
+                         "stir": stir, "time_unit": "nondimensional (L = 2π)"})
 
 
 def _solve_reaction(p, pr, tmp):
     from .reaction import gray_scott, PRESETS
     s = _res(p); n = int(220 * s)
-    pat = p.get("pattern", "Spots"); F, k = PRESETS.get(pat, (0.035, 0.065))
+    pat = p.get("pattern", "Spots")
+    if pat == "Custom":
+        F, k = float(p.get("F", 0.035)), float(p.get("k", 0.065))
+    else:
+        F, k = PRESETS.get(pat, (0.035, 0.065))
+    Du, Dv = float(p.get("Du", 0.16)), float(p.get("Dv", 0.08))
     steps = int(9000 * _durv(p))
     pr(f"Gray–Scott {n}×{n}, {pat} (F={F:.4f}, k={k:.4f}), {steps} steps…")
-    frames = gray_scott(n=n, F=F, k=k, steps=steps, nframes=110, seed=1,
+    frames = gray_scott(n=n, F=F, k=k, Du=Du, Dv=Dv, steps=steps, nframes=110, seed=int(p.get("seed", 1)),
                         progress=lambda f: pr(f"simulating… {int(100 * f)}%"))
     every = max(1, steps // 110)
     times = [float(i * every) for i in range(len(frames))]
     return Result("field", frames, f"{pat}  {n}×{n}", times=times,
-                  hints={"label": "V concentration", "F": F, "k": k, "time_unit": "steps (dt = 1)", "steps": steps})
+                  hints={"label": "V concentration", "F": F, "k": k, "Du": Du, "Dv": Dv,
+                         "time_unit": "steps (dt = 1)", "steps": steps})
 
 
 def _solve_quantum(p, pr, tmp):
@@ -885,100 +914,125 @@ EXHIBITS = {
                                 "F1 car", "Cyclist", "Peloton (drafting)", "Your text"],
                     "default": "Cylinder",
                     "help": "What to drop into the stream — a shape, a vehicle, or your own text."},
-                   _when({"name": "text", "label": "Your text", "type": "str", "default": "Funoos",
+                   _when({"name": "text", "label": "Your text", "type": "str", "default": "Funoos", "max_len": 24,
                           "group": "Geometry", "help": "The word to drop into the stream. Short words read best."},
                          "obstacle", ["Your text"]),
-                   _f("size", "Obstacle size (frac.)", 0.13, 0.05, 0.30, "Geometry",
-                      "Obstacle size as a fraction of the channel height. Bigger → larger, "
-                      "slower-shedding wake."),
-                   _when(_f("angle", "Airfoil angle (°)", 12, 0, 25, "Geometry",
-                            "Angle of attack of the airfoil, in degrees."), "obstacle", ["Airfoil"]),
-                   _f("reynolds", "Reynolds number", 160, 60, 1200, "Physics", _H["Re"]),
-                   _f("speed", "Inflow speed (lattice)", 0.08, 0.02, 0.15, "Physics", _H["U"]),
+                   _when(_f("size", "Obstacle size", 0.13, 0.05, 0.30, "Geometry",
+                            "Obstacle size (cylinder diameter, square side, airfoil chord/2.6) as a fraction "
+                            "of the channel height. Bigger → larger, slower-shedding wake.",
+                            units="× height", hard_min=0.02, hard_max=0.6,
+                            fixed="Re is held: ν is recomputed from the new D"),
+                         "obstacle", ["Cylinder", "Square", "Diamond", "Airfoil"]),
+                   _when(_f("angle", "Airfoil angle of attack", 12, -25, 25, "Geometry",
+                            "Angle of attack in degrees; positive = leading edge up (lift upward). "
+                            "Negative angles mirror the flow and give downward lift.", units="°",
+                            hard_min=-45, hard_max=45), "obstacle", ["Airfoil"]),
+                   _f("reynolds", "Reynolds number", 160, 60, 1200, "Physics", _H["Re"], hard_min=5, hard_max=5000,
+                      fixed="U and D stay; ν = U·D/Re changes"),
+                   _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"], units="lattice",
+                      hard_min=0.005, hard_max=0.25, fixed="Re stays; ν changes with U"),
+                   _f("xpos", "Obstacle position", 0.25, 0.15, 0.5, "Geometry",
+                      "Streamwise position of the obstacle centre as a fraction of the tunnel length "
+                      "(vehicles and text use their own placement).", units="× length", hard_min=0.05,
+                      hard_max=0.8, advanced=True),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_windtunnel(p, pr, t)},
     "Rising Smoke": {
-        "params": [_f("buoyancy", "Buoyancy", 2.5e-3, 5e-4, 6e-3, "Physics", _H["buoy"]),
-                   _f("confinement", "Vorticity confinement", 8, 0, 20, "Physics", _H["conf"]),
-                   _f("viscosity", "Viscosity", 8e-5, 0, 5e-4, "Physics", _H["visc"]),
-                   _f("flicker", "Flame flicker", 0.0, 0.0, 1.0, "Physics",
-                      "Wobble & pulse the source so the plume dances like a flame. 0 = a steady "
-                      "column; 1 = a lively candle flame."),
-                   _f("source", "Source width (×)", 1.0, 0.3, 3.0, "Geometry",
-                      "Width of the hot source at the floor."),
+        "params": [_f("buoyancy", "Buoyancy coefficient", 2.5e-3, 5e-4, 6e-3, "Physics", _H["buoy"],
+                      units="grid units", hard_min=0, hard_max=0.05),
+                   _f("confinement", "Vorticity confinement", 8, 0, 20, "Physics", _H["conf"], hard_min=0, hard_max=60),
+                   _f("viscosity", "Viscosity", 8e-5, 0, 5e-4, "Physics", _H["visc"], units="grid units", hard_min=0, hard_max=0.05),
+                   _f("flicker", "Source flicker", 0.0, 0.0, 1.0, "Physics",
+                      "Wobble & pulse the source (a prescribed modulation of the inflow, not a physical "
+                      "instability). 0 = a steady column; 1 = a lively, flame-like pulse.", hard_min=0, hard_max=1),
+                   _f("source", "Source width", 1.0, 0.3, 3.0, "Geometry",
+                      "Width of the hot source at the floor.", units="×", hard_min=0.1, hard_max=6),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("smoke", p, pr, t)},
     "Candle Flame": {
         "params": [_f("buoyancy", "Heat-release buoyancy", 0.020, 0.008, 0.03, "Physics",
-                      "How strongly the heat released at the flame sheet lifts the gas. Stronger "
-                      "buoyancy draws the fuel up faster, keeping the flame slender and steady."),
+                      "How strongly the temperature proxy T(Z) lifts the gas. Stronger buoyancy draws "
+                      "the fuel up faster, keeping the flame slender and steady.", units="grid units",
+                      hard_min=0, hard_max=0.1),
                    _f("zst", "Stoichiometric mixture  Z_st", 0.18, 0.08, 0.30, "Physics",
-                      "The fuel/air ratio at which the flame burns. The luminous sheet sits on the "
-                      "Z = Z_st surface; a larger value pulls it tighter to the fuel core (a thinner flame)."),
-                   _f("source", "Wick width (×)", 0.45, 0.3, 1.5, "Geometry",
-                      "Width of the fuel vapour leaving the wick. A thin wick gives a slender candle flame."),
+                      "The fuel/air ratio at which the flame sheet sits. The luminous sheet is the "
+                      "Z = Z_st surface; a larger value pulls it tighter to the fuel core.", hard_min=0.02, hard_max=0.9),
+                   _f("source", "Wick width", 0.45, 0.3, 1.5, "Geometry",
+                      "Width of the fuel vapour leaving the wick. A thin wick gives a slender flame.",
+                      units="×", hard_min=0.1, hard_max=4),
                    _f("confinement", "Vorticity confinement", 4, 0, 20, "Physics",
-                      "Sharpens the small eddies that make the flame tip lick and wander."),
-                   _f("viscosity", "Viscosity", 2.5e-4, 5e-5, 6e-4, "Physics", _H["visc"]),
+                      "Sharpens the small eddies that make the flame tip lick and wander (a modelling knob).",
+                      hard_min=0, hard_max=60),
+                   _f("viscosity", "Viscosity", 2.5e-4, 5e-5, 6e-4, "Physics", _H["visc"], units="grid units",
+                      hard_min=0, hard_max=0.05),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("flame", p, pr, t)},
     "Mushroom Clouds": {
         "params": [_f("atwood", "Atwood number", 0.7, 0.2, 1.0, "Physics",
-                      "A = (ρ_heavy − ρ_light)/(ρ_heavy + ρ_light), the density contrast across "
-                      "the interface. It sets how hard the heavy fluid falls: higher A → faster, "
-                      "narrower spikes and more vigorous mushroom roll-up."),
-                   _f("gravity", "Gravity (sim units)", 1.2e-3, 4e-4, 3e-3, "Physics", _H["grav"]),
-                   _f("viscosity", "Viscosity (sim units)", 1.5e-4, 3e-5, 5e-4, "Physics", _H["visc"]),
-                   _f("perturbation", "Interface ripple (×)", 1.0, 0.2, 3.0, "Physics",
-                      "Amplitude of the initial interface ripple that seeds the fingers."),
+                      "A = (ρ_heavy − ρ_light)/(ρ_heavy + ρ_light), the density contrast across the "
+                      "interface. Higher A → faster, narrower spikes. (Boussinesq-like model: density "
+                      "only enters the buoyancy force; see the scene notes.)", hard_min=0.01, hard_max=1.0),
+                   _f("gravity", "Gravity", 1.2e-3, 4e-4, 3e-3, "Physics", _H["grav"], units="grid units",
+                      hard_min=0, hard_max=0.05),
+                   _f("viscosity", "Viscosity", 1.5e-4, 3e-5, 5e-4, "Physics", _H["visc"], units="grid units",
+                      hard_min=0, hard_max=0.05),
+                   _f("perturbation", "Interface ripple", 1.0, 0.2, 3.0, "Physics",
+                      "Amplitude of the initial multi-mode interface ripple that seeds the fingers.",
+                      units="×", hard_min=0, hard_max=10),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("rt", p, pr, t)},
     "Rayleigh-Benard": {
-        "params": [_f("buoyancy", "Buoyancy (Rayleigh)", 6e-3, 2e-3, 1.2e-2, "Physics",
-                      "How hard the temperature difference pushes the fluid — effectively the "
-                      "Rayleigh number. Higher → convection sets in faster and rolls break into "
-                      "more vigorous, plume-like turbulence."),
-                   _f("viscosity", "Viscosity (sim units)", 6e-4, 2e-4, 1.5e-3, "Physics",
-                      "Damps the motion. Lower viscosity → a higher Rayleigh number → tighter, "
-                      "more chaotic convection cells."),
-                   _f("perturbation", "Seed ripple (×)", 1.0, 0.2, 3.0, "Physics",
-                      "Amplitude of the tiny temperature perturbation that breaks the symmetry "
-                      "and selects the cell wavelength."),
+        "params": [_f("buoyancy", "Buoyancy coefficient  β·ΔT", 6e-3, 2e-3, 1.2e-2, "Physics",
+                      "Buoyant acceleration per unit temperature difference. With the viscosity and "
+                      "thermal diffusivity it sets the Rayleigh number Ra = β·ΔT·H³/(ν κ) shown in the "
+                      "derived quantities — this control is NOT itself a Rayleigh number.",
+                      units="grid units", hard_min=0, hard_max=0.1),
+                   _f("viscosity", "Viscosity ν", 6e-4, 2e-4, 1.5e-3, "Physics",
+                      "Damps the motion. Lower viscosity → a higher Rayleigh number → tighter, more chaotic cells.",
+                      units="grid units", hard_min=1e-6, hard_max=0.05),
+                   _f("kappa", "Thermal diffusivity κ", 0.02, 0.005, 0.1, "Physics",
+                      "Conduction of heat. Together with ν it sets the Prandtl number ν/κ and the Rayleigh "
+                      "number. (Explicit diffusion step: κ·dt must stay ≤ 0.25.)", units="grid units",
+                      hard_min=0, hard_max=0.25, advanced=True),
+                   _f("perturbation", "Seed ripple", 1.0, 0.2, 3.0, "Physics",
+                      "Amplitude of the tiny temperature perturbation that breaks the symmetry and "
+                      "selects the cell wavelength.", units="×", hard_min=0, hard_max=10),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("rb", p, pr, t)},
     "Chimney Plume": {
-        "params": [_f("buoyancy", "Buoyancy", 5e-3, 2e-3, 1e-2, "Physics", _H["buoy"]),
+        "params": [_f("buoyancy", "Buoyancy coefficient", 5e-3, 2e-3, 1e-2, "Physics", _H["buoy"],
+                      units="grid units", hard_min=0, hard_max=0.05),
                    _f("wind", "Crosswind speed", 0.30, 0.0, 0.55, "Physics",
-                      "Speed of the horizontal wind blowing across the stack. Stronger wind bends "
-                      "the plume over closer to the ground (a smaller plume rise). Below the plume's "
-                      "own buoyant velocity the plume rises near-vertically; above it, the wind wins "
-                      "and the plume lies over and streams downwind."),
-                   _f("confinement", "Vorticity confinement", 6, 0, 20, "Physics", _H["conf"]),
-                   _f("source", "Stack width (×)", 0.6, 0.3, 3.0, "Geometry",
-                      "Width of the chimney source at the floor."),
-                   _f("viscosity", "Viscosity", 8e-5, 0, 5e-4, "Physics", _H["visc"]),
+                      "Speed of the horizontal wind across the stack. Stronger wind bends the plume over "
+                      "closer to the ground (a smaller plume rise). 0 = calm air.", units="grid units/step",
+                      hard_min=0, hard_max=0.8),
+                   _f("confinement", "Vorticity confinement", 6, 0, 20, "Physics", _H["conf"], hard_min=0, hard_max=60),
+                   _f("source", "Stack width", 0.6, 0.3, 3.0, "Geometry",
+                      "Width of the chimney source at the floor.", units="×", hard_min=0.1, hard_max=6),
+                   _f("viscosity", "Viscosity", 8e-5, 0, 5e-4, "Physics", _H["visc"], units="grid units", hard_min=0, hard_max=0.05),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("wind", p, pr, t)},
     "Detonation": {
         "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
                     "choices": ["Open air", "Shock hits a city"], "default": "Open air",
-                    "help": "Open air: a free blast wave expanding into still gas. Shock hits a "
-                    "city: a ground burst whose blast diffracts around and reflects off two solid "
-                    "towers — watch the Mach stems and shadow zones behind the buildings."},
-                   _f("pressure", "Blast pressure (× ambient)", 10.0, 2.0, 40.0, "Physics",
-                      "Pressure inside the charge, in units of ambient pressure (≈0.1 code). "
-                      "Higher → a stronger, faster shock."),
-                   _f("charge", "Charge size (frac.)", 0.06, 0.02, 0.18, "Geometry",
-                      "Radius of the high-pressure charge as a fraction of the domain width."),
+                    "help": "Open air: a free blast wave expanding into still gas. Shock hits a city: a "
+                    "ground burst whose blast diffracts around and reflects off two solid towers."},
+                   _f("pressure", "Charge pressure ratio  p₀ / p_ambient", 100.0, 20.0, 400.0, "Physics",
+                      "Pressure inside the charge relative to the ambient pressure (0.1 in code units). "
+                      "Higher → a stronger, faster shock. The solver receives p₀ = ratio × 0.1.",
+                      hard_min=1.01, hard_max=5000),
+                   _f("charge", "Charge size", 0.06, 0.02, 0.18, "Geometry",
+                      "Radius of the high-pressure charge as a fraction of the domain width.",
+                      units="× width", hard_min=0.005, hard_max=0.4),
                    _when(_f("strength", "Structure strength", 1.0, 0.2, 3.0, "Physics",
-                            "How much overpressure each block of the towers can take before it "
-                            "fails. Weak structures (low) are scoured away windward-first and "
-                            "collapse; strong ones (high) shrug off the blast. Failed blocks turn "
-                            "to flying debris, so the towers visibly change shape as the shock hits."),
+                            "Overpressure each block of the towers can take before it fails (simplified "
+                            "erosion model, see the scene notes). Weak structures are scoured away "
+                            "windward-first; very strong ones behave as rigid walls.",
+                            hard_min=0.01, hard_max=1000),
                          "scene", ["Shock hits a city"]),
-                   _f("debris", "Debris particles", 200, 0, 800, "Render",
-                      "Glowing debris scattered across the domain and swept outward by the "
-                      "blast (visual only)."),
+                   _i("debris", "Debris particles", 200, 0, 800, "Render",
+                      "Glowing debris swept outward by the blast (visual only; not part of the solution).",
+                      hard_min=0, hard_max=5000),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("blast", p, pr, t)},
     "Shockwave Strike": {
@@ -986,16 +1040,14 @@ EXHIBITS = {
                     "choices": ["Single bubble", "Two bubbles"], "default": "Single bubble",
                     "help": "One gas bubble, or two stacked bubbles whose roll-ups interact."},
                    _f("mach", "Shock Mach number", 1.5, 1.1, 3.0, "Physics",
-                      "Strength of the incoming shock, M_s = (shock speed)/(sound speed). The "
-                      "post-shock gas state is set from the exact Rankine–Hugoniot relations, so "
-                      "higher M → stronger compression, hotter gas and a faster, tighter roll-up."),
-                   _f("densratio", "Density ratio ρ_bub/ρ_air", 0.18, 0.05, 4.0, "Physics",
-                      "Bubble density ÷ ambient air density. <1 = a light bubble (the shock "
-                      "accelerates through it and it rolls up fast); >1 = a heavy bubble (the "
-                      "shock slows and focuses inside it). This is the Atwood-number analogue that "
-                      "sets the sign and strength of the baroclinic vorticity."),
-                   _f("bubble", "Bubble size (frac.)", 0.18, 0.08, 0.32, "Geometry",
-                      "Bubble radius as a fraction of the domain height."),
+                      "Strength of the incoming shock, M_s = (shock speed)/(sound speed). The post-shock "
+                      "state follows the exact Rankine–Hugoniot relations (see derived quantities).",
+                      hard_min=1.01, hard_max=10),
+                   _f("densratio", "Density ratio ρ_bubble/ρ_air", 0.18, 0.05, 4.0, "Physics",
+                      "Bubble density ÷ ambient density. <1 = a light bubble (rolls up fast); >1 = a heavy "
+                      "bubble (the shock slows and focuses inside it).", hard_min=0.01, hard_max=50),
+                   _f("bubble", "Bubble size", 0.18, 0.08, 0.32, "Geometry",
+                      "Bubble radius as a fraction of the domain height.", units="× height", hard_min=0.02, hard_max=0.45),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("bubble", p, pr, t)},
     "The Big Splash": {
@@ -1003,85 +1055,115 @@ EXHIBITS = {
                     "choices": ["Dam break", "Drop & splash", "Sloshing tank",
                                 "Pour into a glass", "Wavy ocean", "Ship on waves"],
                     "default": "Dam break",
-                    "help": "Which free-surface scenario to run. Each scene exposes its own "
-                    "controls below."},
-                   # --- dam break ---
-                   _when(_f("width", "Dam width (m)", 1.0, 0.4, 2.0, "Geometry",
-                            "Width of the held-back water column."), "scene", ["Dam break"]),
-                   _when(_f("height", "Dam height (m)", 2.0, 0.6, 3.0, "Geometry",
-                            "Height of the column — more head → a faster, taller surge."),
-                         "scene", ["Dam break"]),
-                   # --- drop & splash ---
-                   _when(_f("dropsize", "Drop diameter (m)", 0.4, 0.2, 0.8, "Geometry",
-                            "Diameter of the falling water blob (a parcel of water, not a "
-                            "capillary droplet — there's no surface tension at this scale)."),
-                         "scene", ["Drop & splash"]),
-                   _when(_f("dropheight", "Release height (frac.)", 0.70, 0.45, 0.92, "Geometry",
-                            "How high the block starts, as a fraction of tank height. Higher → "
-                            "faster impact and a bigger crown."), "scene", ["Drop & splash"]),
-                   # --- sloshing tank ---
-                   _when(_f("sloshA", "Slosh strength (×g)", 0.7, 0.1, 1.5, "Physics",
-                            "Amplitude of the oscillating sideways gravity, as a multiple of g."),
-                         "scene", ["Sloshing tank"]),
-                   _when(_f("sloshT", "Slosh period (s)", 1.1, 0.5, 3.0, "Physics",
-                            "Period of the side-to-side forcing. Near the tank's natural period "
-                            "the wave resonates and breaks."), "scene", ["Sloshing tank"]),
-                   # --- pour into a glass ---
-                   _when(_f("spout", "Spout width (frac.)", 0.045, 0.02, 0.12, "Geometry",
-                            "Width of the pour stream as a fraction of the tank width."),
-                         "scene", ["Pour into a glass"]),
-                   _when(_f("pourv", "Pour speed (m/s)", 1.4, 0.4, 3.0, "Physics",
-                            "Speed the water leaves the spout. Faster → more splashing on impact."),
-                         "scene", ["Pour into a glass"]),
-                   # --- wavy ocean / ship ---
-                   _when(_f("waveA", "Wave height (m)", 0.4, 0.1, 0.9, "Physics",
-                            "Stroke of the wavemaker paddle — sets the wave amplitude."),
-                         "scene", ["Wavy ocean", "Ship on waves"]),
-                   _when(_f("waveT", "Wave period (s)", 0.9, 0.4, 2.0, "Physics",
-                            "Period of the wavemaker — sets the wavelength of the train."),
-                         "scene", ["Wavy ocean", "Ship on waves"]),
-                   _when(_f("shipsz", "Ship size (×)", 1.0, 0.5, 1.8, "Geometry",
-                            "Scale of the floating hull. Bigger ships sit deeper and roll slower."),
-                         "scene", ["Ship on waves"]),
-                   # --- common ---
-                   _f("particles", "Particles (≈)", 3000, 600, 12000, "Geometry",
-                      "Approximate number of SPH particles. More → finer splash, slower."),
-                   _f("gravity", "Gravity (m/s²)", 9.81, 1.0, 25.0, "Physics",
-                      "Gravitational acceleration."),
+                    "help": "Which free-surface scenario to run. Each scene exposes its own controls below."},
+                   _when(_f("width", "Dam width", 1.0, 0.4, 2.0, "Geometry",
+                            "Width of the held-back water column (tank 5 × 3.2 m).", units="m",
+                            hard_min=0.1, hard_max=4.9), "scene", ["Dam break"]),
+                   _when(_f("height", "Dam height", 2.0, 0.6, 3.0, "Geometry",
+                            "Height of the column — more head → a faster, taller surge.", units="m",
+                            hard_min=0.1, hard_max=3.1), "scene", ["Dam break"]),
+                   _when(_f("dropsize", "Blob diameter", 0.4, 0.2, 0.8, "Geometry",
+                            "Diameter of the falling water blob (a parcel of water, not a capillary "
+                            "droplet — there is no surface tension in this model).", units="m",
+                            hard_min=0.06, hard_max=1.5), "scene", ["Drop & splash"]),
+                   _when(_f("dropheight", "Release height", 0.70, 0.45, 0.92, "Geometry",
+                            "How high the blob starts, as a fraction of tank height (sets the impact speed "
+                            "√(2 g h)).", units="× height", hard_min=0.35, hard_max=0.95), "scene", ["Drop & splash"]),
+                   _when(_f("sloshA", "Slosh strength", 0.7, 0.1, 1.5, "Physics",
+                            "Amplitude of the oscillating sideways gravity, as a multiple of g.", units="× g",
+                            hard_min=0, hard_max=5), "scene", ["Sloshing tank"]),
+                   _when(_f("sloshT", "Slosh period", 1.1, 0.5, 3.0, "Physics",
+                            "Period of the side-to-side forcing. Near the tank's natural period the wave "
+                            "resonates and breaks.", units="s", hard_min=0.1, hard_max=20), "scene", ["Sloshing tank"]),
+                   _when(_f("spout", "Spout width", 0.045, 0.02, 0.12, "Geometry",
+                            "Half-width of the pour stream as a fraction of the glass width. Values below "
+                            "3 particle spacings are raised to that minimum (shown in derived quantities).",
+                            units="× width", hard_min=0.005, hard_max=0.4), "scene", ["Pour into a glass"]),
+                   _when(_f("pourv", "Pour speed", 1.4, 0.4, 3.0, "Physics",
+                            "Speed the water leaves the spout. Faster → more splashing on impact.",
+                            units="m/s", hard_min=0.05, hard_max=10), "scene", ["Pour into a glass"]),
+                   _when(_f("waveA", "Wavemaker stroke", 0.4, 0.1, 0.9, "Physics",
+                            "Stroke of the wavemaker paddle (the wall's travel), which sets the wave amplitude "
+                            "indirectly — it is not the wave height itself.", units="m",
+                            hard_min=0.02, hard_max=2.0), "scene", ["Wavy ocean", "Ship on waves"]),
+                   _when(_f("waveT", "Wave period", 0.9, 0.4, 2.0, "Physics",
+                            "Period of the wavemaker — sets the wavelength of the train.", units="s",
+                            hard_min=0.1, hard_max=10), "scene", ["Wavy ocean", "Ship on waves"]),
+                   _when(_f("shipsz", "Ship size", 1.0, 0.5, 1.8, "Geometry",
+                            "Scale of the floating hull. Bigger ships sit deeper and roll slower.", units="×",
+                            hard_min=0.2, hard_max=3), "scene", ["Ship on waves"]),
+                   _when(_i("particles", "Particles (≈)", 3000, 600, 12000, "Geometry",
+                            "Approximate number of SPH particles: sets the particle spacing dp (see derived "
+                            "quantities). More → finer splash, slower. The pour scene emits particles "
+                            "continuously and ignores this.", hard_min=200, hard_max=40000),
+                         "scene", ["Dam break", "Drop & splash", "Sloshing tank", "Wavy ocean", "Ship on waves"]),
+                   _f("gravity", "Gravity", 9.81, 1.0, 25.0, "Physics", "Gravitational acceleration.",
+                      units="m/s²", hard_min=0.1, hard_max=100),
                    P_DUR()],
         "solve": lambda p, pr, t: _solve_dam(p, pr, t)},
     "Cloud Billows": {
         "params": [{"name": "init", "label": "Initial field", "type": "choice", "group": "Geometry",
                     "choices": ["Shear layers", "Random turbulence"], "default": "Shear layers",
-                    "help": "Shear layers roll into Kelvin–Helmholtz billows; random turbulence "
-                    "decays as vortices merge (the 2-D inverse cascade)."},
-                   _f("viscosity", "Viscosity", 8e-5, 1e-5, 4e-4, "Physics", _H["visc"]),
+                    "help": "Shear layers roll into Kelvin–Helmholtz billows; random turbulence decays as "
+                    "vortices merge (the 2-D inverse cascade)."},
+                   _f("viscosity", "Viscosity ν", 8e-5, 1e-5, 4e-4, "Physics", _H["visc"], hard_min=0, hard_max=0.01),
                    _when(_f("perturbation", "Shear perturbation", 0.05, 0.005, 0.2, "Physics",
-                            "Strength of the initial shear-layer kick that seeds the billows."),
-                         "init", ["Shear layers"]),
+                            "Amplitude of the initial transverse velocity kick that seeds the billows.",
+                            hard_min=0, hard_max=1), "init", ["Shear layers"]),
+                   _when(_f("thickness", "Shear-layer thickness", 1 / 30, 0.01, 0.1, "Physics",
+                            "Thickness of each tanh shear layer as a fraction of the box size L.",
+                            units="× L", hard_min=0.003, hard_max=0.25, advanced=True), "init", ["Shear layers"]),
+                   _when(_i("seed", "Random seed", 1, 0, 9999, "Physics",
+                            "Seed of the random initial vorticity (same seed → same experiment).",
+                            hard_min=0, hard_max=2 ** 31 - 1, advanced=True), "init", ["Random turbulence"]),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_spectral(p, pr, t)},
     "Porous Flow": {
-        "params": [_f("porosity", "Porosity  φ (void frac.)", 0.60, 0.40, 0.85, "Geometry",
-                      "Fraction of the sample that is open pore space. Lower porosity (denser "
-                      "grain packing) → far lower permeability."),
-                   _f("grain", "Grain size (frac.)", 0.035, 0.02, 0.07, "Geometry",
-                      "Radius of the packed grains as a fraction of the sample height."),
+        "params": [_f("porosity", "Porosity  φ", 0.60, 0.40, 0.85, "Geometry",
+                      "Fraction of the sample that is open pore space. Lower porosity (denser grain "
+                      "packing) → far lower permeability.", units="void fraction", hard_min=0.2, hard_max=0.95),
+                   _f("grain", "Grain size", 0.035, 0.02, 0.07, "Geometry",
+                      "Radius of the packed grains as a fraction of the sample height.", units="× height",
+                      hard_min=0.008, hard_max=0.15),
+                   _i("seed", "Random seed", 1, 0, 9999, "Geometry",
+                      "Seed of the random grain arrangement: change it to compare samples with the same "
+                      "porosity but different connectivity.", hard_min=0, hard_max=2 ** 31 - 1, advanced=True),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_porous(p, pr, t)},
     "Turing Patterns": {
         "params": [{"name": "pattern", "label": "Pattern", "type": "choice", "group": "Geometry",
-                    "choices": ["Spots", "Stripes", "Maze", "Mitosis", "Coral", "Waves"],
+                    "choices": ["Spots", "Stripes", "Maze", "Mitosis", "Coral", "Waves", "Custom"],
                     "default": "Spots",
-                    "help": "Each pattern is a different (feed, kill) regime of the Gray–Scott "
-                    "model — Pearson's classification of reaction–diffusion morphologies."},
+                    "help": "Each pattern is a (feed F, removal k) regime of the Gray–Scott model from "
+                    "Pearson's classification; Custom lets you set F and k yourself."},
+                   _when(_f("F", "Feed rate F", 0.035, 0.01, 0.08, "Physics",
+                            "Rate at which U is fed in (and V removed with k).", hard_min=0, hard_max=0.3),
+                         "pattern", ["Custom"]),
+                   _when(_f("k", "Removal rate k", 0.065, 0.04, 0.075, "Physics",
+                            "Rate at which V is removed.", hard_min=0, hard_max=0.3), "pattern", ["Custom"]),
+                   _f("Du", "Diffusivity of U", 0.16, 0.05, 0.25, "Physics",
+                      "Diffusion coefficient of U (explicit scheme: keep Du ≤ 0.25 for stability at dt = 1).",
+                      hard_min=0, hard_max=0.25, advanced=True),
+                   _f("Dv", "Diffusivity of V", 0.08, 0.02, 0.2, "Physics",
+                      "Diffusion coefficient of V. Patterns need Dv < Du (Turing's condition).",
+                      hard_min=0, hard_max=0.25, advanced=True),
+                   _i("seed", "Random seed", 1, 0, 9999, "Geometry",
+                      "Seed of the initial noisy blobs (same seed → same pattern).", hard_min=0,
+                      hard_max=2 ** 31 - 1, advanced=True),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_reaction(p, pr, t)},
     "Ink in Motion": {
-        "params": [_f("bands", "Dye bands", 6, 2, 14, "Geometry",
-                      "How many stripes of dye to start with before the turbulence stirs them."),
-                   _f("diffusion", "Dye diffusion", 1e-4, 0.0, 1e-3, "Physics",
-                      "Molecular diffusion of the dye — higher blurs the fine filaments sooner."),
+        "params": [_i("bands", "Dye bands", 6, 2, 14, "Geometry",
+                      "How many horizontal stripes of dye to start with.", hard_min=1, hard_max=64),
+                   _f("diffusion", "Dye diffusivity κ", 1e-4, 0.0, 1e-3, "Physics",
+                      "Molecular diffusion of the dye — higher blurs the fine filaments sooner. 0 = pure "
+                      "stirring (only numerical diffusion remains).", hard_min=0, hard_max=0.05),
+                   _f("stir", "Stirring strength", 1.0, 0.0, 1.0, "Physics",
+                      "Multiplies the stirring velocity: 1 = the full turbulent flow, 0 = diffusion only "
+                      "(compare how much mixing comes from stirring versus diffusion).",
+                      hard_min=0, hard_max=3, advanced=True),
+                   _i("seed", "Random seed", 3, 0, 9999, "Physics",
+                      "Seed of the random stirring flow.", hard_min=0, hard_max=2 ** 31 - 1, advanced=True),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_mixing(p, pr, t)},
 }
@@ -1331,6 +1413,21 @@ META = {
                        "void fraction φ — the expected pore-scale behaviour (see the Plots).",
         "demo": "results/gallery/porous_phi60.gif"},
 }
+
+
+def solver_versions():
+    """Provenance of the native solvers: source hash + binary size (for saved experiments)."""
+    import hashlib
+    out = {}
+    for d, n in (("lbm", "lbm2d"), ("incompressible", "ins2d"), ("compressible", "euler2d"), ("sph", "sph2d")):
+        src = SOLVERS / d / (n + ".cpp"); b = _bin(d, n)
+        rec = {}
+        if src.exists():
+            rec["source_sha256"] = hashlib.sha256(src.read_bytes()).hexdigest()[:16]
+        if b.exists():
+            rec["binary_bytes"] = b.stat().st_size
+        out[n] = rec
+    return out
 
 
 def estimate(name, params):
