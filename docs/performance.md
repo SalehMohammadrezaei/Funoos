@@ -55,6 +55,23 @@ there as noise except for the compressible solver (below).
 | Large results (> `FUNOOS_DISK_SPILL_MB`, default 256 MB) are memory-mapped from a scratch directory that is removed on eviction and swept after a crash | repeated large runs do not grow RAM; a disk budget (`FUNOOS_DISK_MB`) bounds the spill |
 | Resource estimate before a run (grid, frames, memory, rough time) shown under the Run button | the user knows what "Ultra × 3" costs before starting |
 
+## Re-measured for 1.1.1 (same machine, shared with an unrelated 5-process MOOSE job)
+
+The whole pipeline was re-run on the final 1.1.1 code; the machine was loaded by an
+unrelated simulation during these runs, so solve times are 20–40 % above the table
+above and only the render/encode columns are comparable. Two changes matter:
+
+| case | render s (1.1.0) | render s (1.1.1) | note |
+|---|---|---|---|
+| windtunnel_stream, 98 frames at 1252×360 | 4.32 | 4.7 (0.048 s per frame, measured directly) | traces now stop at cells used by other traces (streamplot-style thinning), a minimum trace length removes stubs, live traces are compacted and steps are sub-sampled |
+| any single-frame preview | derives the whole animation | derives one frame (2 of 40 frames after a preview, 2 ms) | `_LazyFields` |
+| sph_dam encode | 0.32 | 0.29 | unchanged path |
+
+Startup (import + catalog build): 0.9 s; first useful preview after a run: the final
+frame PNG is emitted before encoding (≈ 30 ms for a 644×180 field). Peak RSS of the
+profiler process: 284 MiB (unchanged). Derived-field caches are now counted in the
+run store's memory budget; encoded clips have their own byte budget (96 MB default).
+
 ## OpenMP thread sweep (LBM wind tunnel, Low, duration 0.4)
 
 | OMP threads | solve s |

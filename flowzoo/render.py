@@ -424,7 +424,9 @@ def streamlines_fast(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID, de
         seeds = seeds[~m[np.clip(seeds[:, 1].round().astype(int), 0, ny - 1),
                          np.clip(seeds[:, 0].round().astype(int), 0, nx - 1)]]
     H, W = ny * upscale, nx * upscale
-    step = 1.0 / upscale                                    # one output pixel per sample
+    step = 4.0 / upscale                                    # 4 output pixels per RK2 step; 5 sub-samples are splatted per step
+    SUB = (0.2, 0.4, 0.6, 0.8, 1.0)
+    MIN_STEPS = 4                                            # traces shorter than 4 steps (16 px) are not drawn
     max_len = max_len or int(max(nx, ny) / step)            # a trace may cross the whole domain
     tiny = 1e-3 * vmax + 1e-30
     oc = max(1.0, sp * 0.75)                                # occupancy cell (cells) sets the trace spacing
@@ -461,25 +463,35 @@ def streamlines_fast(ux, uy, cmap=FLOWZOO_EMBER, mask=None, mask_color=SOLID, de
             continue
         occ.flat[cell_of(sd[:, 0], sd[:, 1])] = True
         for sign in (1.0, -1.0):
-            px = sd[:, 0].copy(); py = sd[:, 1].copy(); alive = np.ones(len(px), bool)
-            cprev = cell_of(px, py)
+            px = sd[:, 0].copy(); py = sd[:, 1].copy(); ids = np.arange(len(px))
+            cprev = cell_of(px, py); age = np.zeros(len(px), int)
+            lx, ly, lc, li = [], [], [], []
             for _ in range(max_len):
+                if not len(px):
+                    break
                 u, v = interp(px, py); s_ = np.hypot(u, v)
                 inv = sign * step / np.maximum(s_, tiny)
                 u2, v2 = interp(px + 0.5 * u * inv, py + 0.5 * v * inv); s2 = np.hypot(u2, v2)
                 inv2 = sign * step / np.maximum(s2, tiny)
                 nxp = px + u2 * inv2; nyp = py + v2 * inv2
-                alive &= (s2 > tiny) & (nxp >= 0) & (nxp <= nx - 1) & (nyp >= 0) & (nyp <= ny - 1)
+                alive = (s2 > tiny) & (nxp >= 0) & (nxp <= nx - 1) & (nyp >= 0) & (nyp <= ny - 1)
                 if m is not None:
                     alive &= ~m[np.clip(nyp.round().astype(int), 0, ny - 1), np.clip(nxp.round().astype(int), 0, nx - 1)]
                 c = cell_of(np.clip(nxp, 0, nx - 1), np.clip(nyp, 0, ny - 1))
-                entering = c != cprev
-                alive &= ~(entering & occ.flat[c])            # stop at a cell another trace already uses
+                alive &= ~((c != cprev) & occ.flat[c])           # stop at a cell another trace already uses
                 if not alive.any():
                     break
-                occ.flat[c[alive]] = True; cprev = c
-                px = np.where(alive, nxp, px); py = np.where(alive, nyp, py)
-                xs_all.append(px[alive]); ys_all.append(py[alive]); cs_all.append(s2[alive])
+                # compact to the traces still alive: the work shrinks as traces end
+                ppx, ppy = px[alive], py[alive]
+                px, py, c, s2, ids = nxp[alive], nyp[alive], c[alive], s2[alive], ids[alive]
+                age[ids] += 1
+                occ.flat[c] = True; cprev = c
+                for f in SUB:                                    # sub-samples along the segment keep the trace continuous
+                    lx.append(ppx + (px - ppx) * f); ly.append(ppy + (py - ppy) * f); lc.append(s2); li.append(ids)
+            if lx:                                               # like streamplot's minlength: drop traces that died at once
+                X = np.concatenate(lx); Y = np.concatenate(ly); C = np.concatenate(lc); I = np.concatenate(li)
+                keep = age[I] >= MIN_STEPS
+                xs_all.append(X[keep]); ys_all.append(Y[keep]); cs_all.append(C[keep])
     img = np.zeros((H, W), np.float32)              # brightness = normalised speed (max-blend)
     if xs_all:
         X = np.concatenate(xs_all); Y = np.concatenate(ys_all)
