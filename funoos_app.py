@@ -54,6 +54,8 @@ from flowzoo import engine, render, content, postproc, catalog   # noqa: E402
 # ---------------------------------------------------------------- result storage
 MAX_RUNS = int(os.environ.get("FUNOOS_MAX_RUNS", "3"))
 MEMORY_BUDGET_MB = float(os.environ.get("FUNOOS_MEMORY_MB", "1024"))
+DISK_SPILL_MB = float(os.environ.get("FUNOOS_DISK_SPILL_MB", "256"))   # results above this are memory-mapped from disk
+DISK_BUDGET_MB = float(os.environ.get("FUNOOS_DISK_MB", "4096"))       # cap on spilled data kept on disk
 MAX_JOB_RECORDS = 30           # finished job records kept for state queries
 
 
@@ -83,19 +85,41 @@ class RunStore:
     the last to go.
     """
 
-    def __init__(self, max_runs=MAX_RUNS, max_bytes=int(MEMORY_BUDGET_MB * 2 ** 20)):
+    def __init__(self, max_runs=MAX_RUNS, max_bytes=int(MEMORY_BUDGET_MB * 2 ** 20),
+                 spill_bytes=int(DISK_SPILL_MB * 2 ** 20), disk_bytes=int(DISK_BUDGET_MB * 2 ** 20),
+                 spill_dir=None):
         self.max_runs = max(1, int(max_runs))
         self.max_bytes = max(0, int(max_bytes))
+        self.spill_bytes = int(spill_bytes) if spill_bytes else None     # None: never spill
+        self.disk_bytes = max(0, int(disk_bytes))
+        self.spill_dir = Path(spill_dir) if spill_dir else Path(tempfile.gettempdir())
         self._runs = {}
         self._lock = threading.Lock()
 
     def add(self, run_id, result, info=None, pinned=False):
+        nbytes = result_bytes(result); on_disk = 0
+        if self.spill_bytes and nbytes > self.spill_bytes and hasattr(result, "spill"):
+            d = self.spill_dir / f"{engine.TMP_PREFIX}run-{run_id}"          # swept at next launch after a crash
+            try:
+                on_disk = result.spill(d); nbytes = result_bytes(result) - on_disk
+            except Exception:
+                on_disk = 0; shutil.rmtree(d, ignore_errors=True)
         with self._lock:
             now = time.time()
             self._runs[run_id] = {"result": result, "info": info or getattr(result, "info", ""),
-                                  "bytes": result_bytes(result), "pinned": bool(pinned),
+                                  "bytes": max(0, nbytes), "disk": on_disk, "pinned": bool(pinned),
                                   "created": now, "last_used": now}
             return self._evict(keep=run_id)
+
+    def _release(self, rid):
+        r = self._runs.pop(rid)
+        d = getattr(r["result"], "hints", {}).get("spilled_to") if r.get("disk") else None
+        if d:
+            try:
+                r["result"].raw = []; r["result"].hints.pop("vel", None); r["result"]._cache.clear()
+            except Exception:
+                pass
+            shutil.rmtree(d, ignore_errors=True)
 
     def get(self, run_id, touch=True):
         with self._lock:
@@ -118,11 +142,14 @@ class RunStore:
 
     def remove(self, run_id):
         with self._lock:
-            return self._runs.pop(run_id, None) is not None
+            if run_id not in self._runs:
+                return False
+            self._release(run_id); return True
 
     def clear(self):
         with self._lock:
-            self._runs.clear()
+            for rid in list(self._runs):
+                self._release(rid)
 
     def set_limits(self, max_runs=None, max_bytes=None):
         with self._lock:
@@ -138,17 +165,21 @@ class RunStore:
 
     def _evict(self, keep=None):
         evicted = []
-        while len(self._runs) > self.max_runs or self.total_bytes() > self.max_bytes:
+        while (len(self._runs) > self.max_runs or self.total_bytes() > self.max_bytes
+               or self.disk_total() > self.disk_bytes):
             cands = [(r["last_used"], rid) for rid, r in self._runs.items()
                      if not r["pinned"] and rid != keep]
             if not cands:
                 break                                   # nothing evictable: over budget but pinned/current
             _, victim = min(cands)
-            del self._runs[victim]; evicted.append(victim)
+            self._release(victim); evicted.append(victim)
         return evicted
 
     def total_bytes(self):
         return sum(r["bytes"] for r in self._runs.values())
+
+    def disk_total(self):
+        return sum(r.get("disk", 0) for r in self._runs.values())
 
     def ids(self):
         return list(self._runs)
@@ -156,7 +187,7 @@ class RunStore:
     def summary(self):
         with self._lock:
             return [{"run_id": rid, "info": r["info"], "pinned": r["pinned"],
-                     "bytes": r["bytes"], "created": r["created"], "last_used": r["last_used"]}
+                     "bytes": r["bytes"], "disk": r.get("disk", 0), "created": r["created"], "last_used": r["last_used"]}
                     for rid, r in self._runs.items()]
 
     def __len__(self):
@@ -258,10 +289,46 @@ def _b64_png(rgb):
 
 
 def _b64_mp4(frames, fps):
+    """Encode an iterable of frames (list or generator) and return a data URL."""
     with tempfile.TemporaryDirectory(prefix=engine.TMP_PREFIX) as d:
         p = Path(d) / "v.mp4"; render.save_mp4(frames, p, fps=fps)
         data = p.read_bytes()
     return "data:video/mp4;base64," + base64.b64encode(data).decode()
+
+
+class _Superseded(Exception):
+    """A newer request for the same run replaced this one while it was encoding."""
+
+
+MAX_VIEW_CACHE = int(os.environ.get("FUNOOS_VIEW_CACHE", "12"))   # rendered clips kept (all runs)
+
+
+class ViewCache:
+    """LRU cache of encoded clips keyed by (run_id, view, cmap, fps, vmin, vmax)."""
+
+    def __init__(self, max_items=MAX_VIEW_CACHE):
+        self.max_items = max(1, int(max_items)); self._d = {}; self._lock = threading.Lock()
+
+    def get(self, key):
+        with self._lock:
+            v = self._d.pop(key, None)
+            if v is not None:
+                self._d[key] = v                 # most recently used
+            return v
+
+    def put(self, key, value):
+        with self._lock:
+            self._d[key] = value
+            while len(self._d) > self.max_items:
+                del self._d[next(iter(self._d))]
+
+    def drop_run(self, run_id):
+        with self._lock:
+            for k in [k for k in self._d if k[0] == run_id]:
+                del self._d[k]
+
+    def __len__(self):
+        return len(self._d)
 
 
 def _param_spec(exhibit):
@@ -306,8 +373,11 @@ def _js(s):
 class Api:
     def __init__(self, store=None, sweep=True):
         self.store = store if store is not None else RunStore()   # (an empty store is falsy)
+        self.views = ViewCache()
         self._jobs = {}                  # job_id -> Job (insertion ordered)
         self._lock = threading.Lock()
+        self._encode = threading.Lock()  # one expensive encode at a time (bounded worker)
+        self._latest = {}                # run_id -> newest render request token seen
         self._win = None
         self.swept = sweep_stale_temp() if sweep else []
 
@@ -364,6 +434,16 @@ class Api:
             except Exception:
                 pass
 
+    def _emit(self, js):
+        if self._win:
+            try:
+                self._win.evaluate_js(js)
+            except Exception:
+                pass
+
+    def _emit_preview(self, job_id, png, label):
+        self._emit(f"window.onPreview && window.onPreview({_js(job_id)}, {_js(png)}, {_js(label)})")
+
     def cancel(self, job_id):
         """Request cancellation; the solver is killed / stopped at its next progress tick."""
         with self._lock:
@@ -407,19 +487,27 @@ class Api:
             if job.cancel.is_set():
                 raise engine.Cancelled()
             job.set_state("rendering")
-            view = view if view in res.views else res.views[0]
+            view = res.view_name(view)
             cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
             progress(f"rendering {view}…")
-            vid = _b64_mp4(res.render(view, cm), fps)
+            # show something useful before the clip exists: the final frame as a still
+            self._emit_preview(job.id, _b64_png(res.frame(-1, view, cm)), f"{view} · last frame (video encoding…)")
+            if job.cancel.is_set():
+                raise engine.Cancelled()
+            with self._encode:
+                vid = _b64_mp4(self._frames(res, view, cm, fps, cancel=job.cancel), fps)
             if job.cancel.is_set():
                 raise engine.Cancelled()
             evicted = self.store.add(job.id, res, res.info)
+            for rid in evicted:
+                self.views.drop_run(rid)
+            self.views.put((job.id, view, cm, fps, None, None), vid)
             job.run_id = job.id
             job.set_state("completed")
             return {"ok": True, "job_id": job.id, "run_id": job.id, "state": "completed",
                     "video": vid, "views": list(res.views), "view": view, "info": res.info,
                     "cmaps": list(render.COLORMAPS), "defcmap": cm, "stats": _stats(res, exhibit),
-                    "params": dict(job.params), "evicted": evicted,
+                    "params": dict(job.params), "evicted": evicted, "meta": res.meta(),
                     "store": {"runs": len(self.store), "bytes": self.store.total_bytes()}}
         except engine.Cancelled:
             job.set_state("cancelled"); job.error = "cancelled"
@@ -429,17 +517,71 @@ class Api:
             job.set_state("failed")
             return {"ok": False, "job_id": job.id, "state": "failed", "error": job.error}
 
-    def render_view(self, run_id, view, cmap=None, fps=26, req=None):
+    def _frames(self, res, view, cm, fps, cancel=None, run_id=None, req=None, vmin=None, vmax=None):
+        """Frame generator that stops early when its job is cancelled or a newer render
+        request for the same run has arrived (so obsolete encodes are abandoned)."""
+        for i, fr in enumerate(res.iter_frames(view, cm, vmin, vmax)):
+            if cancel is not None and cancel.is_set():
+                raise engine.Cancelled()
+            if run_id is not None and req is not None and self._latest.get(run_id, req) != req:
+                raise _Superseded()
+            yield fr
+
+    def render_view(self, run_id, view, cmap=None, fps=26, req=None, vmin=None, vmax=None):
+        """Encode a view of a stored run. Cached per (run, view, palette, fps, limits); a
+        request superseded by a newer one for the same run is abandoned mid-encode."""
         res = self.store.result(run_id)
         if res is None:
             return {"ok": False, "error": "run expired", "run_id": run_id, "req": req}
         try:
-            view = view if view in res.views else res.views[0]
+            view = res.view_name(view)
             cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
-            return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm,
-                    "video": _b64_mp4(res.render(view, cm), fps)}
+            vmin = None if vmin in (None, "") else float(vmin)
+            vmax = None if vmax in (None, "") else float(vmax)
+            key = (run_id, view, cm, int(fps), vmin, vmax)
+            hit = self.views.get(key)
+            if hit is not None:
+                return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm,
+                        "video": hit, "cached": True}
+            if req is not None:                                      # tokens grow monotonically per client
+                if req < self._latest.get(run_id, req):
+                    return {"ok": False, "error": "superseded", "superseded": True, "run_id": run_id, "req": req}
+                self._latest[run_id] = req
+            with self._encode:
+                if req is not None and self._latest.get(run_id) != req:
+                    return {"ok": False, "error": "superseded", "superseded": True, "run_id": run_id, "req": req}
+                vid = _b64_mp4(self._frames(res, view, cm, fps, run_id=run_id, req=req, vmin=vmin, vmax=vmax), fps)
+            self.views.put(key, vid)
+            return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm, "video": vid, "cached": False}
+        except _Superseded:
+            return {"ok": False, "error": "superseded", "superseded": True, "run_id": run_id, "req": req}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e), "run_id": run_id, "req": req}
+
+    def preview_frame(self, run_id, view, cmap=None, frac=1.0, req=None, vmin=None, vmax=None):
+        """One frame of a view as PNG — an instant preview for palette / limit changes.
+        `frac` in [0, 1] picks the frame by position in the clip."""
+        res = self.store.result(run_id)
+        if res is None:
+            return {"ok": False, "error": "run expired", "run_id": run_id, "req": req}
+        try:
+            view = res.view_name(view)
+            cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
+            vmin = None if vmin in (None, "") else float(vmin)
+            vmax = None if vmax in (None, "") else float(vmax)
+            frac = float(frac); i = int(round(max(0.0, min(1.0, frac)) * (res.nframes - 1)))
+            img = res.frame(i, view, cm, vmin, vmax)
+            return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm, "index": i,
+                    "time": float(res.times[i]), "img": _b64_png(img)}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "run_id": run_id, "req": req}
+
+    def estimate(self, exhibit, params):
+        """Rough resource estimate for a run before it starts (grid, frames, memory, time)."""
+        try:
+            return {"ok": True, **engine.estimate(exhibit, params or {})}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e)}
 
     def save_clip(self, run_id, view, cmap=None, fmt="mp4"):
         """Render the current view and save it to a user-chosen file (MP4 or GIF).
@@ -463,8 +605,8 @@ class Api:
             path = sel[0] if isinstance(sel, (list, tuple)) else sel
             if not path.lower().endswith("." + fmt):
                 path += "." + fmt
-            frames = res.render(view, cm)
-            (render.save_gif if fmt == "gif" else render.save_mp4)(frames, path, fps=26)
+            with self._encode:
+                (render.save_gif if fmt == "gif" else render.save_mp4)(res.iter_frames(view, cm), path, fps=26)
             return {"ok": True, "path": path, "run_id": run_id}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e), "run_id": run_id}
@@ -483,7 +625,8 @@ class Api:
     # ---------- result store ----------
     def runs(self):
         return {"ok": True, "runs": self.store.summary(), "max_runs": self.store.max_runs,
-                "max_bytes": self.store.max_bytes, "bytes": self.store.total_bytes()}
+                "max_bytes": self.store.max_bytes, "bytes": self.store.total_bytes(),
+                "disk_bytes": self.store.disk_total(), "disk_max": self.store.disk_bytes}
 
     def pin_run(self, run_id, pinned=True):
         if not self.store.pin(run_id, pinned):
@@ -492,6 +635,8 @@ class Api:
 
     def set_budget(self, max_runs=None, memory_mb=None):
         evicted = self.store.set_limits(max_runs, None if memory_mb is None else float(memory_mb) * 2 ** 20)
+        for rid in evicted:
+            self.views.drop_run(rid)
         return {"ok": True, "evicted": evicted, **self.runs()}
 
     # ---------- lifecycle ----------

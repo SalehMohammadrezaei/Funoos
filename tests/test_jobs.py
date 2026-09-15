@@ -28,20 +28,11 @@ FAKE_SOLVER = [sys.executable, "-u", "-c",
                "import time\nfor i in range(1, 201):\n    print(f'step {i}/200', flush=True); time.sleep(0.05)"]
 
 
-class FakeResult:
-    """Minimal engine.Result look-alike (kind lbm so views/colormaps resolve)."""
-    kind = "lbm"
-
-    def __init__(self, nframes=3, tag="fake"):
-        self.raw = [np.zeros((8, 8), np.float32) for _ in range(nframes)]
-        self.mask, self.hints, self.info = None, {}, f"{tag}  8×8"
-
-    @property
-    def views(self):
-        return engine.VIEWS[self.kind]
-
-    def render(self, view=None, colormap=None):
-        return [np.zeros((8, 8, 3), np.uint8) for _ in self.raw]
+def FakeResult(nframes=3, tag="fake"):
+    """A small real engine.Result (kind lbm) so views, previews and metadata resolve."""
+    yy, xx = np.mgrid[0:8, 0:8]
+    raw = [(np.sin(xx / 3.0 + 0.1 * i).astype(np.float32), np.cos(yy / 3.0).astype(np.float32)) for i in range(nframes)]
+    return engine.Result("lbm", raw, f"{tag}  8×8", hints={"dx": 1.0}, times=[float(i) for i in range(nframes)])
 
 
 def _install_fake_exhibits():
@@ -67,7 +58,11 @@ def _install_fake_exhibits():
 
 
 _install_fake_exhibits()
-funoos_app._b64_mp4 = lambda frames, fps: "data:video/mp4;base64,AAAA"   # no ffmpeg needed
+_ENCODES = []
+def _fake_mp4(frames, fps):                       # no ffmpeg needed; consume the generator like the real one
+    n = sum(1 for _ in frames); _ENCODES.append(n)
+    return f"data:video/mp4;base64,{n}"
+funoos_app._b64_mp4 = _fake_mp4
 
 
 def _api():
@@ -220,6 +215,47 @@ def test_diagnostics_envelope():
     assert d["ok"] and d["req"] == 1 and d["plots"][0]["title"] == "T" and d["plots"][0]["img"].startswith("data:image/png")
 
 
+def test_view_cache_preview_and_superseded():
+    api = _api()
+    r = api.run("__quick__", {}, None, "Turbo", 26, "vc")
+    assert r["ok"] and r["meta"]["frames"] == 3 and r["defcmap"] == "Turbo"
+    n0 = len(_ENCODES)
+    v0 = api.render_view("vc", "Vorticity", "Turbo", 26, req=0)
+    assert v0["ok"] and v0["cached"] is True, "the clip encoded by run() itself is already cached"
+    a = api.render_view("vc", "Speed", "Turbo", 26, req=1)
+    assert a["ok"] and a["cached"] is False and len(_ENCODES) == n0 + 1
+    b = api.render_view("vc", "Speed", "Turbo", 26, req=2)
+    assert b["ok"] and b["cached"] is True and len(_ENCODES) == n0 + 1, "second identical request is served from cache"
+    c = api.render_view("vc", "Speed", "Inferno", 26, req=3)
+    assert c["ok"] and c["cached"] is False, "a different palette is a different clip"
+    d = api.render_view("vc", "Speed", "Inferno", 26, req=4, vmin=0, vmax=0.5)
+    assert d["ok"] and d["cached"] is False, "manual limits are part of the key"
+    p = api.preview_frame("vc", "Speed", "Magma", 0.5, req=9)
+    assert p["ok"] and p["req"] == 9 and p["index"] == 1 and p["time"] == 1.0 and p["img"].startswith("data:image/png")
+    assert api.preview_frame("nope", "Speed")["ok"] is False
+    # a request superseded before its encode starts is abandoned, not encoded
+    api._latest["vc"] = 99
+    s = api.render_view("vc", "Streamlines", "Turbo", 26, req=50)
+    assert s["ok"] is False and s.get("superseded") is True
+    # eviction drops the cached clips of that run
+    api.store.remove("vc"); api.views.drop_run("vc")
+    assert len(api.views) == 0
+
+
+def test_estimate_api():
+    api = _api()
+    e = api.estimate("Wind Tunnel", {"resolution": "Low (fast)"})
+    assert e["ok"] and e["grid"] == [540, 180] and e["seconds"] > 0
+    assert api.estimate("__nope__", {})["ok"] is False
+
+
+def test_run_emits_preview_before_clip():
+    api = _api(); seen = []
+    api._emit_preview = lambda jid, png, label: seen.append((jid, png[:15], label))
+    r = api.run("__quick__", {}, None, None, 26, "pv")
+    assert r["ok"] and seen and seen[0][0] == "pv" and seen[0][1] == "data:image/png;" and "encoding" in seen[0][2]
+
+
 # ----------------------------------------------------------------- result store
 def test_store_bounded_by_count_lru():
     st = RunStore(max_runs=3, max_bytes=10 ** 9)
@@ -261,6 +297,28 @@ def test_api_store_integration_and_budget():
     b = api.set_budget(max_runs=1)
     assert b["evicted"] == ["s2"] and [x["run_id"] for x in b["runs"]] == ["s1"]
     assert api.pin_run("gone")["ok"] is False
+
+
+def test_large_results_spill_to_disk_and_clean_up():
+    """Results above the spill threshold are memory-mapped from a scratch directory that
+    is removed on eviction; they still render, and RAM accounting drops accordingly."""
+    with tempfile.TemporaryDirectory() as d:
+        st = RunStore(max_runs=2, max_bytes=10 ** 9, spill_bytes=1000, spill_dir=d)
+        big = FakeResult(nframes=6, tag="big")
+        st.add("big", big)
+        e = st.get("big")
+        assert e["disk"] > 0 and e["bytes"] == 0 and big.hints["spilled_to"].startswith(d)
+        assert type(big.raw[0][0]).__name__ == "memmap"
+        assert len(big.render("Speed")) == 6, "renders from the memory-mapped arrays"
+        assert st.disk_total() == e["disk"]
+        st.add("b", FakeResult(2)); st.add("c", FakeResult(2))
+        assert "big" not in st and not Path(big.hints["spilled_to"]).exists(), "spill directory removed on eviction"
+        st.clear()
+        assert not any(Path(d).iterdir()), "clear() removes every spill directory"
+        # a disk budget also evicts
+        st2 = RunStore(max_runs=10, max_bytes=10 ** 9, spill_bytes=1000, disk_bytes=result_bytes(FakeResult(6)) + 10, spill_dir=d)
+        st2.add("x", FakeResult(6)); ev = st2.add("y", FakeResult(6))
+        assert ev == ["x"] and st2.ids() == ["y"]
 
 
 def test_shutdown_kills_live_solver():

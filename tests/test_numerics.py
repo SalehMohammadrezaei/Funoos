@@ -110,7 +110,7 @@ def test_spectral_fixed_end_time():
     for res in list(engine.RES)[:2]:
         p = dict(base); p.update({"resolution": res, "duration": 0.02})
         r = engine._solve_spectral(p, lambda *_: None, None)
-        ends[res] = (r.hints["T_end"], r.hints["times"][-1], r.raw[0][0].shape)
+        ends[res] = (r.hints["T_end"], r.times[-1], r.raw[0][0].shape)
     T = [e[0] for e in ends.values()]
     assert abs(T[0] - T[1]) < 1e-12, f"end time depends on resolution: {ends}"
     for T_end, t_last, shape in ends.values():
