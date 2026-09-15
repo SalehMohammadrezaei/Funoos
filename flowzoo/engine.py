@@ -27,8 +27,17 @@ from . import render, geometry
 _BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
 SOLVERS = _BASE / "solvers"
 EXE = ".exe" if sys.platform.startswith("win") else ""
-# 2D grids are modest — ~8 threads is the throughput sweet spot (more = overhead).
-_ENV = {**os.environ, "OMP_NUM_THREADS": str(min(8, os.cpu_count() or 4))}
+def _default_threads():
+    """OpenMP threads for the C++ solvers. A user-set OMP_NUM_THREADS is respected;
+    otherwise use up to 8 (measured on the wind tunnel: 1→22 s, 4→6 s, 8→4 s, 16→3 s —
+    beyond 8 the 2-D grids gain little and would oversubscribe shared machines)."""
+    env = os.environ.get("OMP_NUM_THREADS")
+    if env and env.strip().isdigit() and int(env) > 0:
+        return int(env)
+    return min(8, os.cpu_count() or 4)
+
+
+_ENV = {**os.environ, "OMP_NUM_THREADS": str(_default_threads())}
 
 _STEP_RE = re.compile(r"step\s+(\d+)\s*/\s*(\d+)")
 _T_RE = re.compile(r"\bt=([\d.]+)")
@@ -162,17 +171,21 @@ def _nframes(d):
 
 
 RES = {"Low (fast)": 0.6, "Medium": 1.0, "High": 1.35, "Ultra (slow)": 1.8}
-VIEWS = {"lbm": ["Vorticity", "Velocity", "Streamlines"],
-         "spectral": ["Vorticity", "Velocity", "Streamlines"],
-         "density": ["Schlieren", "Density", "Velocity"],
-         "ns": ["Dye", "Velocity", "Vorticity", "Streamlines"],
-         "particles": ["Particles", "Foam & spray", "Velocity field"],
-         "porous": ["Velocity", "Streamlines", "Vorticity"],
+# Public view names. "Speed" is |u| (a scalar magnitude), never a vector field.
+VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
+         "spectral": ["Vorticity", "Speed", "Streamlines"],
+         "density": ["Schlieren", "Density", "Speed"],
+         "ns": ["Dye", "Speed", "Vorticity", "Streamlines"],
+         "particles": ["Particles", "Foam & spray", "Speed field"],
+         "porous": ["Speed", "Streamlines", "Vorticity"],
          "field": ["Pattern"],
          "quantum": ["Probability |ψ|²", "Phase"]}
+_VIEW_ALIASES = {"Velocity": "Speed", "Velocity field": "Speed field"}   # pre-1.1 names
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
            "density": "Ember (fire)", "ns": "Ember (fire)", "particles": "Ocean (water)",
            "porous": "Turbo", "field": "Inferno", "quantum": "Magma"}
+# Views whose field is signed: always drawn with a zero-centred (symmetric) colour range.
+SIGNED_VIEWS = {"Vorticity", "Phase"}
 
 
 def _res(p):
@@ -185,207 +198,111 @@ def _durv(p):
 
 # ---------- Result: holds raw fields, renders any view on demand ----------
 class Result:
-    def __init__(self, kind, raw, info, mask=None, hints=None):
+    """Solved fields + everything needed to render any view of them.
+
+    raw   : list of per-frame arrays ([y, x] scalar, (ux, uy) tuple, or SPH particle rows)
+    times : simulation time of every frame in `raw` (solver units; see hints["time_unit"])
+    hints : solver metadata (grid spacing, velocity fields for scalar kinds, probe series …)
+
+    Rendering is split in two cached stages so palette changes are cheap:
+      derived(view)  -> per-view scalar fields + the shared colour normalisation (cached)
+      iter_frames()  -> RGB frames one at a time (a generator; nothing is materialised)
+    `render()` keeps the list-returning API for scripts and tests.
+    """
+
+    def __init__(self, kind, raw, info, mask=None, hints=None, times=None):
         self.kind, self.raw, self.info = kind, raw, info
         self.mask, self.hints = mask, (hints or {})
+        self.times = list(times) if times is not None else list(self.hints.get("times", []))
+        if len(self.times) != len(raw):
+            self.times = [float(i) for i in range(len(raw))]
+            self.hints.setdefault("time_unit", "frame")
+        self._cache = {}
 
     @property
     def views(self):
         return VIEWS[self.kind]
 
-    def render(self, view=None, colormap=None):
-        view = view or self.views[0]
-        cm = render.COLORMAPS.get(colormap, render.COLORMAPS[DEFCMAP[self.kind]]) \
-            if colormap else render.COLORMAPS[DEFCMAP[self.kind]]
-        if self.kind in ("lbm", "spectral", "porous"):
-            return self._render_vel(self.raw, view, cm, self.mask)
+    @property
+    def nframes(self):
+        return len(self.raw)
+
+    def view_name(self, view):
+        view = _VIEW_ALIASES.get(view, view)
+        return view if view in self.views else self.views[0]
+
+    def colormap(self, colormap):
+        return render.COLORMAPS.get(colormap, render.COLORMAPS[DEFCMAP[self.kind]])
+
+    # ----- stage 1: derived fields + normalisation (cached per view) -----
+    def derived(self, view=None):
+        view = self.view_name(view)
+        d = self._cache.get(view)
+        if d is None:
+            d = self._cache[view] = self._derive(view)
+        return d
+
+    def _vel(self):
+        return self.raw if self.kind in ("lbm", "spectral", "porous") else self.hints.get("vel")
+
+    def _derive(self, view):
+        N = render.Norm
+        if self.kind in ("lbm", "spectral", "porous", "ns") and view in ("Speed", "Streamlines", "Vorticity"):
+            vel = self._vel()
+            if view == "Vorticity":
+                f = [render.vorticity(ux, uy, self.hints.get("dx", 1.0)) for ux, uy in vel]
+                v = float(np.percentile(np.abs(f[-1]), 99.0)) + 1e-12
+                return {"fields": f, "norm": N(-v, v), "label": "vorticity ω",
+                        "mask_color": render.SOLID, "upscale": 1}
+            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
+            pct = 80.0 if self.kind == "porous" else 99.5          # porous flow is slow/sparse → brighten
+            vmax = float(np.percentile(sp[-1], pct)) + 1e-12
+            if view == "Streamlines":
+                return {"fields": sp, "vel": vel, "norm": N(0, vmax), "label": "speed |u|"}
+            g = 0.45 if self.kind == "porous" else 1.0
+            mc = "#0f1830" if self.kind == "porous" else render.SOLID
+            return {"fields": sp, "norm": N(0, vmax, gamma=g), "label": "speed |u|",
+                    "mask_color": mc, "upscale": 1}
+        if self.kind == "ns":                                           # Dye
+            v0, v1 = self.hints["vlim"]
+            return {"fields": self.raw, "norm": N(v0, v1, gamma=self.hints.get("gamma", 1.0)),
+                    "label": self.hints.get("label", ""), "mask_color": "#6e6358", "upscale": 1}
         if self.kind == "density":
-            return self._render_density(view, cm)
-        if self.kind == "ns":
-            if view == "Dye":
-                v0, v1 = self.hints["vlim"]
-                return [render.add_colorbar(
-                    render.field_to_rgb(s, cm, v0, v1, upscale=1, gamma=self.hints["gamma"],
-                                        mask=self.mask, mask_color="#6e6358"),
-                    cm, v0, v1, self.hints.get("label", "")) for s in self.raw]
-            return self._render_vel(self.hints["vel"], view, cm, None)
-        if self.kind == "particles":
-            if view == "Velocity field":
-                return self._render_sph_field(cm)
-            return self._render_particles(cm, foam=(view == "Foam & spray"))
-        if self.kind == "field":
-            v1 = np.percentile(self.raw[-1], 99.0) + 1e-9
-            return [render.add_colorbar(render.field_to_rgb(s, cm, 0, v1, upscale=2),
-                                        cm, 0, v1, self.hints.get("label", "")) for s in self.raw]
-        if self.kind == "quantum":
-            return self._render_quantum(view, cm)
-
-    def _render_quantum(self, view, cm):
-        import matplotlib.cm as mcm
-        out = []
-        pmax = np.percentile(self.raw[-1], 99.7) + 1e-12
-        if view == "Phase":
-            twil = mcm.get_cmap("twilight")
-            for prob, ph in zip(self.raw, self.hints["phase"]):
-                hue = twil((ph + np.pi) / (2 * np.pi))[..., :3]      # cyclic phase → color
-                val = np.clip(prob / pmax, 0, 1)[..., None]          # brightness ∝ |ψ|²
-                rgb = (hue * val * 255).astype(np.uint8)
-                out.append(render.add_colorbar(np.flipud(rgb), cm, -np.pi, np.pi, "arg ψ"))
-            return out
-        return [render.add_colorbar(render.field_to_rgb(p, cm, 0, pmax, upscale=2),
-                                    cm, 0, pmax, "|ψ|²") for p in self.raw]
-
-    def _render_vel(self, vel, view, cm, mask):
-        pct = 80.0 if self.kind == "porous" else 99.5   # porous flow is slow/sparse → brighten
-        if view == "Streamlines":
-            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
-            vmax = np.percentile(sp[-1], pct) + 1e-12
-            return [render.add_colorbar(
-                render.streamlines_rgb(ux, uy, cmap=cm, mask=mask, vmax=vmax),
-                cm, 0, vmax, "|u|") for ux, uy in vel]
-        if view == "Velocity":
-            sp = [np.sqrt(ux * ux + uy * uy) for ux, uy in vel]
-            vmax = np.percentile(sp[-1], pct) + 1e-12
-            g = 0.45 if self.kind == "porous" else 1.0          # brighten the slow pore flow
-            mc = "#0f1830" if self.kind == "porous" else render.SOLID   # dark grains so flow pops
-            return [render.add_colorbar(
-                render.field_to_rgb(s, cm, 0, vmax, mask=mask, mask_color=mc,
-                                    upscale=1, gamma=g), cm, 0, vmax, "|u|") for s in sp]
-        vt = [render.vorticity(ux, uy, self.hints.get("dx", 1.0)) for ux, uy in vel]
-        vmax = np.percentile(np.abs(vt[-1]), 99.0) + 1e-12
-        return [render.add_colorbar(
-            render.field_to_rgb(w, cm, -vmax, vmax, mask=mask, mask_color=render.SOLID,
-                                upscale=1), cm, -vmax, vmax, "vorticity ω") for w in vt]
-
-    def _render_density(self, view, cm):
-        out = []
-        h = self.hints; deb = h.get("debris", 0); nx, ny = h.get("nx"), h.get("ny")
-        solid = h.get("solid"); city = solid is not None
-        failt = h.get("failt")                              # per-block failure fraction, -1=intact
-        CONCRETE = np.array([78, 82, 102], np.uint8)
-
-        def standing(tau):
-            # blocks still in place at time-fraction tau (failed ones have flown off)
-            if failt is None:
-                return solid[::-1]
-            vis = solid & ((failt < 0) | (tau < failt))
-            return vis[::-1]
-
-        if view == "Velocity":
-            vel = h.get("vel")
-            sp = [np.hypot(ux, uy) for ux, uy in vel]
-            ref = sp[-1] if not city else sp[-1][~solid]
-            vmax = np.percentile(ref, 99.0) + 1e-9
-            res = []
-            n = len(sp)
-            for fi, s in enumerate(sp):
-                img = render.field_to_rgb(s, cm, 0, vmax, upscale=1)
-                if city:
-                    img = np.array(img); img[standing(fi / max(1, n - 1))] = CONCRETE
-                res.append(render.add_colorbar(img, cm, 0, vmax, "|u|"))
-            return res
-        if view == "Density":
-            dv0, dv1 = np.percentile(self.raw[-1], 1), np.percentile(self.raw[-1], 99.5) + 1e-6
-        else:
-            # ignore the stiff solid cells (ρ=6, huge edge gradients) when scaling
-            sref = render.schlieren(self.raw[-1])
-            if city: sref = sref[~solid]
-            sv = np.percentile(sref, 99.5) + 1e-6
-        if deb and h.get("mode") == "blast" and view == "Schlieren":
-            rng = np.random.default_rng(7)
-            if city:
-                # debris IS the masonry: seed on blocks that actually fail, and launch
-                # each fragment exactly when its block fails (failt), not on a guess
-                fy_, fx_ = np.where(solid & (failt >= 0)) if failt is not None else np.where(solid)
-                if len(fx_):
-                    pick = rng.integers(0, len(fx_), deb)
-                    bx = fx_[pick] + rng.uniform(-1, 1, deb); by = fy_[pick] + rng.uniform(-1, 1, deb)
-                    flaunch = (failt[fy_[pick], fx_[pick]] if failt is not None
-                               else np.zeros(deb))
-                else:                                      # nothing failed → no debris
-                    bx = by = flaunch = np.zeros(0); deb = 0
-                cx, cy = nx * 0.20, ny * 0.14              # the ground-burst origin
-            else:
-                bx = rng.uniform(0, nx, deb); by = rng.uniform(0, ny, deb)
-                cx, cy = nx / 2, ny / 2
-                flaunch = None
-            dist = np.hypot(bx - cx, by - cy) + 1e-6; ang = np.arctan2(by - cy, bx - cx)
-            if city: ang += rng.uniform(-0.4, 0.4, deb)    # scatter the fragments
-            push = rng.uniform(0.5, 1.0, deb); Rmax = 0.75 * np.hypot(nx, ny) / 2
-        for fi, rho in enumerate(self.raw):
-            tau = fi / max(1, len(self.raw) - 1)
+            h = self.hints; solid = h.get("solid")
+            if view == "Speed":
+                sp = [np.hypot(ux, uy) for ux, uy in h["vel"]]
+                ref = sp[-1] if solid is None else sp[-1][~solid]
+                return {"fields": sp, "norm": N(0, float(np.percentile(ref, 99.0)) + 1e-9),
+                        "label": "speed |u|", "upscale": 1}
             if view == "Density":
-                img = np.array(render.field_to_rgb(rho, cm, dv0, dv1, upscale=1))
-                if city: img[standing(tau)] = CONCRETE
-                out.append(render.add_colorbar(img, cm, dv0, dv1, "ρ"))
-                continue
-            sch = render.schlieren(rho)
-            img = render.field_to_rgb(sch, cm, 0.0, sv, upscale=1, gamma=0.7)
-            if city:                                       # draw the towers that are still standing
-                img = np.array(img); img[standing(tau)] = CONCRETE
-            if deb and h.get("mode") == "blast":
-                if city:                                   # fragment flies once its block fails
-                    since = tau - flaunch
-                else:
-                    since = tau - dist / (Rmax * 1.25)     # open air: shock-front arrival
-                disp = np.where(since > 0, since * Rmax * 1.25 * push * 0.7, 0.0)
-                px = bx + np.cos(ang) * disp; py = by + np.sin(ang) * disp
-                if city:                                   # ballistic arc: fling up, fall under gravity
-                    py = py + np.where(since > 0, since * Rmax * 0.9 - (since ** 2) * Rmax * 2.2, 0.0)
-                iy = ny - 1 - py
-                heat = np.clip(np.where(since > 0, np.exp(-2.2 * since), 0.12), 0.08, 1.0)
-                size = 1.0 + 1.8 * heat
-                keep = (since > 0) & (px > 1) & (px < nx - 1) & (iy > 1) & (iy < ny - 1)
-                img = render.overlay_particles(img, px[keep], iy[keep], size[keep], heat[keep])
-            out.append(render.add_colorbar(img, cm, 0, sv, "|∇ρ|"))
-        return out
+                return {"fields": self.raw, "norm": N(float(np.percentile(self.raw[-1], 1)),
+                                                      float(np.percentile(self.raw[-1], 99.5)) + 1e-6),
+                        "label": "density ρ", "upscale": 1}
+            sch = [render.schlieren(r) for r in self.raw]
+            sref = sch[-1] if solid is None else sch[-1][~solid]
+            return {"fields": sch, "norm": N(0.0, float(np.percentile(sref, 99.5)) + 1e-6, gamma=0.7),
+                    "label": "|∇ρ|", "upscale": 1}
+        if self.kind == "particles":
+            vmax = self.hints["vmax"]
+            if view == "Speed field":
+                return {"fields": self._sph_fields(), "norm": N(0, vmax), "label": "speed |v|",
+                        "upscale": 3}
+            # particle shading floors at 0.34 so resting water stays visible; the legend uses the same floor
+            return {"fields": None, "norm": N(0, vmax, floor=0.34 if view == "Particles" else 0.0),
+                    "label": "speed |v|"}
+        if self.kind == "field":
+            return {"fields": self.raw, "norm": N(0, float(np.percentile(self.raw[-1], 99.0)) + 1e-9),
+                    "label": self.hints.get("label", ""), "upscale": 2}
+        if self.kind == "quantum":
+            pmax = float(np.percentile(self.raw[-1], 99.7)) + 1e-12
+            if view == "Phase":
+                return {"fields": self.hints["phase"], "norm": N(-np.pi, np.pi), "label": "arg ψ", "pmax": pmax}
+            return {"fields": self.raw, "norm": N(0, pmax), "label": "|ψ|²", "upscale": 2}
+        raise ValueError(f"no view {view!r} for kind {self.kind!r}")
 
-    def _render_particles(self, cm, foam=False):
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        Lx, Ly, vmax = self.hints["Lx"], self.hints["Ly"], self.hints["vmax"]
-        hull = self.hints.get("hull")
-        # size markers to the particle spacing so the water reads as a continuous
-        # body, not sparse dots (the dp→px→points² conversion for this figure)
-        dp = self.hints.get("dp", 0.04); DPI = 110
-        px_per_unit = 6.4 * DPI / Lx
-        diam_pt = dp * px_per_unit / (DPI / 72.0)
-        PSIZE = float(np.clip((diam_pt * 1.35) ** 2, 5.0, 230.0))  # high cap so a fine glass reads as continuous water
-        out = []
-        for fi, d in enumerate(self.raw):
-            fig = plt.figure(figsize=(6.4, 6.4 * Ly / Lx), dpi=DPI)
-            ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(render.INK)
-            fig.patch.set_facecolor(render.INK)
-            sp = np.clip(d[:, 2] / vmax, 0, 1)
-            if foam:
-                # deep water + whitewater on the fast (breaking/spray) particles
-                ax.scatter(d[:, 0], d[:, 1], c="#173a6b", s=PSIZE, edgecolors="none")
-                fast = sp > 0.45
-                if fast.any():
-                    ax.scatter(d[fast, 0], d[fast, 1], c="white", s=PSIZE * 0.7,
-                               alpha=np.clip(sp[fast], 0.3, 0.95), edgecolors="none")
-            else:
-                # keep RESTING water clearly visible: floor the shade so v=0 is a
-                # legible blue, not the near-black bottom of the colormap (otherwise
-                # still water vanishes and only moving water shows — looks like it
-                # "appears from nothing"). Brightness still rises with speed.
-                shade = 0.34 + 0.66 * sp
-                ax.scatter(d[:, 0], d[:, 1], c=shade, cmap=cm, vmin=0.0, vmax=1.0,
-                           s=PSIZE, edgecolors="none")
-            if hull is not None:
-                hp = hull[fi]; ax.scatter(hp[:, 0], hp[:, 1], c="#c79a5b", s=PSIZE, edgecolors="none")
-            ax.set_xlim(0, Lx); ax.set_ylim(0, Ly); ax.axis("off")
-            fig.canvas.draw(); w, hh = fig.canvas.get_width_height()
-            rgb = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(hh, w, 4)[..., :3].copy()
-            plt.close(fig)
-            out.append(rgb if foam else render.add_colorbar(rgb, cm, 0, vmax, "|v|"))
-        return out
-
-    def _render_sph_field(self, cm):
-        # bin the particles onto a grid and reconstruct a smooth speed field (the
-        # SPH "continuum" view) — the mesh-free analogue of the LBM Speed view
-        Lx, Ly, vmax = self.hints["Lx"], self.hints["Ly"], self.hints["vmax"]
+    def _sph_fields(self):
+        """Bin the particles onto a grid: a smooth speed field, NaN where there is no water."""
+        Lx, Ly = self.hints["Lx"], self.hints["Ly"]
         gx = 150; gy = max(40, int(gx * Ly / Lx))
 
         def blur(a, k=2):
@@ -398,13 +315,197 @@ class Result:
             ix = np.clip((d[:, 0] / Lx * gx).astype(int), 0, gx - 1)
             iy = np.clip((d[:, 1] / Ly * gy).astype(int), 0, gy - 1)
             cnt = np.zeros((gy, gx)); ssum = np.zeros((gy, gx))
-            np.add.at(cnt, (iy, ix), 1.0)
-            np.add.at(ssum, (iy, ix), d[:, 2])
-            field = blur(ssum, 2) / (blur(cnt, 2) + 1e-6)
-            field[blur(cnt, 2) < 0.05] = 0.0          # empty (air) cells stay dark
-            out.append(render.add_colorbar(
-                render.field_to_rgb(field, cm, 0, vmax, upscale=3), cm, 0, vmax, "|v|"))
+            np.add.at(cnt, (iy, ix), 1.0); np.add.at(ssum, (iy, ix), d[:, 2])
+            bc = blur(cnt, 2)
+            field = blur(ssum, 2) / (bc + 1e-6)
+            field[bc < 0.05] = np.nan                      # empty (air) cells: no measurement, not zero
+            out.append(field)
         return out
+
+    # ----- stage 2: frames -----
+    def render(self, view=None, colormap=None, vmin=None, vmax=None):
+        """All frames of a view as a list (convenience for scripts/tests)."""
+        return list(self.iter_frames(view, colormap, vmin, vmax))
+
+    def frame(self, index, view=None, colormap=None, vmin=None, vmax=None):
+        """One rendered frame (index may be negative or a float fraction in [0, 1])."""
+        if isinstance(index, float) and 0.0 <= index <= 1.0:
+            index = int(round(index * (self.nframes - 1)))
+        index = int(index) % self.nframes
+        for i, fr in enumerate(self.iter_frames(view, colormap, vmin, vmax, only=index)):
+            return fr
+
+    def iter_frames(self, view=None, colormap=None, vmin=None, vmax=None, only=None):
+        """Yield RGB frames one at a time. `vmin`/`vmax` override the automatic colour
+        range (manual limits); `only` renders a single frame index."""
+        view = self.view_name(view); cm = self.colormap(colormap)
+        d = self.derived(view); norm = d["norm"]
+        if vmin is not None or vmax is not None:
+            norm = norm.with_range(vmin, vmax)
+        idx = range(self.nframes) if only is None else [only]
+        if self.kind == "particles" and view != "Speed field":
+            yield from self._iter_particles(cm, norm, foam=(view == "Foam & spray"), idx=idx)
+            return
+        if view == "Streamlines":
+            for i in idx:
+                ux, uy = d["vel"][i]
+                yield render.add_colorbar(render.streamlines_rgb(ux, uy, cmap=cm, mask=self.mask, vmax=norm.vmax),
+                                          cm, norm, d["label"])
+            return
+        if self.kind == "quantum" and view == "Phase":
+            import matplotlib.cm as mcm
+            twil = mcm.get_cmap("twilight")
+            for i in idx:
+                hue = twil(norm(self.hints["phase"][i]))[..., :3]
+                val = np.clip(self.raw[i] / d["pmax"], 0, 1)[..., None]
+                yield render.add_colorbar(np.flipud((hue * val * 255).astype(np.uint8)), "twilight", norm, d["label"])
+            return
+        if self.kind == "density":
+            yield from self._iter_density(view, cm, norm, d, idx)
+            return
+        fields = d["fields"]; up = d.get("upscale", 1); mc = d.get("mask_color", render.SOLID)
+        for i in idx:
+            f = fields[i]
+            img = render.field_to_rgb(f, cm, norm, mask=self.mask, mask_color=mc, upscale=up)
+            yield render.add_colorbar(img, cm, norm, d["label"], clip_frac=norm.clipped(f) if i == idx[-1] or only is not None else None)
+
+    def _iter_density(self, view, cm, norm, d, idx):
+        h = self.hints; deb = h.get("debris", 0); nx, ny = h.get("nx"), h.get("ny")
+        solid = h.get("solid"); city = solid is not None
+        failt = h.get("failt")                              # per-block failure fraction, -1=intact
+        CONCRETE = np.array([78, 82, 102], np.uint8)
+        n = self.nframes
+
+        def standing(tau):
+            if failt is None:
+                return solid[::-1]
+            return (solid & ((failt < 0) | (tau < failt)))[::-1]
+
+        deb_state = None
+        if deb and h.get("mode") == "blast" and view == "Schlieren":
+            rng = np.random.default_rng(7)
+            if city:
+                fy_, fx_ = np.where(solid & (failt >= 0)) if failt is not None else np.where(solid)
+                if len(fx_):
+                    pick = rng.integers(0, len(fx_), deb)
+                    bx = fx_[pick] + rng.uniform(-1, 1, deb); by = fy_[pick] + rng.uniform(-1, 1, deb)
+                    flaunch = failt[fy_[pick], fx_[pick]] if failt is not None else np.zeros(deb)
+                else:
+                    bx = by = flaunch = np.zeros(0); deb = 0
+                cx, cy = nx * 0.20, ny * 0.14
+            else:
+                bx = rng.uniform(0, nx, deb); by = rng.uniform(0, ny, deb)
+                cx, cy = nx / 2, ny / 2; flaunch = None
+            dist = np.hypot(bx - cx, by - cy) + 1e-6; ang = np.arctan2(by - cy, bx - cx)
+            if city:
+                ang += rng.uniform(-0.4, 0.4, deb)
+            push = rng.uniform(0.5, 1.0, deb); Rmax = 0.75 * np.hypot(nx, ny) / 2
+            deb_state = (bx, by, flaunch, dist, ang, push, Rmax)
+        for fi in idx:
+            tau = fi / max(1, n - 1)
+            f = d["fields"][fi]
+            img = np.array(render.field_to_rgb(f, cm, norm, upscale=1))
+            if city:
+                img[standing(tau)] = CONCRETE
+            if deb_state is not None and deb:
+                bx, by, flaunch, dist, ang, push, Rmax = deb_state
+                since = (tau - flaunch) if city else (tau - dist / (Rmax * 1.25))
+                disp = np.where(since > 0, since * Rmax * 1.25 * push * 0.7, 0.0)
+                px = bx + np.cos(ang) * disp; py = by + np.sin(ang) * disp
+                if city:
+                    py = py + np.where(since > 0, since * Rmax * 0.9 - (since ** 2) * Rmax * 2.2, 0.0)
+                iy = ny - 1 - py
+                heat = np.clip(np.where(since > 0, np.exp(-2.2 * since), 0.12), 0.08, 1.0)
+                size = 1.0 + 1.8 * heat
+                keep = (since > 0) & (px > 1) & (px < nx - 1) & (iy > 1) & (iy < ny - 1)
+                img = render.overlay_particles(img, px[keep], iy[keep], size[keep], heat[keep])
+            yield render.add_colorbar(img, cm, norm, d["label"])
+
+    def _iter_particles(self, cm, norm, foam=False, idx=None):
+        Lx, Ly, vmax = self.hints["Lx"], self.hints["Ly"], self.hints["vmax"]
+        hull = self.hints.get("hull")
+        dp = self.hints.get("dp", 0.04); DPI = 110
+        px_per_unit = 6.4 * DPI / Lx
+        diam_pt = dp * px_per_unit / (DPI / 72.0)
+        PSIZE = float(np.clip((diam_pt * 1.35) ** 2, 5.0, 230.0))
+        for fi in idx:
+            d = self.raw[fi]
+            with render._MPL_LOCK:
+                fig, ax = render.reuse_figure(("sph", round(Ly / Lx, 4)), (6.4, 6.4 * Ly / Lx), DPI)
+                ax.cla(); ax.set_facecolor(render.INK); fig.patch.set_facecolor(render.INK)
+                sp = np.clip(d[:, 2] / vmax, 0, 1)
+                if foam:
+                    ax.scatter(d[:, 0], d[:, 1], c="#173a6b", s=PSIZE, edgecolors="none")
+                    fast = sp > 0.45
+                    if fast.any():
+                        ax.scatter(d[fast, 0], d[fast, 1], c="white", s=PSIZE * 0.7,
+                                   alpha=np.clip(sp[fast], 0.3, 0.95), edgecolors="none")
+                else:
+                    ax.scatter(d[:, 0], d[:, 1], c=norm(d[:, 2]), cmap=cm, vmin=0.0, vmax=1.0,
+                               s=PSIZE, edgecolors="none")
+                if hull is not None:
+                    hp = hull[fi]; ax.scatter(hp[:, 0], hp[:, 1], c="#c79a5b", s=PSIZE, edgecolors="none")
+                ax.set_xlim(0, Lx); ax.set_ylim(0, Ly); ax.axis("off")
+                rgb = render.figure_rgb(fig)
+            yield rgb if foam else render.add_colorbar(rgb, cm, norm, "speed |v|")
+
+    # ----- disk backing for large results -----
+    def spill(self, directory):
+        """Move the frame arrays to memory-mapped .npy files under `directory`, so a
+        large run costs disk instead of RAM while it sits in the history. Arrays keep
+        their shapes/dtypes (they become read-only memmap views); the derived-field
+        cache is cleared so it is rebuilt from disk on demand. Returns bytes moved.
+        Particle results (ragged frames) are stored one file per frame."""
+        directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
+        moved = 0
+
+        def _dump(name, frames):
+            nonlocal moved
+            if not frames:
+                return frames
+            f0 = frames[0]
+            if isinstance(f0, tuple):                                   # (ux, uy) pairs
+                comps = list(zip(*frames))
+                mm = []
+                for ci, comp in enumerate(comps):
+                    arr = np.stack(comp); path = directory / f"{name}_{ci}.npy"
+                    m = np.lib.format.open_memmap(path, mode="w+", dtype=arr.dtype, shape=arr.shape)
+                    m[:] = arr; m.flush(); del m; moved += arr.nbytes
+                    mm.append(np.load(path, mmap_mode="r"))
+                return [tuple(mm[ci][i] for ci in range(len(mm))) for i in range(len(frames))]
+            if all(getattr(f, "shape", None) == f0.shape for f in frames):
+                arr = np.stack(frames); path = directory / f"{name}.npy"
+                m = np.lib.format.open_memmap(path, mode="w+", dtype=arr.dtype, shape=arr.shape)
+                m[:] = arr; m.flush(); del m; moved += arr.nbytes
+                mm = np.load(path, mmap_mode="r")
+                return [mm[i] for i in range(len(frames))]
+            out = []                                                    # ragged (particles)
+            for i, f in enumerate(frames):
+                path = directory / f"{name}_{i:05d}.npy"; np.save(path, f); moved += f.nbytes
+                out.append(np.load(path, mmap_mode="r"))
+            return out
+
+        self.raw = _dump("raw", self.raw)
+        if isinstance(self.hints.get("vel"), list):
+            self.hints["vel"] = _dump("vel", self.hints["vel"])
+        self._cache.clear()
+        self.hints["spilled_to"] = str(directory)
+        return moved
+
+    # ----- metadata -----
+    def meta(self):
+        """JSON-safe description of this result (see docs/result_schema.md)."""
+        h = self.hints
+        shape = None
+        if self.raw:
+            f0 = self.raw[0]
+            arr = f0[0] if isinstance(f0, tuple) else f0
+            shape = list(getattr(arr, "shape", []))
+        return {"kind": self.kind, "info": self.info, "views": list(self.views), "frames": self.nframes,
+                "shape": shape, "times": [float(t) for t in self.times],
+                "time_unit": h.get("time_unit", "solver units"),
+                "hints": {k: (float(v) if isinstance(v, (int, float, np.floating, np.integer)) else v)
+                          for k, v in h.items() if isinstance(v, (int, float, str, bool, np.floating, np.integer))}}
 
 
 # ---------- parameter descriptors (pre-run only) ----------
@@ -489,11 +590,21 @@ def _solve_windtunnel(p, pr, tmp):
     n = _nframes(tmp); stride = max(1, (n - n // 5) // 90)
     use = range(n // 5, n, stride)
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
-    hints = {"probe_x": min(probe, nx - 2), "probe_y": probe_y, "D": D, "U": U,
-             "obstacle": obs,                            # so diagnostics can pick the right plot
-             "frame_dt_steps": stride * save_every}     # for the lift / Strouhal diagnostic
+    times = [float(i * save_every) for i in use]          # lattice time steps of each kept frame
+    hints = {"probe_x": min(probe, nx - 2), "probe_y": probe_y, "D": D, "U": U, "tau": tau,
+             "nu": (tau - 0.5) / 3.0, "obstacle": obs,   # so diagnostics can pick the right plot
+             "frame_dt_steps": stride * save_every,       # for the lift / Strouhal diagnostic
+             "time_unit": "lattice steps", "steps": steps, "dx": 1.0}
+    probe_csv = Path(tmp) / "probe.csv"
+    if probe_csv.exists():                                 # high-rate wake probe (every step)
+        try:
+            pv = np.loadtxt(probe_csv, delimiter=",", skiprows=1)
+            if pv.ndim == 2 and len(pv):
+                hints["probe_t"] = pv[:, 0].astype(np.float32); hints["probe_uy"] = pv[:, 1].astype(np.float32)
+        except Exception:
+            pass
     return Result("lbm", raw, f"wind tunnel · {obs} · Re={Re:.0f} · {nx}×{ny}",
-                  mask=mask, hints=hints)
+                  mask=mask, hints=hints, times=times)
 
 
 def _solve_porous(p, pr, tmp):
@@ -511,6 +622,7 @@ def _solve_porous(p, pr, tmp):
                  "--out", tmp], pr)
     n = _nframes(tmp); use = range(n // 3, n, max(1, (n - n // 3) // 70))
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
+    times = [float(i * max(1, steps // 120)) for i in use]
     meta = {}
     for line in (Path(tmp) / "meta.txt").read_text().splitlines():
         kk = line.split()
@@ -518,8 +630,10 @@ def _solve_porous(p, pr, tmp):
             try: meta[kk[0]] = float(kk[1])
             except ValueError: pass
     poro = meta.get("porosity", phi); perm = meta.get("permeability", 0.0)
-    hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force}
-    return Result("porous", raw, f"porous · φ={poro:.2f} · k={perm:.2e}", mask=mask, hints=hints)
+    hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force, "tau": tau,
+             "nu": (tau - 0.5) / 3.0, "mean_ux_pore": meta.get("mean_ux_pore"), "mean_ux": meta.get("mean_ux"),
+             "time_unit": "lattice steps", "steps": steps, "dx": 1.0}
+    return Result("porous", raw, f"porous · φ={poro:.2f} · k={perm:.2e}", mask=mask, hints=hints, times=times)
 
 
 def _solve_ns(mode, p, pr, tmp):
@@ -560,19 +674,22 @@ def _solve_ns(mode, p, pr, tmp):
     _run_solver(args, pr)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
+    save_every = max(1, steps // 110)
+    times = [float(i * save_every) for i in idx]             # solver steps (dt = 1 in ins2d)
 
     def _rv(i):                                              # read the vel_*.bin field
         b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
         return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
     hints["vel"] = [_rv(i) for i in idx]                     # for Speed/Vorticity/Streamlines
     hints["ns_mode"] = mode                                  # so diagnostics can pick the right plot
+    hints.update({"time_unit": "solver steps (dt = 1)", "steps": steps, "dx": 1.0, "nu": float(p["viscosity"])})
     mask = None
     if mode == "wind":                                       # draw the solid chimney stack
         stack_h = int(0.32 * ny); sxx = nx // 4
         sw = max(6, int(nx / 12 * float(p["source"]))); hw = max(2, sw // 2)
         mask = np.zeros((ny, nx), np.uint8)
         mask[0:stack_h, max(0, sxx - hw):min(nx, sxx + hw + 1)] = 1
-    return Result("ns", raw, f"{mode}  {nx}×{ny}", hints=hints, mask=mask)
+    return Result("ns", raw, f"{mode}  {nx}×{ny}", hints=hints, mask=mask, times=times)
 
 
 def _solve_euler(mode, p, pr, tmp):
@@ -599,6 +716,11 @@ def _solve_euler(mode, p, pr, tmp):
                  "--save_every", "12", "--out", tmp] + extra, pr, tend=tend)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
+    ft = Path(tmp) / "frame_times.txt"                       # actual (adaptive-dt) time of every saved frame
+    all_t = [float(x) for x in ft.read_text().split()] if ft.exists() else []
+    times = [all_t[i] for i in idx] if len(all_t) >= n else [float(i) for i in idx]
+    hints.update({"time_unit": "code units (ρ=1, p=1 ambient; c = √γ)" if len(all_t) >= n else "frame",
+                  "tend": tend, "dx": 1.0 / nx})
 
     def _rv(i):
         b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
@@ -611,7 +733,7 @@ def _solve_euler(mode, p, pr, tmp):
     fp = Path(tmp) / "failt.bin"
     if fp.exists():
         hints["failt"] = np.fromfile(fp, dtype=np.float32).reshape(ny, nx)   # [0,1], -1=intact
-    return Result("density", raw, f"{mode}  {nx}×{ny}", hints=hints)
+    return Result("density", raw, f"{mode}  {nx}×{ny}", hints=hints, times=times)
 
 
 _SPLASH_SCENE = {"Dam break": "dam", "Drop & splash": "drop", "Sloshing tank": "slosh",
@@ -652,16 +774,20 @@ def _solve_dam(p, pr, tmp):
     _run_solver(args, pr)
     n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3) for i in idx]
+    ft = Path(tmp) / "frame_times.txt"
+    all_t = [float(x) for x in ft.read_text().split()] if ft.exists() else []
+    times = [all_t[i] for i in idx] if len(all_t) >= n else [float(i) for i in idx]
     if sc == "pour":          # colour by the pour/impact speed, not a dam-height scale
         vmax = 1.3 * max(float(p.get("pourv", 1.4)), float(np.sqrt(2 * g * Ly)))
     else:
         vmax = 1.2 * float(np.sqrt(2 * g * max(H, Ly * 0.5)))
-    hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": vmax}
+    hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": vmax, "scene": sc, "g": g, "H": H, "tend": tend,
+             "time_unit": "s" if len(all_t) >= n else "frame"}
     if sc == "ship":
         hints["hull"] = [np.fromfile(Path(tmp) / f"hull_{i:05d}.bin", dtype=np.float32).reshape(-1, 2)
                          for i in idx]
     return Result("particles", raw, f"{p.get('scene', 'Dam break')}  ({len(raw[-1])} particles)",
-                  hints=hints)
+                  hints=hints, times=times)
 
 
 def _solve_spectral(p, pr, tmp):
@@ -689,8 +815,8 @@ def _solve_spectral(p, pr, tmp):
             pr(f"simulating… {int(100 * st / steps)}%")
         if st < steps:
             wh = sim.step(wh, dt)
-    r = Result("spectral", vel, f"{label}  {n}×{n}")
-    r.hints.update({"dx": L / n, "L": L, "dt": dt, "T_end": T_end, "times": times})
+    r = Result("spectral", vel, f"{label}  {n}×{n}", times=times,
+               hints={"dx": L / n, "L": L, "dt": dt, "T_end": T_end, "nu": nu, "time_unit": "nondimensional (L = 2π)"})
     return r
 
 
@@ -705,19 +831,20 @@ def _solve_mixing(p, pr, tmp):
     c = 0.5 * (1 + np.sign(np.sin(float(p.get("bands", 6)) * yy)))
     kap = float(p.get("diffusion", 1e-4))
     pr(f"chaotic mixing {n}×{n}, {steps} steps…")
-    raw = []; _pp = max(1, steps // 50)
+    raw = []; times = []; _pp = max(1, steps // 50)
     for st in range(steps + 1):
         u, v = sim.velocity(wh)
         if st % max(1, steps // 100) == 0:
-            raw.append(c.T.copy())      # solver is [x,y]; public arrays are [y,x]
+            raw.append(c.T.copy()); times.append(st * dt)     # solver is [x,y]; public arrays are [y,x]
         if st % _pp == 0:
             pr(f"simulating… {int(100 * st / steps)}%")
         c = advect_sl(c, u, v, dt, L)
         if kap > 0:                                   # gentle scalar diffusion (spectral)
             c = np.real(np.fft.ifft2(np.exp(-kap * sim.k2 * dt) * np.fft.fft2(c)))
         wh = sim.step(wh, dt)
-    return Result("field", raw, f"chaotic mixing  {n}×{n}",
-                  hints={"label": "dye", "dx": L / n, "dt": dt, "T_end": T_end})
+    return Result("field", raw, f"chaotic mixing  {n}×{n}", times=times,
+                  hints={"label": "dye", "dx": L / n, "dt": dt, "T_end": T_end, "nu": nu, "kappa": kap,
+                         "time_unit": "nondimensional (L = 2π)"})
 
 
 def _solve_reaction(p, pr, tmp):
@@ -728,7 +855,10 @@ def _solve_reaction(p, pr, tmp):
     pr(f"Gray–Scott {n}×{n}, {pat} (F={F:.4f}, k={k:.4f}), {steps} steps…")
     frames = gray_scott(n=n, F=F, k=k, steps=steps, nframes=110, seed=1,
                         progress=lambda f: pr(f"simulating… {int(100 * f)}%"))
-    return Result("field", frames, f"{pat}  {n}×{n}", hints={"label": "V concentration"})
+    every = max(1, steps // 110)
+    times = [float(i * every) for i in range(len(frames))]
+    return Result("field", frames, f"{pat}  {n}×{n}", times=times,
+                  hints={"label": "V concentration", "F": F, "k": k, "time_unit": "steps (dt = 1)", "steps": steps})
 
 
 def _solve_quantum(p, pr, tmp):
@@ -1201,6 +1331,48 @@ META = {
                        "void fraction φ — the expected pore-scale behaviour (see the Plots).",
         "demo": "results/gallery/porous_phi60.gif"},
 }
+
+
+def estimate(name, params):
+    """Grid, frame count, memory and a rough wall-time estimate for a run (before it starts).
+
+    Time scales are per-cell-step costs measured on the profiling machine (8 threads);
+    they are indicative, not a promise — the UI labels them as estimates.
+    """
+    spec = EXHIBITS[name]
+    p = {q["name"]: q["default"] for q in spec["params"]}; p.update(params or {})
+    s = _res(p); dur = _durv(p)
+    if name == "Wind Tunnel":
+        nx, ny = int(900 * s), int(300 * s); steps = int(44000 * dur); frames = 90; comp = 2
+        secs = nx * ny * steps * 2.0e-9
+    elif name == "Porous Flow":
+        nx, ny = int(380 * s), int(360 * s); steps = int(24000 * dur); frames = 70; comp = 2
+        secs = nx * ny * steps * 2.0e-9
+    elif name in ("Rising Smoke", "Candle Flame", "Mushroom Clouds", "Rayleigh-Benard", "Chimney Plume"):
+        dims = {"Rising Smoke": (280, 440), "Mushroom Clouds": (280, 440), "Rayleigh-Benard": (480, 230),
+                "Candle Flame": (190, 360), "Chimney Plume": (540, 420)}[name]
+        nx, ny = int(dims[0] * s), int(dims[1] * s); steps = int(4800 * dur); frames = 100; comp = 3
+        secs = nx * ny * steps * 1.6e-8
+    elif name == "Detonation":
+        nx = ny = int(420 * s); frames = 100; comp = 3; steps = int(70 * dur * nx * 0.9)
+        secs = nx * ny * steps * 4.0e-9
+    elif name == "Shockwave Strike":
+        nx, ny = int(620 * s), int(320 * s); frames = 100; comp = 3; steps = int(230 * dur * nx * 0.4)
+        secs = nx * ny * steps * 4.0e-9
+    elif name == "The Big Splash":
+        npart = max(500.0, float(p.get("particles", 3000))); nx, ny = int(np.sqrt(npart)), int(np.sqrt(npart))
+        frames = 100; comp = 3; steps = int(9000 * dur)
+        secs = npart * steps * 2.5e-7
+    elif name in ("Cloud Billows", "Ink in Motion"):
+        nx = ny = int(256 * s); frames = 95; comp = 2 if name == "Cloud Billows" else 1
+        steps = int(2800 * dur * s); secs = nx * ny * np.log2(nx) * steps * 1.2e-8
+    else:                                             # Turing / quantum
+        nx = ny = int(220 * s); frames = 110; comp = 1; steps = int(9000 * dur)
+        secs = nx * ny * steps * 6e-9
+    bytes_ = nx * ny * 4 * comp * frames
+    return {"exhibit": name, "grid": [nx, ny], "steps": steps, "frames": frames,
+            "bytes": int(bytes_), "mb": round(bytes_ / 2 ** 20, 1), "seconds": float(max(1.0, secs)),
+            "threads": _ENV.get("OMP_NUM_THREADS")}
 
 
 TMP_PREFIX = f"funoos-{os.getpid()}-"     # solver scratch dirs; stale ones are swept at the next launch

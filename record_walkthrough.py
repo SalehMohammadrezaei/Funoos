@@ -111,7 +111,7 @@ def main():
 
         # 5) SWITCH VIEWS
         hl("Switch views live")
-        for v in ["Velocity", "Streamlines", "Vorticity"]:
+        for v in ["Speed", "Streamlines", "Vorticity"]:
             pg.click(f'#s-views button:has-text("{v}")'); dwell(1800)
 
         # 6) RECOLOUR

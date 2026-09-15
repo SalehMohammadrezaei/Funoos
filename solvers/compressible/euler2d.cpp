@@ -137,14 +137,15 @@ int main(int argc,char**argv){
     auto yflux=[&](const St&q,double F[4]){ double E=q.p/(G-1)+0.5*q.r*(q.u*q.u+q.v*q.v);
         F[0]=q.r*q.v; F[1]=q.r*q.u*q.v; F[2]=q.r*q.v*q.v+q.p; F[3]=(E+q.p)*q.v; };
 
-    // L(U): finite-volume residual with MUSCL+HLLC in both directions
+    // L(U): finite-volume residual with MUSCL+HLLC in both directions.
+    // Face fluxes are computed into arrays (embarrassingly parallel, no atomics),
+    // then accumulated per cell in a second parallel pass.
+    std::vector<double> FX((size_t)(nx-1)*ny*4), FY((size_t)nx*(ny-1)*4);
     auto residual=[&](std::vector<double>&R,std::vector<double>&MX,
                       std::vector<double>&MY,std::vector<double>&EE,
                       std::vector<double>&dR,std::vector<double>&dMX,
                       std::vector<double>&dMY,std::vector<double>&dE){
-        std::fill(dR.begin(),dR.end(),0.0);std::fill(dMX.begin(),dMX.end(),0.0);
-        std::fill(dMY.begin(),dMY.end(),0.0);std::fill(dE.begin(),dE.end(),0.0);
-        // x-direction faces
+        // x-direction faces: face k=(i,j) sits between cells (i,j) and (i+1,j)
         #pragma omp parallel for schedule(static)
         for(int j=0;j<ny;j++)for(int i=0;i<nx-1;i++){
             int sL=IX(i,j),sR=IX(i+1,j);
@@ -158,24 +159,9 @@ int main(int argc,char**argv){
             Rr.v=cR.v-0.5*minmod(cR.v-cL.v,cRR.v-cR.v); Rr.p=cR.p-0.5*minmod(cR.p-cL.p,cRR.p-cR.p);
             if(L.p<1e-6||L.r<1e-6){L=cL;} if(Rr.p<1e-6||Rr.r<1e-6){Rr=cR;}
             double F[4]; hllc_x(L,Rr,F);
-            #pragma omp atomic
-            dR[sL]-=F[0];
-            #pragma omp atomic
-            dMX[sL]-=F[1];
-            #pragma omp atomic
-            dMY[sL]-=F[2];
-            #pragma omp atomic
-            dE[sL]-=F[3];
-            #pragma omp atomic
-            dR[sR]+=F[0];
-            #pragma omp atomic
-            dMX[sR]+=F[1];
-            #pragma omp atomic
-            dMY[sR]+=F[2];
-            #pragma omp atomic
-            dE[sR]+=F[3];
+            double* f=&FX[((size_t)j*(nx-1)+i)*4]; f[0]=F[0]; f[1]=F[1]; f[2]=F[2]; f[3]=F[3];
         }
-        // y-direction faces (rotate: normal=y -> swap u,v into hllc_x)
+        // y-direction faces (rotate: normal=y -> swap u,v into hllc_x); face (i,j) between (i,j) and (i,j+1)
         #pragma omp parallel for schedule(static)
         for(int j=0;j<ny-1;j++)for(int i=0;i<nx;i++){
             int sL=IX(i,j),sR=IX(i,j+1);
@@ -191,40 +177,22 @@ int main(int argc,char**argv){
             Rr2.v=Rr.v-0.5*minmod(Rr.v-L.v,RR.v-Rr.v); Rr2.p=Rr.p-0.5*minmod(Rr.p-L.p,RR.p-Rr.p);
             if(Lr.p<1e-6||Lr.r<1e-6)Lr=L; if(Rr2.p<1e-6||Rr2.r<1e-6)Rr2=Rr;
             double F[4]; hllc_x(Lr,Rr2,F);  // F[1]=normal(y)-mom, F[2]=tangential(x)-mom
-            #pragma omp atomic
-            dR[sL]-=F[0];
-            #pragma omp atomic
-            dMY[sL]-=F[1];
-            #pragma omp atomic
-            dMX[sL]-=F[2];
-            #pragma omp atomic
-            dE[sL]-=F[3];
-            #pragma omp atomic
-            dR[sR]+=F[0];
-            #pragma omp atomic
-            dMY[sR]+=F[1];
-            #pragma omp atomic
-            dMX[sR]+=F[2];
-            #pragma omp atomic
-            dE[sR]+=F[3];
+            double* f=&FY[((size_t)j*nx+i)*4]; f[0]=F[0]; f[1]=F[2]; f[2]=F[1]; f[3]=F[3];   // stored as [rho, x-mom, y-mom, E]
         }
-        // transmissive domain boundaries: zero-gradient ghost = boundary cell,
-        // so the boundary-face flux is the physical flux there (balances pressure)
+        // cell accumulation: interior faces, plus transmissive boundary faces (zero-gradient
+        // ghost = boundary cell, so the boundary-face flux is the physical flux there)
         #pragma omp parallel for schedule(static)
-        for(int j=0;j<ny;j++){
-            double F[4]; int s;
-            St qL=getprim(R,MX,MY,EE,IX(0,j));    xflux(qL,F); s=IX(0,j);
-            dR[s]+=F[0];dMX[s]+=F[1];dMY[s]+=F[2];dE[s]+=F[3];
-            St qR=getprim(R,MX,MY,EE,IX(nx-1,j)); xflux(qR,F); s=IX(nx-1,j);
-            dR[s]-=F[0];dMX[s]-=F[1];dMY[s]-=F[2];dE[s]-=F[3];
-        }
-        #pragma omp parallel for schedule(static)
-        for(int i=0;i<nx;i++){
-            double F[4]; int s;
-            St qB=getprim(R,MX,MY,EE,IX(i,0));    yflux(qB,F); s=IX(i,0);
-            dR[s]+=F[0];dMX[s]+=F[1];dMY[s]+=F[2];dE[s]+=F[3];
-            St qT=getprim(R,MX,MY,EE,IX(i,ny-1)); yflux(qT,F); s=IX(i,ny-1);
-            dR[s]-=F[0];dMX[s]-=F[1];dMY[s]-=F[2];dE[s]-=F[3];
+        for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){
+            int s=IX(i,j); double d0=0,d1=0,d2=0,d3=0, F[4];
+            if(i<nx-1){ const double* f=&FX[((size_t)j*(nx-1)+i)*4]; d0-=f[0]; d1-=f[1]; d2-=f[2]; d3-=f[3]; }
+            else { St q=getprim(R,MX,MY,EE,s); xflux(q,F); d0-=F[0]; d1-=F[1]; d2-=F[2]; d3-=F[3]; }
+            if(i>0){ const double* f=&FX[((size_t)j*(nx-1)+i-1)*4]; d0+=f[0]; d1+=f[1]; d2+=f[2]; d3+=f[3]; }
+            else { St q=getprim(R,MX,MY,EE,s); xflux(q,F); d0+=F[0]; d1+=F[1]; d2+=F[2]; d3+=F[3]; }
+            if(j<ny-1){ const double* f=&FY[((size_t)j*nx+i)*4]; d0-=f[0]; d1-=f[1]; d2-=f[2]; d3-=f[3]; }
+            else { St q=getprim(R,MX,MY,EE,s); yflux(q,F); d0-=F[0]; d1-=F[1]; d2-=F[2]; d3-=F[3]; }
+            if(j>0){ const double* f=&FY[((size_t)(j-1)*nx+i)*4]; d0+=f[0]; d1+=f[1]; d2+=f[2]; d3+=f[3]; }
+            else { St q=getprim(R,MX,MY,EE,s); yflux(q,F); d0+=F[0]; d1+=F[1]; d2+=F[2]; d3+=F[3]; }
+            dR[s]=d0; dMX[s]=d1; dMY[s]=d2; dE[s]=d3;
         }
     };
 
@@ -238,7 +206,21 @@ int main(int argc,char**argv){
         std::ofstream sf(a.out+"/solid.bin",std::ios::binary); sf.write((char*)sb.data(),N*sizeof(float)); }
     std::vector<double> dR(N),dMX(N),dMY(N),dE(N);
     double t=0; int nf=0;
+    std::ofstream ftimes(a.out+"/frame_times.txt");   // actual time of every saved frame (adaptive dt)
+    // frame 0 is the initial state (t = 0); the final state is always saved after the loop
+    auto save_frame=[&](){
+        std::vector<float> buf(N); for(int s=0;s<N;s++)buf[s]=(float)r[s];
+        char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
+        std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
+        std::vector<float> vb(2*N);                  // velocity field (for the Speed view)
+        for(int s=0;s<N;s++){ vb[s]=(float)(mx[s]/r[s]); vb[N+s]=(float)(my[s]/r[s]); }
+        char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
+        std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
+        ftimes<<t<<"\n"; nf++; };
+    double t_last_saved=-1.0;
     for(int step=0; step<a.steps && t<a.tend; step++){
+        if(step%a.save_every==0){ save_frame(); t_last_saved=t;
+            if(step%(a.save_every*3)==0)printf("step %d t=%.4f (%d frames)\n",step,t,nf); }
         double dt=a.cfl/maxspeed(); if(t+dt>a.tend)dt=a.tend-t;
         // stage 1
         residual(r,mx,my,E,dR,dMX,dMY,dE);
@@ -276,17 +258,8 @@ int main(int argc,char**argv){
                 if(c){ r[s]=R/c; mx[s]=MX/c; my[s]=MY/c; E[s]=EE/c; }
             }
         }
-        if(step%a.save_every==0){
-            std::vector<float> buf(N); for(int s=0;s<N;s++)buf[s]=(float)r[s];
-            char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
-            std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
-            std::vector<float> vb(2*N);                  // velocity field (for the Speed view)
-            for(int s=0;s<N;s++){ vb[s]=(float)(mx[s]/r[s]); vb[N+s]=(float)(my[s]/r[s]); }
-            char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
-            std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
-            nf++; if(step%(a.save_every*3)==0)printf("step %d t=%.4f (%d frames)\n",step,t,nf);
-        }
     }
+    if(t!=t_last_saved) save_frame();            // final state, at the actual end time
     // always save final density
     { std::vector<float> buf(N); for(int s=0;s<N;s++)buf[s]=(float)r[s];
       char fn[512]; snprintf(fn,sizeof(fn),"%s/final.bin",a.out.c_str());

@@ -131,7 +131,8 @@ int main(int argc,char**argv){
     auto ciy=[&](double py){ int c=(int)((py+marg)/supp)+1; return c<0?0:(c>=gny?gny-1:c); };
 
     std::error_code _ec; std::filesystem::create_directories(A.out, _ec);
-    std::ofstream front(A.out+"/front.csv"); front<<"t,xfront\n";   // dam-break front validation
+    std::ofstream front(A.out+"/front.csv"); front<<"t,xfront\n";
+    std::ofstream ftimes(A.out+"/frame_times.txt");     // time of every saved frame   // dam-break front validation
     int nf=0;
     const double kw=0.10*c0*c0/h;                 // (still used by the ship-hull contact)
     const double sx=A.Lx*0.5, sw=std::max(3.0*dp, A.sw*A.Lx);       // pour stream half-width
@@ -139,8 +140,30 @@ int main(int argc,char**argv){
     const double Ts=A.sloshT, sloshA=A.sloshA*g;
     const int Ncap=22000;
 
+    // frame i holds the state at the START of step i (time = i*dt); frame 0 is the initial state
+    auto save_frame=[&](double tt, int step){
+        int N=x.size();
+        std::vector<float> buf; buf.reserve(3*Nfluid+3);
+        int Nw=0;
+        for(int i=0;i<N;i++) if(!bnd[i]){
+            buf.push_back((float)x[i]); buf.push_back((float)y[i]);
+            buf.push_back((float)sqrt(vx[i]*vx[i]+vy[i]*vy[i])); Nw++; }
+        char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",A.out.c_str(),nf);
+        std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),buf.size()*sizeof(float));
+        ftimes<<tt<<"\n";
+        if(ship){ double ca=cos(th),sa=sin(th); int Nh=hlx.size();
+            std::vector<float> hb(2*Nh);
+            for(int k=0;k<Nh;k++){ hb[2*k]=(float)(Cx+ca*hlx[k]-sa*hly[k]);
+                hb[2*k+1]=(float)(Cy+sa*hlx[k]+ca*hly[k]); }
+            char hn[512]; snprintf(hn,sizeof(hn),"%s/hull_%05d.bin",A.out.c_str(),nf);
+            std::ofstream hof(hn,std::ios::binary); hof.write((char*)hb.data(),hb.size()*sizeof(float)); }
+        double xf=0; for(int i=0;i<N;i++) if(!bnd[i] && y[i]<0.1*A.H && x[i]>xf) xf=x[i];
+        front<<tt<<","<<xf<<"\n"; nf++;
+        if(step%(A.save_every*3)==0) printf("step %d/%d (%d frames, %d fluid)\n",step,steps,nf,Nw);
+    };
     for(int step=0; step<=steps; step++){
         double t=step*dt;
+        if(step%A.save_every==0) save_frame(t, step);
         double ramp=std::min(1.0, t/0.40), gt=g*ramp;     // ease gravity in
         // continuous emission for the pour scene
         if(sc=="pour" && (int)x.size()<Ncap && step%std::max(1,(int)(0.012/dt))==0){
@@ -246,25 +269,9 @@ int main(int argc,char**argv){
             if(y[i]<0){y[i]=0; if(vy[i]<0)vy[i]=0;} if(y[i]>A.Ly){y[i]=A.Ly; if(vy[i]>0)vy[i]=0;}
         }
 
-        if(step%A.save_every==0){
-            std::vector<float> buf; buf.reserve(3*Nfluid+3);
-            int Nw=0;
-            for(int i=0;i<N;i++) if(!bnd[i]){
-                buf.push_back((float)x[i]); buf.push_back((float)y[i]);
-                buf.push_back((float)sqrt(vx[i]*vx[i]+vy[i]*vy[i])); Nw++; }
-            char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",A.out.c_str(),nf);
-            std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),buf.size()*sizeof(float));
-            if(ship){ double ca=cos(th),sa=sin(th); int Nh=hlx.size();
-                std::vector<float> hb(2*Nh);
-                for(int k=0;k<Nh;k++){ hb[2*k]=(float)(Cx+ca*hlx[k]-sa*hly[k]);
-                    hb[2*k+1]=(float)(Cy+sa*hlx[k]+ca*hly[k]); }
-                char hn[512]; snprintf(hn,sizeof(hn),"%s/hull_%05d.bin",A.out.c_str(),nf);
-                std::ofstream hof(hn,std::ios::binary); hof.write((char*)hb.data(),hb.size()*sizeof(float)); }
-            double xf=0; for(int i=0;i<N;i++) if(!bnd[i] && y[i]<0.1*A.H && x[i]>xf) xf=x[i];
-            front<<t<<","<<xf<<"\n"; nf++;
-            if(step%(A.save_every*3)==0) printf("step %d/%d (%d frames, %d fluid)\n",step,steps,nf,Nw);
-        }
+        if(step%A.save_every==0) save_frame(t, step);
     }
+    if(steps%A.save_every!=0) save_frame(steps*dt, steps);   // final state, at the end time
     std::ofstream meta(A.out+"/meta.txt");
     meta<<"N "<<Nfluid<<"\nLx "<<A.Lx<<"\nLy "<<A.Ly<<"\ng "<<g
         <<"\nscene_"<<sc<<" 1\nnframes "<<nf<<"\n";
