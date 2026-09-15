@@ -837,6 +837,9 @@ def _solve_spectral(p, pr, tmp):
             pr(f"simulating… {int(100 * st / steps)}%")
         if st < steps:
             wh = sim.step(wh, dt)
+            if st % _pp == 0 and not np.isfinite(wh).all():
+                raise ValueError(f"spectral field became non-finite at step {st} (dt={dt:.4g}, ν={nu:g}); "
+                                 "reduce the viscosity or the perturbation")
     r = Result("spectral", vel, f"{label}  {n}×{n}", times=times,
                hints={"dx": L / n, "L": L, "dt": dt, "T_end": T_end, "nu": nu, "time_unit": "nondimensional (L = 2π)",
                       "init": "Taylor–Green" if label == "Taylor–Green vortex" else label})
@@ -867,6 +870,8 @@ def _solve_mixing(p, pr, tmp):
         if kap > 0:                                   # gentle scalar diffusion (spectral)
             c = np.real(np.fft.ifft2(np.exp(-kap * sim.k2 * dt) * np.fft.fft2(c)))
         wh = sim.step(wh, dt)
+        if st % _pp == 0 and not (np.isfinite(wh).all() and np.isfinite(c).all()):
+            raise ValueError(f"mixing field became non-finite at step {st}")
     return Result("field", raw, f"chaotic mixing  {n}×{n}", times=times,
                   hints={"label": "dye", "dx": L / n, "dt": dt, "T_end": T_end, "nu": nu, "kappa": kap,
                          "stir": stir, "time_unit": "nondimensional (L = 2π)"})

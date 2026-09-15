@@ -46,7 +46,7 @@ static Args parse(int c, char** v){
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
     auto fail=[](const std::string& m){ fprintf(stderr,"error: %s\n",m.c_str()); exit(2); };
     if(a.mode!="smoke"&&a.mode!="rt"&&a.mode!="rb"&&a.mode!="flame"&&a.mode!="wind") fail("unknown --mode (smoke|rt|rb|flame|wind)");
-    if(a.nx<4||a.ny<4||(long long)a.nx*a.ny>400000000LL) fail("--nx/--ny must be >= 4 and nx*ny <= 4e8");
+    if(a.nx<16||a.ny<16||(long long)a.nx*a.ny>400000000LL) fail("--nx/--ny must be >= 16 (the source geometry needs room) and nx*ny <= 4e8");
     if(a.steps<1||a.save_every<1||a.iters<1) fail("--steps, --save_every and --iters must be >= 1");
     for(double v: {a.dt,a.visc,a.buoy,a.grav,a.conf,a.srcw,a.pert,a.atwood,a.flicker,a.wind,a.zst,a.kappa})
         if(!std::isfinite(v)) fail("non-finite numeric argument");
@@ -164,10 +164,13 @@ int main(int argc,char**argv){
     std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
     int nf=0;
     int sx = wind ? nx/4 : nx/2;                 // chimney sits upwind so the plume can bend across
-    int sw=std::max(6,(int)(nx/12*a.srcw)), sh=std::max(5,ny/26);
-    int stack_h  = wind ? (int)(0.32*ny) : 0;    // chimney height; the plume leaves its top
-    int stack_hw = std::max(2, sw/2);            // chimney half-width (solid)
+    // source geometry, bounded so it always fits inside the interior (i in [1, nx-2], j in [1, ny-2])
+    int sw=std::min(std::max(6,(int)(nx/12*a.srcw)), std::max(1,(nx-4)/2));
+    int sh=std::min(std::max(5,ny/26), std::max(1,(ny-4)/2));
+    int stack_h  = wind ? std::min((int)(0.32*ny), ny-sh-3) : 0;    // chimney height; the plume leaves its top
+    int stack_hw = std::min(std::max(2, sw/2), std::max(1,(nx-4)/2)); // chimney half-width (solid)
     int sj = wind ? stack_h : 1;                 // source sits at the stack mouth, not on the floor
+    if(sj+sh>ny-1) sh=std::max(1, ny-1-sj);
     // zero the velocity inside the solid chimney so the wind flows around it
     auto solidify=[&](){ if(!wind) return;
         for(int j=0;j<stack_h;j++) for(int i=std::max(0,sx-stack_hw);i<=std::min(nx-1,sx+stack_hw);i++){
@@ -181,15 +184,15 @@ int main(int argc,char**argv){
             int off=(int)(a.flicker*sw*0.8*(sin(ph)+0.4*sin(2.3*ph+1.0)));
             double str=1.0 + a.flicker*0.5*sin(1.7*ph);
             int sxx=std::min(nx-2-sw, std::max(1+sw, sx+off));
-            for(int j=sj;j<sj+sh;j++)for(int i=sxx-sw;i<=sxx+sw;i++){
+            for(int j=sj;j<std::min(ny-1,sj+sh);j++)for(int i=std::max(1,sxx-sw);i<=std::min(nx-2,sxx+sw);i++){
                 double r=double(i-sxx)/sw; double g=exp(-3*r*r);
                 s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.55*g*str);
                 v[IX(i,j)] += 0.02*g*str;
             }
         }
         if(flame){                                  // fuel-rich vapour rising off a thin wick
-            int ww=std::max(2, sw/3);
-            for(int j=1;j<1+sh;j++)for(int i=sx-ww;i<=sx+ww;i++){
+            int ww=std::min(std::max(2, sw/3), std::max(1,(nx-4)/2));
+            for(int j=1;j<std::min(ny-1,1+sh);j++)for(int i=std::max(1,sx-ww);i<=std::min(nx-2,sx+ww);i++){
                 double r=double(i-sx)/ww; double g=exp(-3*r*r);
                 s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g);        // mixture fraction Z→1 at the wick
                 v[IX(i,j)] += 0.06*g;                                // launch the fuel upward so it doesn't pool/creep on the floor

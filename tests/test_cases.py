@@ -29,6 +29,15 @@ _ENV = {**os.environ, "OMP_NUM_THREADS": "4"}
 engine._ENV["OMP_NUM_THREADS"] = "4"
 
 
+def test_spectral_stays_finite_beyond_the_explicit_diffusion_limit():
+    """ν k_max² dt ≈ 2.85 exceeds the explicit-RK4 diffusion limit; the integrating-factor
+    scheme must still produce finite fields (Ultra/ν=0.01 reproduced at Low with ν=0.03)."""
+    r = engine.solve_exhibit("Cloud Billows", {"resolution": "Low (fast)", "viscosity": 0.03, "duration": 0.05})
+    assert all(np.isfinite(u).all() and np.isfinite(v).all() for u, v in r.raw)
+    n = r.raw[0][0].shape[0]; kmax = n // 2
+    print(f"    spectral: ν·k_max²·dt = {0.03 * kmax ** 2 * r.hints['dt']:.2f}, all {r.nframes} frames finite")
+
+
 def test_registry_complete():
     keys = set()
     for s in catalog.SCENES:

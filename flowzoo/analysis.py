@@ -54,31 +54,36 @@ def value_at(res, view, xfrac, yfrac, when=1.0):
             "index": i, "time": float(res.times[i]), "solid": solid, "empty": not np.isfinite(v)}
 
 
-def probe_series(res, view, xfrac, yfrac):
-    """Time series of the view's field at one point over all frames."""
+def probe_series(res, view, xfrac=None, yfrac=None, ix=None, iy=None):
+    """Time series of the view's field at one point over all frames. Pass either field
+    fractions or the resolved cell (ix, iy); the cell wins so display and export agree."""
     d = res.derived(view)
     if d.get("fields") is None:
         raise ValueError("this view has no scalar field to probe")
     f0 = d["fields"][0]; ny, nx = f0.shape[:2]
-    ix = int(min(nx - 1, max(0, round(xfrac * (nx - 1))))); iy = int(min(ny - 1, max(0, round(yfrac * (ny - 1)))))
+    if ix is None or iy is None:
+        ix = int(min(nx - 1, max(0, round(xfrac * (nx - 1))))); iy = int(min(ny - 1, max(0, round(yfrac * (ny - 1)))))
+    ix = int(min(nx - 1, max(0, ix))); iy = int(min(ny - 1, max(0, iy)))
     vals = [float(f[iy, ix]) for f in d["fields"]]
     return {"label": d["label"], "ix": ix, "iy": iy, "times": [float(t) for t in res.times],
             "values": [None if not np.isfinite(v) else v for v in vals],
             "time_unit": res.hints.get("time_unit", "frame")}
 
 
-def line_profile(res, view, axis="x", frac=0.5, when=1.0):
-    """Values along a horizontal (axis='x', at height frac) or vertical line (axis='y', at x frac)."""
+def line_profile(res, view, axis="x", frac=0.5, when=1.0, index=None, ix=None, iy=None):
+    """Values along a horizontal (axis='x', at row iy / height frac) or vertical line
+    (axis='y', at column ix / x frac) of frame `index` (or clip position `when`)."""
     d = res.derived(view)
     if d.get("fields") is None:
         raise ValueError("this view has no scalar field to profile")
-    i = frame_index(res, when); f = d["fields"][i]; ny, nx = f.shape[:2]
+    i = int(index) % res.nframes if index is not None else frame_index(res, when)
+    f = d["fields"][i]; ny, nx = f.shape[:2]
     if axis == "x":
-        iy = int(min(ny - 1, max(0, round(frac * (ny - 1))))); line = f[iy, :]
-        pos = np.linspace(0, 1, nx); at = {"iy": iy}
+        iy = int(min(ny - 1, max(0, round(frac * (ny - 1))))) if iy is None else int(min(ny - 1, max(0, iy)))
+        line = f[iy, :]; pos = np.linspace(0, 1, nx); at = {"iy": iy}
     else:
-        ix = int(min(nx - 1, max(0, round(frac * (nx - 1))))); line = f[:, ix]
-        pos = np.linspace(0, 1, ny); at = {"ix": ix}
+        ix = int(min(nx - 1, max(0, round(frac * (nx - 1))))) if ix is None else int(min(nx - 1, max(0, ix)))
+        line = f[:, ix]; pos = np.linspace(0, 1, ny); at = {"ix": ix}
     return {"label": d["label"], "axis": axis, "pos": pos.tolist(),
             "values": [None if not np.isfinite(v) else float(v) for v in line], "index": i,
             "time": float(res.times[i]), **at}

@@ -339,6 +339,61 @@ def test_exports_are_traceable_to_the_run():
         assert api.save_png("nope", "Speed")["ok"] is False
 
 
+def test_every_api_response_is_strict_json():
+    """Sweeps with unavailable metrics (NaN) and every other reply must be valid JSON (NaN→null)."""
+    import json
+    api = _api()
+    orig = funoos_app.postproc.metrics
+    funoos_app.postproc.metrics = lambda res: {"strouhal": float("nan"), "cd": 1.5}
+    try:
+        r = api.sweep("__quick__", {}, "a", [1, 2], None, None, "nanj")
+    finally:
+        funoos_app.postproc.metrics = orig
+    txt = json.dumps(r, allow_nan=False)                      # raises on NaN
+    assert r["items"][0]["metrics"]["strouhal"] is None and r["items"][0]["metrics"]["cd"] == 1.5
+    for resp in (api.run("__quick__", {}, None, None, 26, "j1"), api.runs(), api.jobs(), api.job("j1"),
+                 api.estimate("Wind Tunnel", {}), api.derived("Rayleigh-Benard", {"kappa": 0}),
+                 api.render_view("j1", "Speed", "Turbo", 26, req=1), api.probe("j1", "Speed", 0.03, 0.5, req=2),
+                 api.exhibits(), api.catalog(), api.scene_detail("lbm_cylinder"), api.validate("Wind Tunnel", {"reynolds": "x"})):
+        json.dumps(resp, allow_nan=False)
+
+
+def test_derived_readouts_never_fail_a_run():
+    """A completed run stays completed even when a derived readout cannot be computed."""
+    from flowzoo import schema, catalog
+    for s in catalog.SCENES:
+        d = schema.derived(s["exhibit"], s["preset"])
+        assert d and not d[0]["label"].startswith("derived quantities unavailable"), s["key"]
+    d = schema.derived("Rayleigh-Benard", {"kappa": 0})
+    assert any("undefined" in x["value"] for x in d if "Prandtl" in x["label"])
+    d = schema.derived("The Big Splash", {"scene": "Still water (hydrostatic)"})
+    assert any("particles" in x["label"] for x in d)
+    api = _api()
+    orig = funoos_app.schema.derived
+    funoos_app.schema.derived = lambda ex, p: (_ for _ in ()).throw(RuntimeError("readout bug"))
+    try:
+        r = api.run("__quick__", {}, None, None, 26, "dr1")
+    finally:
+        funoos_app.schema.derived = orig
+    assert r["ok"] and r["state"] == "completed" or api.job("dr1")["state"] == "completed", "the run's terminal state is completed"
+
+
+def test_probe_export_uses_the_displayed_cell():
+    api = _api(); api.run("__quick__", {}, None, None, 26, "pe")
+    pr = api.probe("pe", "Speed", 0.03, 0.62, req=1)
+    with tempfile.TemporaryDirectory() as d:
+        api._win = _FakeWin(d)
+        c = api.export_csv("pe", "probe", {"view": "Speed", "ix": pr["ix"], "iy": pr["iy"]})
+        head = Path(c["path"]).read_text().splitlines()[0]
+        assert f"cell ({pr['ix']}, {pr['iy']})" in head, head
+        lp = api.line_profile("pe", "Speed", "x", 0.62, 0.5, req=2)
+        c2 = api.export_csv("pe", "profile", {"view": "Speed", "axis": "x", "index": lp["index"], "iy": lp["iy"]})
+        h2 = Path(c2["path"]).read_text().splitlines()[0]
+        assert f"frame {lp['index']}" in h2 and f"time {lp['time']}" in h2, h2
+        rows = Path(c2["path"]).read_text().splitlines()[2:]
+        assert len(rows) == 8 and abs(float(rows[3].split(",")[1]) - lp["values"][3]) < 1e-12
+
+
 # ----------------------------------------------------------------- result store
 def test_store_bounded_by_count_lru():
     st = RunStore(max_runs=3, max_bytes=10 ** 9)

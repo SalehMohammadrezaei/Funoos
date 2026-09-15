@@ -36,6 +36,7 @@ import base64
 import copy
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -376,6 +377,38 @@ def _js(s):
     return json.dumps(s)
 
 
+def _json_safe(obj):
+    """Make a response strictly JSON-serialisable: NaN/±inf → None, numpy scalars/arrays → Python."""
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return _json_safe(obj.tolist())
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (float, np.floating)):
+        f = float(obj)
+        return f if math.isfinite(f) else None
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (str, int, bool)) or obj is None:
+        return obj
+    return str(obj)
+
+
+def _api_method(fn):
+    """Every public Api method returns a strictly JSON-safe envelope."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        out = fn(self, *args, **kwargs)
+        return _json_safe(out)
+    wrapper._api = True
+    return wrapper
+
+
 class Api:
     def __init__(self, store=None, sweep=True):
         self.store = store if store is not None else RunStore()   # (an empty store is falsy)
@@ -544,12 +577,22 @@ class Api:
                 self.views.drop_run(rid)
             self.views.put((job.id, view, cm, fps, None, None), vid)
             job.run_id = job.id
-            job.set_state("completed")
+            job.set_state("completed")                    # terminal state first; readouts below are advisory
+
+            def advisory(fn, default):
+                try:
+                    return fn(), None
+                except Exception as e:              # noqa: BLE001 — a readout problem never fails a completed run
+                    return default, _errtext(e)
+            stats, stats_note = advisory(lambda: _stats(res, exhibit), [])
+            derived_items, derived_note = advisory(lambda: schema.derived(exhibit, dict(job.params)), [])
+            meta, _ = advisory(res.meta, {"kind": res.kind, "frames": res.nframes})
             return {"ok": True, "job_id": job.id, "run_id": job.id, "state": "completed",
                     "video": vid, "views": list(res.views), "view": view, "info": res.info,
-                    "cmaps": list(render.COLORMAPS), "defcmap": cm, "stats": _stats(res, exhibit),
-                    "params": dict(job.params), "evicted": evicted, "meta": res.meta(),
-                    "validation": val.as_dict(), "derived": schema.derived(exhibit, dict(job.params)),
+                    "cmaps": list(render.COLORMAPS), "defcmap": cm, "stats": stats,
+                    "params": dict(job.params), "evicted": evicted, "meta": meta,
+                    "validation": val.as_dict(), "derived": derived_items,
+                    "stats_note": stats_note or derived_note,
                     "store": {"runs": len(self.store), "bytes": self.store.total_bytes()}}
         except engine.Cancelled:
             job.set_state("cancelled"); job.error = "cancelled"
@@ -1024,11 +1067,15 @@ class Api:
             if res is None:
                 return {"ok": False, "error": "run expired"}
             if kind == "probe":
-                d = analysis.probe_series(res, kw.get("view"), float(kw.get("xfrac", 0.5)), float(kw.get("yfrac", 0.5)))
-                rows = [("time", d["label"])] + list(zip(d["times"], d["values"]))
+                # the SAME cell the plot used: resolved cell indices, not re-derived fractions
+                d = analysis.probe_series(res, kw.get("view"), ix=int(kw["ix"]), iy=int(kw["iy"]))
+                rows = [("# " + f"run {run_id}, view {kw.get('view')}, cell ({d['ix']}, {d['iy']}), time unit {d['time_unit']}", ""),
+                        ("time", d["label"])] + list(zip(d["times"], d["values"]))
             elif kind == "profile":
-                d = analysis.line_profile(res, kw.get("view"), kw.get("axis", "x"), float(kw.get("frac", 0.5)))
-                rows = [("position", d["label"])] + list(zip(d["pos"], d["values"]))
+                d = analysis.line_profile(res, kw.get("view"), kw.get("axis", "x"), index=int(kw["index"]),
+                                          ix=kw.get("ix"), iy=kw.get("iy"))
+                rows = [("# " + f"run {run_id}, view {kw.get('view')}, axis {d['axis']}, frame {d['index']}, time {d['time']}", ""),
+                        ("position", d["label"])] + list(zip(d["pos"], d["values"]))
             else:
                 series = postproc.series(res) if hasattr(postproc, "series") else {}
                 if not series:
@@ -1130,6 +1177,11 @@ def _webview2_present():
         return False
     except Exception:                           # noqa: BLE001
         return None
+
+
+for _name, _fn in list(vars(Api).items()):
+    if callable(_fn) and not _name.startswith("_") and not getattr(_fn, "_api", False):
+        setattr(Api, _name, _api_method(_fn))
 
 
 def main():

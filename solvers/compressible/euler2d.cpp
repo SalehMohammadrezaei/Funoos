@@ -227,9 +227,11 @@ int main(int argc,char**argv){
         char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
         std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
         ftimes<<t<<"\n"; nf++; };
-    double t_last_saved=-1.0;
+    double t_last_saved=-1.0, pmin_run=1e300, rmin_run=1e300;
     for(int step=0; step<a.steps && t<a.tend; step++){
         if(step%a.save_every==0){ save_frame(); t_last_saved=t;
+            for(int s=0;s<N;s++){ St q=getprim(r,mx,my,E,s); double praw=(G-1)*(E[s]-0.5*r[s]*(q.u*q.u+q.v*q.v));
+                if(praw<pmin_run) pmin_run=praw; if(r[s]<rmin_run) rmin_run=r[s]; }
             if(step%(a.save_every*3)==0)printf("step %d t=%.4f (%d frames)\n",step,t,nf); }
         double dt=a.cfl/maxspeed(); if(t+dt>a.tend)dt=a.tend-t;
         // stage 1
@@ -278,7 +280,8 @@ int main(int argc,char**argv){
         std::vector<float> fb(N); for(int s=0;s<N;s++) fb[s]= failt[s]<0?-1.0f:failt[s]/(float)t;
         std::ofstream ff(a.out+"/failt.bin",std::ios::binary); ff.write((char*)fb.data(),N*sizeof(float)); }
     std::ofstream meta(a.out+"/meta.txt");
-    meta<<"nx "<<nx<<"\nny "<<ny<<"\nnframes "<<nf<<"\ntime "<<t<<"\nmode_"<<a.mode<<" 1\n";
+    meta<<"nx "<<nx<<"\nny "<<ny<<"\nnframes "<<nf<<"\ntime "<<t<<"\nmode_"<<a.mode<<" 1\n"
+        <<"pmin "<<pmin_run<<"\nrhomin "<<rmin_run<<"\n";     // admissibility over the saved frames (raw pressure, before the 1e-6 floor)
     printf("done: %d frames, t=%.4f -> %s\n",nf,t,a.out.c_str());
     return 0;
 }

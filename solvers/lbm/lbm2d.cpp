@@ -123,6 +123,14 @@ int main(int argc, char** argv) {
 
     std::ofstream probe(a.out + "/probe.csv");
     probe << "step,uy\n";
+    std::ofstream permh(a.out + "/perm.csv");     // k at every frame (periodic/body-force mode): convergence record
+    permh << "step,k\n";
+    auto total_mass=[&](){ double m=0; for(int s=0;s<(int)N;s++) for(int k=0;k<NQ;k++) m+=f[k*N+s]; return m; };
+    auto perm_now=[&](){ if(!a.force) return 0.0; double su=0; long nfl=0;
+        for(int s=0;s<(int)N;s++) if(!solid[s]){ double rho=0,ux=0,uy=0; for(int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
+            su += a.fdir? (uy+0.5*a.force)/rho : (ux+0.5*a.force)/rho; nfl++; }
+        return ((a.tau-0.5)/3.0)*(su/(double)N)/a.force; };
+    const double mass0 = total_mass();
     int nframes = 0;
 
     for (int step=0; step<=a.steps; step++) {
@@ -185,6 +193,7 @@ int main(int argc, char** argv) {
             probe << step << "," << (uy/rho) << "\n";
         }
         if (step % a.save_every == 0) {
+            if (a.periodic) permh << step << "," << perm_now() << "\n";
             std::vector<float> buf(2*N);
             #pragma omp parallel for schedule(static)
             for (int j=0;j<ny;j++) for (int i=0;i<nx;i++) {
@@ -223,6 +232,7 @@ int main(int argc, char** argv) {
 
     // metadata for the Python renderer
     std::ofstream meta(a.out + "/meta.txt");
+    meta << "mass_initial "<<mass0<<"\nmass_final "<<total_mass()<<"\n";
     meta << "nx "<<nx<<"\nny "<<ny<<"\nU "<<a.U<<"\ntau "<<a.tau
          << "\nnu "<<nu<<"\nsave_every "<<a.save_every
          << "\nnframes "<<nframes

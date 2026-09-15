@@ -149,7 +149,23 @@ def check_presets():
 
 # ----------------------------------------------------------------- derived quantities
 def derived(exhibit, params):
-    """Quantities the runner will use, computed the same way the runner does."""
+    """Quantities the runner will use, computed the same way the runner does.
+
+    Advisory only: this never raises. If a readout cannot be computed the list
+    carries one item explaining why, so a completed run is never invalidated by
+    a readout problem."""
+    try:
+        return _derived(exhibit, params)
+    except Exception as e:                       # noqa: BLE001
+        return [{"label": "derived quantities unavailable", "value": f"{type(e).__name__}: {e}", "units": "",
+                 "note": "the simulation itself is unaffected"}]
+
+
+def _fmt_ratio(num, den, digits=3):
+    return f"{num / den:.{digits}g}" if den else "undefined (division by zero)"
+
+
+def _derived(exhibit, params):
     from . import engine
     p = validate(exhibit, params, allow_outside=True).params
     s = engine._res(p); dur = engine._durv(p); out = []
@@ -191,15 +207,23 @@ def derived(exhibit, params):
         add("grid", f"{nx} × {ny}", "cells (dx = dt = 1)"); add("time steps", f"{int(4800 * dur)}", "steps")
         if exhibit == "Rayleigh-Benard":
             nu = float(p["viscosity"]); kap = float(p.get("kappa", 0.02)); b = float(p["buoyancy"])
-            H = ny; Ra = b * H ** 3 / (nu * kap)
+            H = ny
             add("thermal diffusivity κ", f"{kap:.3g}", "grid units")
-            add("Prandtl number ν/κ", f"{nu / kap:.3g}")
-            add("Rayleigh number  β·ΔT·H³/(ν κ)", f"{Ra:.3g}", "", "β·ΔT = buoyancy coefficient, H = layer height in cells; onset ≈ 1708 for rigid plates")
+            add("Prandtl number ν/κ", _fmt_ratio(nu, kap))
+            add("Rayleigh number  β·ΔT·H³/(ν κ)", _fmt_ratio(b * H ** 3, nu * kap), "",
+                "β·ΔT = buoyancy coefficient, H = layer height in CELLS, so this value changes with the "
+                "resolution setting (a resolution change is not a convergence study here). Onset ≈ 1708 "
+                "applies to rigid no-slip conducting plates.")
     elif exhibit == "Detonation":
         nx = ny = int(420 * s); ratio = float(p["pressure"]); p_amb = 0.1
         add("grid", f"{nx} × {ny}", "cells"); add("ambient pressure", f"{p_amb}", "code")
         add("charge pressure p₀ = ratio × ambient", f"{ratio * p_amb:.3g}", "code")
         add("charge radius", f"{float(p['charge']) * nx:.0f}", "cells"); add("end time", f"{70 * dur:.0f}", "code units")
+    elif exhibit == "Shock Tube":
+        nx, ny = int(600 * s), 24; tend = 0.2 * nx * dur
+        add("cells along the tube", f"{nx}", "", "tube length 1; the strip height is for display only")
+        add("end time", f"{tend / nx:.3f}", "tube-length units", f"({tend:g} code units; reference 0.2)")
+        add("expected mean density error", "≈ 0.003 at 300 cells, ≈ 0.002 at 600", "", "first order at the discontinuities")
     elif exhibit == "Shockwave Strike":
         nx, ny = int(620 * s), int(320 * s); G = 1.4; Ms = float(p["mach"])
         rr = ((G + 1) * Ms * Ms) / ((G - 1) * Ms * Ms + 2.0); pr = (2.0 * G * Ms * Ms - (G - 1)) / (G + 1)
@@ -217,7 +241,8 @@ def derived(exhibit, params):
         c0 = 10.0 * (g * max(H, Ly * 0.5)) ** 0.5
         add("tank", f"{Lx} × {Ly}", "m"); add("particle spacing dp", f"{dp:.3f}", "m", "clamped to 0.02–0.08 m")
         fill = {"dam": float(p.get("width", 1.0)) * float(p.get("height", 2.0)), "drop": Lx * 0.30 * Ly,
-                "slosh": Lx * 0.42 * Ly, "waves": Lx * 0.40 * Ly, "ship": Lx * 0.40 * Ly, "pour": 0.0}[sc]
+                "slosh": Lx * 0.42 * Ly, "rest": Lx * 0.42 * Ly, "waves": Lx * 0.40 * Ly, "ship": Lx * 0.40 * Ly,
+                "pour": 0.0}.get(sc, 0.0)
         add("estimated particles", f"{int(fill / dp / dp)}" if sc != "pour" else "emitted continuously (≤ 22 000)", "", "the particle count is set by dp and the water area")
         add("numerical sound speed c₀", f"{c0:.1f}", "m/s", "10 × √(g H): weakly compressible")
         add("time step", f"{0.08 * 1.3 * dp / c0:.2e}", "s")

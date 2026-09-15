@@ -2,8 +2,8 @@
 
 Periodic box, vorticity transport  d(omega)/dt + u.grad(omega) = nu * lap(omega).
 The nonlinear term is evaluated in physical space (pseudo-spectral) with 2/3-
-rule dealiasing; viscosity is treated explicitly in the right-hand side; time
-stepping is explicit RK4. Space is spectrally accurate, but time integration is
+rule dealiasing; the viscous term is integrated exactly (integrating factor) and
+the advection term with RK4. Space is spectrally accurate, but time integration is
 not exact: in the inviscid limit energy is conserved only to the RK4 truncation
 error (measured in tests/), not to round-off.
 """
@@ -30,20 +30,28 @@ class Spectral2D:
         v = np.real(np.fft.ifft2(-1j * self.kx * psih))
         return u, v
 
-    def rhs(self, wh):
+    def nonlinear(self, wh):
+        """−(u·∇)ω in spectral space, dealiased (the advection term only)."""
         u, v = self.velocity(wh)
         wx = np.real(np.fft.ifft2(1j * self.kx * wh))
         wy = np.real(np.fft.ifft2(1j * self.ky * wh))
-        adv = np.fft.fft2(u * wx + v * wy) * self.mask
-        return -adv - self.nu * self.k2 * wh
+        return -np.fft.fft2(u * wx + v * wy) * self.mask
+
+    def rhs(self, wh):
+        return self.nonlinear(wh) - self.nu * self.k2 * wh
 
     def step(self, wh, dt):
-        # RK4 -- stable for the (imaginary-eigenvalue) advection operator
-        k1 = self.rhs(wh)
-        k2 = self.rhs(wh + 0.5 * dt * k1)
-        k3 = self.rhs(wh + 0.5 * dt * k2)
-        k4 = self.rhs(wh + dt * k3)
-        return wh + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+        """Integrating-factor RK4: the viscous term e^{−νk²t} is applied exactly and RK4
+        advances only the advection term, so there is no diffusive time-step limit
+        (explicit RK4 on ν k² ω is unstable once ν k_max² dt exceeds ≈ 2.8) and the
+        advection CFL alone sets dt. Fourth order in time; with ν = 0 it reduces to
+        classical RK4."""
+        E = np.exp(-0.5 * self.nu * self.k2 * dt); E2 = E * E
+        a = self.nonlinear(wh)
+        b = self.nonlinear(E * (wh + 0.5 * dt * a))
+        c = self.nonlinear(E * wh + 0.5 * dt * b)
+        d = self.nonlinear(E2 * wh + dt * E * c)
+        return E2 * wh + (dt / 6.0) * (E2 * a + 2.0 * E * (b + c) + d)
 
     def energy(self, wh):
         u, v = self.velocity(wh)

@@ -283,7 +283,9 @@ int main(int argc,char**argv){
         if(step%A.save_every==0) save_frame(t, step);
     }
     if(steps%A.save_every!=0) save_frame(steps*dt, steps);   // final state, at the end time
+    double dev2=0; long nfl=0; for(int i=0;i<(int)x.size();i++) if(!bnd[i]){ double d=rho[i]/rho0-1.0; dev2+=d*d; nfl++; }
     std::ofstream meta(A.out+"/meta.txt");
+    meta<<"rho_rms_dev "<<(nfl? sqrt(dev2/nfl):0.0)<<"\n";      // rms relative density deviation of the fluid at the end
     meta<<"N "<<Nfluid<<"\nLx "<<A.Lx<<"\nLy "<<A.Ly<<"\ng "<<g
         <<"\nscene_"<<sc<<" 1\nnframes "<<nf<<"\n";
     printf("done: %d frames -> %s\n",nf,A.out.c_str());
