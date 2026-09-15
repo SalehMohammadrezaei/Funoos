@@ -27,9 +27,9 @@ DETAIL = {
 "What ties it together is the Reynolds number, Re = U·D/ν, the ratio of inertial "
 "to viscous forces. Raise it and the wake goes steady → periodic shedding → "
 "turbulent; the shedding frequency collapses onto a near-constant Strouhal "
-"number St = f·D/U ≈ 0.2. Because lattice-Boltzmann treats the obstacle as just "
-"a set of 'solid' cells, ANY shape drops in with no mesh generation — the reason "
-"LBM is a workhorse for flow through geometrically complex media."),
+"number St = f·D/U ≈ 0.2. Because lattice-Boltzmann represents the obstacle as a "
+"set of solid cells on a regular lattice, any shape drops in without a body-fitted "
+"mesh — one reason LBM is used for flow through geometrically complex media."),
 "terms": (
 "• fq — the population of fluid 'walkers' moving along lattice direction q\n"
 "• cq — the discrete velocity of direction q (one of 9 in D2Q9)\n"
@@ -384,10 +384,12 @@ DETAIL["Chimney Plume"] = {
 # Initial & boundary conditions per exhibit — shown as a "Setup" block on each scene.
 SETUP = {
 "Wind Tunnel": {
-  "ic": "Fluid at rest; a uniform inflow is ramped up to the chosen speed.",
-  "bc": "Velocity inlet on the left, zero-gradient outflow on the right, periodic top and "
-        "bottom walls, and no-slip half-way bounce-back on the obstacle (any shape, vehicle "
-        "or text) — so no mesh is ever generated."},
+  "ic": "Uniform flow at the inflow speed everywhere (equilibrium populations); a brief "
+        "transverse inflow perturbation seeds the wake instability.",
+  "bc": "Velocity inlet on the left, zero-gradient outflow on the right with a relaxation "
+        "sponge over the last 12 % (it reduces but does not eliminate reflections), periodic "
+        "top and bottom, and no-slip half-way bounce-back on the obstacle. Vehicle scenes add "
+        "a no-slip road."},
 "Rising Smoke": {
   "ic": "Quiescent ambient fluid with no dye; the source switches on at t = 0.",
   "bc": "No-penetration (free-slip) floor carrying a hot, dyed source patch; free-slip side "
@@ -408,27 +410,29 @@ SETUP = {
 "Detonation": {
   "ic": "Ambient gas at rest with a small high-pressure, high-density charge; the 'city' "
         "scene also places two solid towers on the ground.",
-  "bc": "Non-reflecting (transmissive) outflow at the domain edges; solid reflecting walls "
-        "on the towers, which the blast diffracts around and reflects off."},
+  "bc": "Zero-gradient (transmissive) edges — they let waves leave with weak reflections, not "
+        "perfectly; the towers are cells held at a fixed dense state (an approximate reflecting "
+        "wall), which the blast diffracts around and reflects off."},
 "Shockwave Strike": {
   "ic": "A planar incident shock travelling into still gas, set just upstream of a lighter "
         "(or heavier) gas bubble at rest; the twin-bubble variant seeds two.",
   "bc": "The incident shock is set as an initial condition (a post-shock slab); all domain "
-        "edges are transmissive (zero-gradient) outflow; the bubble is "
+        "edges are zero-gradient (weakly reflecting) outflow; the bubble is "
         "a density contrast, not a wall, so the shock passes through and deforms it."},
 "The Big Splash": {
   "ic": "A body of water at rest under gravity — a tall column (dam break), a falling blob "
         "(droplet), a filled tank (slosh), a partly-filled glass (pour) or a wave train.",
-  "bc": "Free-slip (non-penetration) tank walls enforced by dynamic boundary particles; a free surface "
-        "open to the air; the ship scene adds a rigid body that floats on the surface through a "
-        "contact (penalty) force, heaving and rolling with the waves."},
+  "bc": "Tank walls of fixed boundary particles (dynamic boundary condition); a free surface "
+        "open to the air; the wavemaker is a moving wall layer; the ship scene adds a rigid hull "
+        "driven by contact forces, gravity and damping, with limits on its motion."},
 "Cloud Billows": {
   "ic": "Two opposing shear layers with a seeded perturbation (Kelvin–Helmholtz), or a "
         "random divergence-free field (decaying turbulence).",
   "bc": "Periodic in both directions — the natural setting for the pseudo-spectral (FFT) solver."},
 "Porous Flow": {
-  "ic": "Fluid at rest inside a random grain pack.",
-  "bc": "Periodic in x and y with a constant body force driving the flow; no-slip bounce-back "
+  "ic": "Fluid at rest inside a random grain pack (equilibrium populations at zero velocity), "
+        "then accelerated by the body force; the permeability is read from the final state.",
+  "bc": "Periodic in x and y with a constant body force along x or y; no-slip bounce-back "
         "on every grain surface."},
 "Turing Patterns": {
   "ic": "A uniform field (u = 1, v = 0) with a few small seeded patches of v to nucleate the pattern.",
@@ -457,8 +461,8 @@ DETAIL["Candle Flame"] = {
 "anchors it to the wick. That same buoyant acceleration is unstable: a ring of vorticity forms "
 "and sheds periodically, pinching the flame and making the tip flicker at a few cycles a second. "
 "The slender teardrop, the steady anchoring, and the flicker all fall out of this fuel-meets-air-"
-"plus-buoyancy picture — which is why this scene uses a combustion model, not the recoloured "
-"buoyant jet of the smoke plume."),
+"plus-buoyancy picture. This scene reproduces it with a simplified model — a mixture variable, "
+"a prescribed wick inflow, a temperature proxy and buoyancy — without chemistry or heat release."),
 "terms": (
 "• Z — mixture fraction: 1 in the fuel from the wick, 0 in the ambient air, conserved as it mixes\n"
 "• Z = Z_st — the stoichiometric surface where fuel and air meet in burning proportion (the sheet)\n"
@@ -467,7 +471,8 @@ DETAIL["Candle Flame"] = {
 "• 𝒟∇²Z — diffusion of the mixture, which sets the thickness of the luminous zone"),
 }
 SETUP["Candle Flame"] = {
-  "ic": "Still, cool air everywhere (mixture fraction Z = 0); the wick begins releasing fuel at t = 0.",
-  "bc": "A thin fuel inlet at the wick (Z → 1) on the floor; a no-penetration (free-slip) floor, free-slip side walls that "
-        "let air be entrained, and an open top through which the hot products leave.",
+  "ic": "Still, cool air everywhere (mixture variable Z = 0); the wick begins releasing fuel at t = 0.",
+  "bc": "A thin inlet at the wick with a prescribed upward velocity (Z → 1) on the floor; a free-slip floor, "
+        "side walls with lateral damping, an open top through which the hot products leave, and a decay "
+        "of Z away from the source (model terms, see the checks).",
 }

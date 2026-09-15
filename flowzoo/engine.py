@@ -631,11 +631,12 @@ def _solve_porous(p, pr, tmp):
     mask = geometry.porous(nx, ny, solid_frac=1.0 - phi, grain=grain, seed=int(p.get("seed", 1)))
     geometry.save_mask(mask, Path(tmp) / "m.bin")
     _ensure(_bin("lbm", "lbm2d"))
-    tau, force = 0.8, 1.2e-5            # viscous (Stokes regime → Darcy valid), gentle body force
+    tau, force = 0.8, 1.2e-5 * float(p.get("strength", 1.0))   # viscous (Stokes regime → Darcy valid), gentle body force
+    fdir = 1 if str(p.get("direction", "x")).lower().startswith("y") else 0
     steps = int(24000 * _durv(p))
-    pr(f"LBM porous medium · φ={phi:.2f} · {nx}×{ny}…")
+    pr(f"LBM porous medium · φ={phi:.2f} · {nx}×{ny} · force along {'y' if fdir else 'x'}…")
     _run_solver([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
-                 "--mask", str(Path(tmp) / "m.bin"), "--periodic", "1", "--force", str(force),
+                 "--mask", str(Path(tmp) / "m.bin"), "--periodic", "1", "--force", str(force), "--fdir", str(fdir),
                  "--tau", str(tau), "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
                  "--out", tmp], pr)
     n = _nframes(tmp); use = range(n // 3, n, max(1, (n - n // 3) // 70))
@@ -649,9 +650,10 @@ def _solve_porous(p, pr, tmp):
             except ValueError: pass
     poro = meta.get("porosity", phi); perm = meta.get("permeability", 0.0)
     hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force, "tau": tau,
+             "direction": "y" if fdir else "x", "seed": int(p.get("seed", 1)),
              "nu": (tau - 0.5) / 3.0, "mean_ux_pore": meta.get("mean_ux_pore"), "mean_ux": meta.get("mean_ux"),
              "time_unit": "lattice steps", "steps": steps, "dx": 1.0}
-    return Result("porous", raw, f"porous · φ={poro:.2f} · k={perm:.2e}", mask=mask, hints=hints, times=times)
+    return Result("porous", raw, f"porous · φ={poro:.2f} · k_{'y' if fdir else 'x'}={perm:.2e}", mask=mask, hints=hints, times=times)
 
 
 def _solve_ns(mode, p, pr, tmp):
@@ -674,7 +676,7 @@ def _solve_ns(mode, p, pr, tmp):
         hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
     elif mode == "rt":
         args += ["--grav", str(p["gravity"]), "--pert", str(p["perturbation"]), "--conf", "0",
-                 "--iters", "80", "--atwood", str(p.get("atwood", 1.0))]
+                 "--iters", "80", "--atwood", str(p.get("atwood", 1.0)), "--modes", str(int(p.get("modes", 0)))]
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "density ρ"}
     elif mode == "rb":
         args += ["--buoy", str(p["buoyancy"]), "--conf", "0", "--iters", "80",
@@ -712,16 +714,21 @@ def _solve_ns(mode, p, pr, tmp):
 
 def _solve_euler(mode, p, pr, tmp):
     s = _res(p)
-    if mode == "blast":
+    if mode == "sod":
+        nx, ny = int(600 * s), 24; tend = 0.2 * nx * float(p.get("tend", 1.0)) * _durv(p)   # code time 0.2·nx per unit tube length
+        extra = []
+        hints = {"mode": "sod", "nx": nx, "ny": ny, "tube_length": 1.0}
+    elif mode == "blast":
         nx = ny = int(420 * s); tend = 70 * _durv(p)
         bld = 1 if p.get("scene") == "Shock hits a city" else 0
         p_amb = 0.1                                        # ambient pressure in the solver's code units
         extra = ["--p0", str(float(p["pressure"]) * p_amb), "--radius", str(p["charge"]), "--building", str(bld)]
         if bld:
-            extra += ["--strength", str(p.get("strength", 1.0))]
+            erodes = str(p.get("structure", "Rigid walls")).startswith("Erodes")
+            extra += ["--strength", str(p.get("strength", 1.0) if erodes else 1e9)]   # 1e9: never fails = rigid
         hints = {"mode": "blast", "debris": int(p.get("debris", 0)), "nx": nx, "ny": ny,
                  "building": bld, "p_ambient": p_amb, "p0": float(p["pressure"]) * p_amb,
-                 "pressure_ratio": float(p["pressure"])}
+                 "pressure_ratio": float(p["pressure"]), "structure": p.get("structure", "Rigid walls") if bld else None}
     else:
         nx, ny = int(620 * s), int(320 * s); tend = 230 * _durv(p)
         nb = 2 if p.get("target") == "Two bubbles" else 1
@@ -757,8 +764,9 @@ def _solve_euler(mode, p, pr, tmp):
 
 
 _SPLASH_SCENE = {"Dam break": "dam", "Drop & splash": "drop", "Sloshing tank": "slosh",
-                 "Pour into a glass": "pour", "Wavy ocean": "waves", "Ship on waves": "ship"}
-_SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2),
+                 "Pour into a glass": "pour", "Wave tank": "waves", "Ship on waves": "ship",
+                 "Still water (hydrostatic)": "rest", "Wavy ocean": "waves"}
+_SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2), "rest": (5.0, 3.2),
                 "pour": (0.13, 0.20), "waves": (6.0, 2.4), "ship": (6.0, 2.4)}   # pour = a real glass
 
 
@@ -801,7 +809,7 @@ def _solve_dam(p, pr, tmp):
         vmax = 1.3 * max(float(p.get("pourv", 1.4)), float(np.sqrt(2 * g * Ly)))
     else:
         vmax = 1.2 * float(np.sqrt(2 * g * max(H, Ly * 0.5)))
-    hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": vmax, "scene": sc, "g": g, "H": H, "tend": tend,
+    hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": vmax, "scene": sc, "g": g, "H": H, "tend": tend, "a": a,
              "time_unit": "s" if len(all_t) >= n else "frame"}
     if sc == "ship":
         hints["hull"] = [np.fromfile(Path(tmp) / f"hull_{i:05d}.bin", dtype=np.float32).reshape(-1, 2)
@@ -816,6 +824,9 @@ def _solve_spectral(p, pr, tmp):
     sim = Spectral2D(n=n, L=L, nu=nu)
     if p.get("init") == "Random turbulence":
         wh = random_field(n, seed=int(p.get("seed", 1))); label = "decaying turbulence"
+    elif p.get("init") == "Taylor–Green vortex":
+        from .spectral import taylor_green
+        wh = taylor_green(n); label = "Taylor–Green vortex"
     else:
         wh = double_shear_layer(n, amp=float(p["perturbation"]), delta=float(p.get("thickness", 1 / 30)))
         label = "Kelvin–Helmholtz"
@@ -837,7 +848,8 @@ def _solve_spectral(p, pr, tmp):
         if st < steps:
             wh = sim.step(wh, dt)
     r = Result("spectral", vel, f"{label}  {n}×{n}", times=times,
-               hints={"dx": L / n, "L": L, "dt": dt, "T_end": T_end, "nu": nu, "time_unit": "nondimensional (L = 2π)"})
+               hints={"dx": L / n, "L": L, "dt": dt, "T_end": T_end, "nu": nu, "time_unit": "nondimensional (L = 2π)",
+                      "init": "Taylor–Green" if label == "Taylor–Green vortex" else label})
     return r
 
 
@@ -927,7 +939,7 @@ EXHIBITS = {
                             "Angle of attack in degrees; positive = leading edge up (lift upward). "
                             "Negative angles mirror the flow and give downward lift.", units="°",
                             hard_min=-45, hard_max=45), "obstacle", ["Airfoil"]),
-                   _f("reynolds", "Reynolds number", 160, 60, 1200, "Physics", _H["Re"], hard_min=5, hard_max=5000,
+                   _f("reynolds", "Reynolds number", 160, 30, 1200, "Physics", _H["Re"], hard_min=5, hard_max=5000,
                       fixed="U and D stay; ν = U·D/Re changes"),
                    _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"], units="lattice",
                       hard_min=0.005, hard_max=0.25, fixed="Re stays; ν changes with U"),
@@ -977,15 +989,19 @@ EXHIBITS = {
                    _f("viscosity", "Viscosity", 1.5e-4, 3e-5, 5e-4, "Physics", _H["visc"], units="grid units",
                       hard_min=0, hard_max=0.05),
                    _f("perturbation", "Interface ripple", 1.0, 0.2, 3.0, "Physics",
-                      "Amplitude of the initial multi-mode interface ripple that seeds the fingers.",
+                      "Amplitude of the initial interface ripple that seeds the fingers.",
                       units="×", hard_min=0, hard_max=10),
+                   _i("modes", "Single-mode wavenumber", 0, 0, 8, "Physics",
+                      "0 = the multi-mode ripple (modes 3 + 7). A value n ≥ 1 seeds a single cosine mode with n "
+                      "wavelengths across the box and a small amplitude, for measuring the early growth of one mode.",
+                      hard_min=0, hard_max=32, advanced=True),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_ns("rt", p, pr, t)},
     "Rayleigh-Benard": {
-        "params": [_f("buoyancy", "Buoyancy coefficient  β·ΔT", 6e-3, 2e-3, 1.2e-2, "Physics",
+        "params": [_f("buoyancy", "Buoyancy coefficient  β·ΔT", 6e-3, 0.0, 1.2e-2, "Physics",
                       "Buoyant acceleration per unit temperature difference. With the viscosity and "
                       "thermal diffusivity it sets the Rayleigh number Ra = β·ΔT·H³/(ν κ) shown in the "
-                      "derived quantities — this control is NOT itself a Rayleigh number.",
+                      "derived quantities — this control is NOT itself a Rayleigh number. 0 = pure conduction.",
                       units="grid units", hard_min=0, hard_max=0.1),
                    _f("viscosity", "Viscosity ν", 6e-4, 2e-4, 1.5e-3, "Physics",
                       "Damps the motion. Lower viscosity → a higher Rayleigh number → tighter, more chaotic cells.",
@@ -1024,17 +1040,26 @@ EXHIBITS = {
                    _f("charge", "Charge size", 0.06, 0.02, 0.18, "Geometry",
                       "Radius of the high-pressure charge as a fraction of the domain width.",
                       units="× width", hard_min=0.005, hard_max=0.4),
+                   _when({"name": "structure", "label": "Structure model", "type": "choice", "group": "Physics",
+                          "choices": ["Rigid walls", "Erodes (experimental)"], "default": "Rigid walls",
+                          "help": "Rigid walls: the towers are fixed reflecting obstacles. Erodes: an experimental "
+                          "rule removes a block when the overpressure on an exposed face exceeds its strength "
+                          "(not a structural-mechanics model)."}, "scene", ["Shock hits a city"]),
                    _when(_f("strength", "Structure strength", 1.0, 0.2, 3.0, "Physics",
-                            "Overpressure each block of the towers can take before it fails (simplified "
-                            "erosion model, see the scene notes). Weak structures are scoured away "
-                            "windward-first; very strong ones behave as rigid walls.",
+                            "Overpressure each block can take before it fails (erosion model only). Weak "
+                            "structures are scoured away windward-first.",
                             hard_min=0.01, hard_max=1000),
-                         "scene", ["Shock hits a city"]),
+                         "structure", ["Erodes (experimental)"]),
                    _i("debris", "Debris particles", 200, 0, 800, "Render",
                       "Glowing debris swept outward by the blast (visual only; not part of the solution).",
                       hard_min=0, hard_max=5000),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_euler("blast", p, pr, t)},
+    "Shock Tube": {
+        "params": [P_RES("Cells along the tube (the tube is one-dimensional; the strip is for display). "
+                         "Higher resolution sharpens the shock and contact discontinuity."),
+                   P_DUR("Fraction of the reference time 0.2 (tube length 1); at 1.0 the waves have not yet reached the ends.")],
+        "solve": lambda p, pr, t: _solve_euler("sod", p, pr, t)},
     "Shockwave Strike": {
         "params": [{"name": "target", "label": "Target", "type": "choice", "group": "Geometry",
                     "choices": ["Single bubble", "Two bubbles"], "default": "Single bubble",
@@ -1053,9 +1078,10 @@ EXHIBITS = {
     "The Big Splash": {
         "params": [{"name": "scene", "label": "Scene", "type": "choice", "group": "Geometry",
                     "choices": ["Dam break", "Drop & splash", "Sloshing tank",
-                                "Pour into a glass", "Wavy ocean", "Ship on waves"],
+                                "Pour into a glass", "Wave tank", "Ship on waves", "Still water (hydrostatic)"],
                     "default": "Dam break",
-                    "help": "Which free-surface scenario to run. Each scene exposes its own controls below."},
+                    "help": "Which free-surface scenario to run. Each scene exposes its own controls below. "
+                    "Still water is the hydrostatic baseline: nothing should move."},
                    _when(_f("width", "Dam width", 1.0, 0.4, 2.0, "Geometry",
                             "Width of the held-back water column (tank 5 × 3.2 m).", units="m",
                             hard_min=0.1, hard_max=4.9), "scene", ["Dam break"]),
@@ -1082,13 +1108,14 @@ EXHIBITS = {
                    _when(_f("pourv", "Pour speed", 1.4, 0.4, 3.0, "Physics",
                             "Speed the water leaves the spout. Faster → more splashing on impact.",
                             units="m/s", hard_min=0.05, hard_max=10), "scene", ["Pour into a glass"]),
-                   _when(_f("waveA", "Wavemaker stroke", 0.4, 0.1, 0.9, "Physics",
+                   _when(_f("waveA", "Wavemaker stroke", 0.4, 0.0, 0.9, "Physics",
                             "Stroke of the wavemaker paddle (the wall's travel), which sets the wave amplitude "
-                            "indirectly — it is not the wave height itself.", units="m",
-                            hard_min=0.02, hard_max=2.0), "scene", ["Wavy ocean", "Ship on waves"]),
+                            "indirectly — it is not the wave height itself. 0 = still paddle (free decay / "
+                            "equilibrium test for the ship).", units="m",
+                            hard_min=0.0, hard_max=2.0), "scene", ["Wave tank", "Ship on waves"]),
                    _when(_f("waveT", "Wave period", 0.9, 0.4, 2.0, "Physics",
                             "Period of the wavemaker — sets the wavelength of the train.", units="s",
-                            hard_min=0.1, hard_max=10), "scene", ["Wavy ocean", "Ship on waves"]),
+                            hard_min=0.1, hard_max=10), "scene", ["Wave tank", "Ship on waves"]),
                    _when(_f("shipsz", "Ship size", 1.0, 0.5, 1.8, "Geometry",
                             "Scale of the floating hull. Bigger ships sit deeper and roll slower.", units="×",
                             hard_min=0.2, hard_max=3), "scene", ["Ship on waves"]),
@@ -1096,16 +1123,17 @@ EXHIBITS = {
                             "Approximate number of SPH particles: sets the particle spacing dp (see derived "
                             "quantities). More → finer splash, slower. The pour scene emits particles "
                             "continuously and ignores this.", hard_min=200, hard_max=40000),
-                         "scene", ["Dam break", "Drop & splash", "Sloshing tank", "Wavy ocean", "Ship on waves"]),
+                         "scene", ["Dam break", "Drop & splash", "Sloshing tank", "Wave tank", "Ship on waves", "Still water (hydrostatic)"]),
                    _f("gravity", "Gravity", 9.81, 1.0, 25.0, "Physics", "Gravitational acceleration.",
                       units="m/s²", hard_min=0.1, hard_max=100),
                    P_DUR()],
         "solve": lambda p, pr, t: _solve_dam(p, pr, t)},
     "Cloud Billows": {
         "params": [{"name": "init", "label": "Initial field", "type": "choice", "group": "Geometry",
-                    "choices": ["Shear layers", "Random turbulence"], "default": "Shear layers",
+                    "choices": ["Shear layers", "Random turbulence", "Taylor–Green vortex"], "default": "Shear layers",
                     "help": "Shear layers roll into Kelvin–Helmholtz billows; random turbulence decays as "
-                    "vortices merge (the 2-D inverse cascade)."},
+                    "vortices merge (the 2-D inverse cascade); the Taylor–Green vortex is an exact decaying "
+                    "solution (energy ∝ exp(−4νt)) used to check the solver."},
                    _f("viscosity", "Viscosity ν", 8e-5, 1e-5, 4e-4, "Physics", _H["visc"], hard_min=0, hard_max=0.01),
                    _when(_f("perturbation", "Shear perturbation", 0.05, 0.005, 0.2, "Physics",
                             "Amplitude of the initial transverse velocity kick that seeds the billows.",
@@ -1128,6 +1156,13 @@ EXHIBITS = {
                    _i("seed", "Random seed", 1, 0, 9999, "Geometry",
                       "Seed of the random grain arrangement: change it to compare samples with the same "
                       "porosity but different connectivity.", hard_min=0, hard_max=2 ** 31 - 1, advanced=True),
+                   {"name": "direction", "label": "Driving direction", "type": "choice", "group": "Physics",
+                    "choices": ["x", "y"], "default": "x",
+                    "help": "Direction of the body force. Run both to measure the directional permeability "
+                    "k_x and k_y of the same sample (anisotropy)."},
+                   _f("strength", "Driving strength", 1.0, 0.25, 4.0, "Physics",
+                      "Multiplier on the body force (1 = 1.2e-5 lattice units). In the Darcy regime k must not "
+                      "depend on it — sweep it to check linearity.", units="×", hard_min=0.01, hard_max=50, advanced=True),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_porous(p, pr, t)},
     "Turing Patterns": {
@@ -1185,12 +1220,13 @@ META = {
                     "per cell, a single-relaxation-time (BGK) collision toward the local "
                     "equilibrium, and a streaming step that shifts populations to neighbours. "
                     "The obstacle — any shape or text — is simply a set of cells flagged solid "
-                    "and handled by half-way bounce-back (a no-slip wall), so no mesh is ever "
-                    "generated. Velocity inlet, open outflow, periodic top/bottom; the "
+                    "and handled by half-way bounce-back (a no-slip wall); obstacles are represented on "
+                    "the regular lattice, so a body-fitted mesh is unnecessary. Velocity inlet, zero-gradient "
+                    "outflow, periodic top/bottom; the "
                     "relaxation time τ sets the viscosity via ν = (τ − ½)/3, hence the Reynolds number.",
-        "validation": "The dimensionless shedding frequency — the Strouhal number St = fD/U — "
-                       "comes out ≈ 0.20 for a cylinder at Re ≈ 160, matching the long-"
-                       "established experimental value of about 0.2 across Re ≈ 100–300.",
+        "validation": "Numerical check: the measured shedding frequency of a cylinder, as a Strouhal number "
+                       "St = fD/U, is compared with the reference range 0.18–0.21 (Re 100–300); this confined, "
+                       "periodic tunnel is expected to sit slightly above an unconfined cylinder.",
         "demo": "results/flow_around_flowzoo.gif"},
     "Rising Smoke": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "A continuous source of hot, dyed fluid is injected at the floor. Because it "
@@ -1209,24 +1245,23 @@ META = {
                        "tolerance each step; buoyant transport stays stable and the plume "
                        "develops the expected shear roll-up.",
         "demo": "results/smoke_plume.gif"},
-    "Candle Flame": {"method": "Low-Mach laminar diffusion flame · Navier–Stokes + mixture fraction",
-        "blurb": "A real candle is a non-premixed (diffusion) flame: fuel vapour rises from the "
-                 "wick, air is drawn in from the sides, and the two can only burn where they meet "
-                 "in the right proportion. Modelled with fast chemistry, that burning sheet sits on "
-                 "the stoichiometric surface; the heat it releases makes the gas buoyant, which "
-                 "pulls in fresh air and lifts the products — giving the slender teardrop and the "
-                 "characteristic tip flicker. Unlike the smoke plume, the flame here is the result "
-                 "of combustion, not a recoloured buoyant jet.",
+    "Candle Flame": {"method": "Simplified flame model · Navier–Stokes + mixture variable",
+        "blurb": "A candle is a non-premixed (diffusion) flame: fuel vapour rises from the wick, air "
+                 "is drawn in from the sides, and burning is confined to the surface where they meet in "
+                 "stoichiometric proportion. This scene uses a simplified flame model: an advected mixture "
+                 "variable Z with a prescribed source velocity at the wick, a temperature proxy T(Z) that "
+                 "peaks on the stoichiometric surface, buoyancy proportional to that proxy, lateral damping "
+                 "and scalar decay. No chemistry or heat release is computed.",
         "eq": r"$\partial_t Z+\mathbf{u}\!\cdot\!\nabla Z=\mathcal{D}\nabla^2 Z,\quad T(Z)=T_{\rm ad}\,\min\!\left(\dfrac{Z}{Z_{st}},\ \dfrac{1-Z}{1-Z_{st}}\right),\quad \mathbf{f}_b=\beta\,T(Z)\,\hat{\mathbf{y}}$",
-        "numerics": "The incompressible projection solver carries a conserved mixture fraction Z "
-                    "(Z = 1 in the fuel leaving the wick, Z = 0 in the surrounding air). In the "
-                    "Burke–Schumann fast-chemistry limit the flame sheet sits exactly on Z = Z_st, "
-                    "where the temperature peaks; T(Z) is a tent function of Z, and that heat drives "
-                    "the Boussinesq buoyancy. The luminous field rendered is T(Z) — the reacting, "
-                    "glowing zone.",
-        "validation": "The flame anchors on the wick and self-organises into a steady teardrop with "
-                       "a buoyancy-driven tip flicker — the hallmark of a laminar diffusion flame — "
-                       "without any artificial forcing; the flicker frequency is reported in the plots."},
+        "numerics": "The incompressible projection solver carries a mixture variable Z (Z = 1 in the "
+                    "fuel leaving the wick, Z = 0 in the surrounding air) with a prescribed inflow velocity "
+                    "at the wick, lateral damping of the flow and a decay of Z away from the source. In the "
+                    "Burke–Schumann picture the flame sheet sits on Z = Z_st, where the temperature proxy "
+                    "T(Z) (a tent function of Z) peaks; that proxy drives the Boussinesq buoyancy and is the "
+                    "field rendered.",
+        "validation": "Qualitative demonstration: the shape anchors on the wick and the tip flickers "
+                       "periodically; the flicker frequency is reported in the plots but not compared with "
+                       "measurements."},
     "Mushroom Clouds": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "Place a heavy fluid on top of a lighter one in a gravitational field and "
                  "the arrangement is unstable: the tiniest ripple on the interface grows, the "
@@ -1235,12 +1270,13 @@ META = {
                  "instability governs phenomena from supernova remnants and inertial-"
                  "confinement fusion to salt domes and atmospheric mixing.",
         "eq": r"$\partial_t\mathbf{u}+(\mathbf{u}\!\cdot\!\nabla)\mathbf{u}=-\nabla p+\nu\nabla^2\mathbf{u}-g\,\rho\,\hat{\mathbf{y}},\quad \nabla\!\cdot\!\mathbf{u}=0$",
-        "numerics": "The same incompressible projection solver, with an advected density "
-                    "field whose weight drives the gravitational body force. The interface is "
-                    "seeded with a small multi-mode ripple; growth rate is controlled by the "
-                    "gravity and viscosity you set.",
-        "validation": "Reproduces the characteristic spike-and-bubble mushroom roll-up; the "
-                       "finger growth scales with gravity and is damped by viscosity as theory predicts.",
+        "numerics": "The same constant-density projection solver with an advected scalar ρ that enters "
+                    "only the gravitational body force (a Boussinesq-like approximation: inertia does not "
+                    "change with density). The interface is seeded with a multi-mode ripple, or a single "
+                    "mode of chosen wavenumber.",
+        "validation": "Qualitative demonstration of the spike-and-bubble roll-up; the mixing-width diagnostic "
+                       "is consistent across resolutions, but large-Atwood growth rates are not claimed because "
+                       "the model is not a variable-density formulation.",
         "demo": "results/rayleigh_taylor.gif"},
     "Rayleigh-Benard": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "Heat a shallow layer of fluid from below and cool it from above and, once the "
@@ -1256,9 +1292,10 @@ META = {
                     "rows are held at fixed hot and cold temperatures (Dirichlet plates), the side "
                     "walls are insulating, and a tiny initial perturbation seeds the cells. The "
                     "ratio of buoyant forcing to viscous and diffusive damping is the Rayleigh number.",
-        "validation": "Below a critical Rayleigh number the layer stays still (pure conduction); "
-                       "above it, steady counter-rotating rolls appear and, at higher Ra, break into "
-                       "unsteady plumes — the classic convection-onset behaviour."},
+        "validation": "Numerical check: with buoyancy off the explicit diffusion step preserves the linear "
+                       "conduction profile (tests/) and the Nusselt number is 1. The Rayleigh number "
+                       "Ra = β·ΔT·H³/(ν κ) is computed from the controls; at this grid it lies far above the "
+                       "rigid-plate onset value 1708, so the onset regime itself is not reachable."},
     "Chimney Plume": {"method": "Incompressible Navier–Stokes · projection",
         "blurb": "A buoyant plume leaves a stack into a steady crosswind. Near the source buoyancy "
                  "lifts it almost vertically, but the horizontal wind keeps pushing, so the plume "
@@ -1272,27 +1309,34 @@ META = {
                     "advects it downstream, so the steady plume trajectory emerges from the force balance.",
         "validation": "The plume rises then bends over, and its rise height falls as the crosswind "
                        "strengthens — the expected buoyancy-versus-momentum trade-off of plume-rise theory."},
-    "Detonation": {"method": "Compressible Euler · finite-volume HLLC",
-        "blurb": "A small region of very high pressure is released into ambient gas. It "
-                 "bursts outward as a near-circular shock wave — a thin front across which "
-                 "density, pressure and velocity jump almost discontinuously — trailed by an "
-                 "expansion that leaves a low-density cavity behind. This is the textbook "
-                 "blast-wave problem at the heart of explosion safety, astrophysical "
-                 "shockwaves and supersonic aerodynamics; here glowing debris is scattered "
-                 "through the domain and swept up as the front passes.",
+    "Detonation": {"method": "Blast wave (pressure release) · Compressible Euler · finite-volume HLLC",
+        "blurb": "A small region of high-pressure gas is released into ambient gas — a pressure-release "
+                 "model, not a detonation (no reaction or energy release is computed). It bursts outward as "
+                 "a near-circular shock wave, a thin front across which density, pressure and velocity jump, "
+                 "trailed by an expansion that leaves a low-density cavity. Debris particles are a visual "
+                 "overlay.",
         "eq": _EULER_EQ,
         "numerics": "A finite-volume solver for the compressible Euler equations: "
                     "piecewise-linear MUSCL reconstruction with a minmod slope limiter, an "
                     "HLLC approximate Riemann solver at each cell face, and a two-stage "
                     "strong-stability-preserving Runge–Kutta time step under a CFL condition "
                     "(γ = 1.4). Schlieren imaging shows |∇ρ|, lighting up the shock fronts. In "
-                    "the city scene, solid blocks are held as reflecting walls and fail when the "
-                    "overpressure on an exposed face exceeds their strength — an overpressure-"
-                    "driven fluid–structure coupling that lets the towers crumble into debris.",
-        "validation": "The identical solver reproduces the exact Sod shock-tube Riemann "
-                       "solution to a mean density error of ≈ 0.002 — capturing the "
-                       "rarefaction, contact and shock crisply.",
+                    "the city scene the towers are cells held at a fixed dense state each stage (an "
+                    "approximate reflecting boundary, not a wall-flux condition); an experimental erosion "
+                    "rule can remove a block when the overpressure on an exposed face exceeds its strength.",
+        "validation": "Analytical comparison for the solver: the Sod shock tube against the exact Riemann "
+                       "solution (mean density error ≈ 0.003 at 300 cells, CI). The blast scenes themselves "
+                       "are checked numerically (front deceleration toward the Sedov–Taylor exponent).",
         "demo": "results/explosion.gif"},
+    "Shock Tube": {"method": "Compressible Euler · finite-volume HLLC",
+        "blurb": "Sod's shock tube: a membrane separates high-pressure gas from low-pressure gas; when it "
+                 "bursts a shock runs right, a contact discontinuity follows, and a rarefaction fan spreads left. "
+                 "The exact Riemann solution is known, so this is the solver's quantitative check.",
+        "eq": _EULER_EQ,
+        "numerics": "Same finite-volume scheme (MUSCL + minmod, HLLC, SSP-RK2, γ = 1.4) on a one-dimensional "
+                    "tube shown as a strip. Transmissive ends.",
+        "validation": "Analytical comparison: density, velocity and pressure against the exact Riemann solution "
+                      "(Toro), with the errors printed in the diagnostics."},
     "Shockwave Strike": {"method": "Compressible Euler · finite-volume HLLC",
         "blurb": "A planar shock wave travels through air and strikes a bubble of lighter "
                  "gas. Because the shock speeds up in the light gas, it bends and focuses, "
@@ -1306,17 +1350,14 @@ META = {
                     "density ratio sit in still air; the incoming flow is the exact "
                     "Rankine–Hugoniot post-shock state for the Mach number you set, so shock "
                     "strength and density contrast are both physical, tunable inputs.",
-        "validation": "Uses the same HLLC solver validated against the exact Sod shock tube "
-                       "(mean density error ≈ 0.002).",
+        "validation": "Qualitative demonstration; the solver itself is compared with the exact Sod "
+                       "solution (see the Shock Tube scene).",
         "demo": "results/shock_bubble.gif"},
     "The Big Splash": {"method": "Free-surface water · Smoothed-Particle Hydrodynamics",
-        "blurb": "Water you can actually splash — six scenes from one meshfree solver. "
-                 "Break a dam and watch the surge overturn against the far wall; drop a block "
-                 "into a pool for a crown splash; slosh a tank back and forth until it "
-                 "breaks; pour a stream into a tall glass; drive a wavemaker across an "
-                 "ocean of travelling waves; or float a rigid ship on them. There is no grid "
-                 "at all — the fluid is a cloud of moving particles, which is why it handles "
-                 "violent free surfaces and breaking, folding water so naturally.",
+        "blurb": "Free-surface water from one mesh-free solver: still water, a dam break, a water-blob "
+                 "impact, a sloshing tank, a pouring stream, a flat-bottomed wave tank and a floating hull. "
+                 "The fluid is a set of moving particles, so breaking and folding surfaces need no "
+                 "interface tracking. Two-dimensional, weakly compressible, no surface tension.",
         "eq": r"$\dfrac{D\mathbf{v}_i}{Dt}=-\sum_j m_j\!\left(\dfrac{p_i}{\rho_i^2}+\dfrac{p_j}{\rho_j^2}+\Pi_{ij}\right)\nabla W_{ij}+\mathbf{g}$",
         "numerics": "Weakly-compressible SPH: each particle carries mass and velocity; "
                     "density and forces are smoothed sums over neighbours using a cubic-"
@@ -1329,12 +1370,11 @@ META = {
                     "(no penalty force on the fluid, no spurious near-wall motion); the "
                     "wavemaker is simply a wall layer that moves. A δ-SPH density-diffusion "
                     "term and XSPH velocity smoothing damp the acoustic noise and relax the "
-                    "initial lattice so the fluid starts genuinely at rest; the floating ship "
-                    "is a rigid body that rides on the fluid through a contact (penalty) "
-                    "force, heaving and rolling as the water surface moves beneath it.",
-        "validation": "The leading surge-front advances at a speed within the physical range "
-                       "of the frictionless Ritter dry-bed limit 2√(gH) — the column must "
-                       "first collapse vertically, so the real front lags that ideal bound.",
+                    "initial lattice; the floating hull is a rigid body driven by contact forces from "
+                    "the fluid, gravity and damping, with limits on its motion.",
+        "validation": "Numerical checks: still water stays at rest to a small residual (tests/); the "
+                       "dam-break front lags the frictionless Ritter bound 2√(gH) as a collapsing column "
+                       "should. The other scenes are qualitative demonstrations.",
         "demo": "results/dam_break.gif"},
     "Cloud Billows": {"method": "Pseudo-spectral · FFT",
         "blurb": "Two fluid streams sliding past each other at different speeds form an "
@@ -1349,9 +1389,10 @@ META = {
                     "nonlinear advection term is formed in physical space with 2/3-rule "
                     "dealiasing, and time advances with classical fourth-order Runge–Kutta "
                     "(stable for the advection operator's imaginary eigenvalues).",
-        "validation": "With viscosity switched off the scheme conserves kinetic energy essentially "
-                       "to round-off (relative drift below 10⁻⁸ over hundreds of steps) — the "
-                       "hallmark of spectral accuracy.",
+        "validation": "Analytical comparison: the Taylor–Green vortex decays as exp(−4νt) (relative "
+                       "error ≈ 10⁻¹⁵ in tests/). Spatial derivatives are spectral but time stepping is "
+                       "explicit RK4, so with ν = 0 the energy is conserved to truncation error "
+                       "(measured drift ≈ 2×10⁻⁹ over 200 steps), not to round-off.",
         "demo": "results/turbulence.gif"},
     "Turing Patterns": {"method": "Reaction–Diffusion · Gray–Scott",
         "blurb": "Two chemicals diffuse at different rates while one feeds on the other. From a "
@@ -1363,11 +1404,12 @@ META = {
         "numerics": "Explicit time stepping of the two coupled reaction–diffusion equations on a "
                     "periodic grid, with a 9-point isotropic Laplacian for the diffusion term. "
                     "The (F, k) pair is taken from Pearson's classification to select each regime.",
-        "validation": "Reproduces Pearson's catalogue of Gray–Scott regimes — the same (F, k) "
-                       "values yield the published spot / stripe / maze / mitosis morphologies; "
-                       "the concentrations stay bounded in [0, 1] throughout.",
+        "validation": "Numerical check: the (F, k) values yield the morphologies of Pearson's "
+                       "classification. The scheme clips U and V to [0, 1] each step, so bounded "
+                       "concentrations are enforced, not demonstrated. The resemblance to biological "
+                       "patterns is suggestive only.",
         "demo": "results/gallery/rd_spots.gif"},
-    "Quantum Ripples": {"method": "Schrödinger · split-step Fourier",
+    "Quantum Ripples": {"method": "Schrödinger · split-step Fourier (experimental module, not in the gallery)",
         "blurb": "A quantum particle isn't a dot but a wave of probability. Launch a wavepacket "
                  "and watch it spread, tunnel through a wall it classically could not cross, "
                  "interfere with itself through a double slit, or slosh coherently in a trap. "
@@ -1405,12 +1447,12 @@ META = {
         "eq": r"$\langle\mathbf{u}\rangle = -\tfrac{k}{\mu}\nabla p$",
         "numerics": "The same D2Q9 lattice-Boltzmann scheme, here in a periodic box driven by a "
                     "constant body force (Guo forcing) through a random grain pack, in the "
-                    "viscous (Stokes) regime. Permeability is read off as k = ν⟨u⟩/g from the "
-                    "volume-averaged pore velocity ⟨u⟩ — exactly how digital-rock physics "
-                    "computes it.",
-        "validation": "The measured permeability tracks the Kozeny–Carman relation "
-                       "k ≈ φ³d²/180(1−φ)² across porosities, and rises monotonically with the "
-                       "void fraction φ — the expected pore-scale behaviour (see the Plots).",
+                    "viscous (Stokes) regime, along x or y. Permeability is k = ν U_D/g with U_D the "
+                    "superficial velocity (flow averaged over the whole sample, solids counting as zero) "
+                    "and g the body force per unit mass; the pore-average velocity U_D/φ is reported separately.",
+        "validation": "Numerical check: the solver reproduces the analytical plane-Poiseuille permeability "
+                       "(error 0.07 %), and k rises with porosity (CI). The Kozeny–Carman relation is an "
+                       "empirical 3-D packed-bed formula shown for orientation only.",
         "demo": "results/gallery/porous_phi60.gif"},
 }
 
@@ -1463,6 +1505,9 @@ def estimate(name, params):
     elif name in ("Cloud Billows", "Ink in Motion"):
         nx = ny = int(256 * s); frames = 95; comp = 2 if name == "Cloud Billows" else 1
         steps = int(2800 * dur * s); secs = nx * ny * np.log2(nx) * steps * 1.2e-8
+    elif name == "Shock Tube":
+        nx, ny = int(600 * s), 24; frames = 100; comp = 3; steps = int(0.2 * nx * dur * nx * 0.5)
+        secs = nx * ny * steps * 4.0e-9
     else:                                             # Turing / quantum
         nx = ny = int(220 * s); frames = 110; comp = 1; steps = int(9000 * dur)
         secs = nx * ny * steps * 6e-9
