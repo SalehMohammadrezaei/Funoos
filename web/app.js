@@ -110,20 +110,27 @@ const SCHEME = {
   "Compressible Euler": "HLLC", "Smoothed-Particle Hydrodynamics": "WCSPH",
   "Pseudo-spectral": "FFT", "Reaction–Diffusion": "Gray–Scott"
 };
-// play only the cards currently on screen (keeps 29 clips light)
-const _visible = new Set(), MAX_PLAYING = 6;
-function _reconcilePlayback() {
-  let playing = 0;
-  for (const v of _visible) { if (CUR === "gallery" && playing < MAX_PLAYING && _lsGet("funoos.autoplay", true) && !REDUCED) { v.play().catch(() => {}); playing++; } else v.pause(); }
+// Play only cards on screen (at most MAX_PLAYING, the hovered card first). A card that is not
+// playing has no source, so it shows its poster (a developed frame), never the clip's first frame.
+const _visible = new Set(), MAX_PLAYING = 6; let _hovered = null;
+function _setPlaying(v, on) {
+  if (on) { if (!v.getAttribute("src") && v.dataset.src) v.src = v.dataset.src; const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+  else { v.pause(); v.classList.remove("ready"); if (v.getAttribute("src")) { v.removeAttribute("src"); v.load(); } }
 }
-const _vio = new IntersectionObserver(es => { es.forEach(e => { const v = e.target; if (e.isIntersecting) _visible.add(v); else { _visible.delete(v); v.pause(); } }); _reconcilePlayback(); },
+function _reconcilePlayback() {
+  const allow = CUR === "gallery" && _lsGet("funoos.autoplay", true) && !REDUCED;
+  const order = [..._visible]; if (_hovered && _visible.has(_hovered)) { order.splice(order.indexOf(_hovered), 1); order.unshift(_hovered); }
+  let playing = 0;
+  for (const v of order) { const on = allow && playing < MAX_PLAYING; _setPlaying(v, on); if (on) playing++; }
+}
+const _vio = new IntersectionObserver(es => { es.forEach(e => { const v = e.target; if (e.isIntersecting) _visible.add(v); else { _visible.delete(v); _setPlaying(v, false); } }); _reconcilePlayback(); },
   { root: null, threshold: 0.15 });
 function _releaseGalleryVideos() {
-  document.querySelectorAll("#gallery-grid video").forEach(v => { _vio.unobserve(v); v.pause(); v.removeAttribute("src"); v.load(); });
-  _visible.clear();
+  document.querySelectorAll("#gallery-grid video, #gallery-start video").forEach(v => { _vio.unobserve(v); v.pause(); if (v.getAttribute("src")) { v.removeAttribute("src"); v.load(); } });
+  _visible.clear(); _hovered = null;
 }
 
-let GAL_METHODS = [], FILTER = { method: "", q: "", fav: false, quick: false }, S2E = {}, EXPS = [];
+let GAL_METHODS = [], FILTER = { method: "", q: "", fav: false, quick: false, phen: "" }, S2E = {}, EXPS = [];
 async function buildGallery() {
   const r = await call("catalog"); GAL = r.groups; GAL_METHODS = r.methods || []; S2E = r.scene_to_experiment || {};
   EXPS = GAL.flatMap(g => g.experiments);
@@ -156,16 +163,23 @@ function expMatches(e, q) {
   const hay = [e.name, e.question, e.phenomenon, ...e.methods, ...e.presets.flatMap(p => [p.label, p.name, p.question, p.status_label])].join(" ").toLowerCase();
   return hay.includes(q);
 }
+// A first look at each kind of flow; shown above the phenomena when no filter is active.
+const START_HERE = ["cylinder_wake", "dam_break", "kelvin_helmholtz", "rising_smoke", "gray_scott"];
 function renderGallery() {
-  const root = $("#gallery-grid"); _releaseGalleryVideos(); root.innerHTML = "";
+  const root = $("#gallery-grid"), start = $("#gallery-start"); _releaseGalleryVideos(); root.innerHTML = ""; if (start) start.innerHTML = "";
   const f = favs(), q = FILTER.q.trim().toLowerCase(), rec = recents();
   const match = e => (!FILTER.method || e.methods.includes(FILTER.method)) && (!FILTER.fav || f[e.id])
-    && (!FILTER.quick || (e.estimate_s != null && e.estimate_s <= 60)) && expMatches(e, q);
-  let shown = 0;
-  if (rec.length && !q && !FILTER.method && !FILTER.fav && !FILTER.quick) {
+    && (!FILTER.quick || (e.estimate_s != null && e.estimate_s <= 60)) && (!FILTER.phen || e.phenomenon === FILTER.phen) && expMatches(e, q);
+  const filtered = q || FILTER.method || FILTER.fav || FILTER.quick || FILTER.phen;
+  renderPhenChips();
+  if (start && !filtered) {
     const rs = rec.map(x => ({ e: EXPS.find(e => e.id === x.exp), key: x.key })).filter(x => x.e);
-    if (rs.length) { root.append(groupHead("Recent experiments", "")); for (const x of rs) root.append(expCard(x.e, f, x.key)); }
+    if (rs.length) { start.append(groupHead("Recently opened", "")); const row = el("div", "startrow"); for (const x of rs) row.append(expCard(x.e, f, x.key)); start.append(row); }
+    const picks = START_HERE.map(id => EXPS.find(e => e.id === id)).filter(Boolean);
+    if (picks.length) { start.append(groupHead("Start here", "one experiment from each kind of flow")); const row = el("div", "startrow"); for (const e of picks) row.append(expCard(e, f, f[e.id] || null)); start.append(row); }
+    fitRows();
   }
+  let shown = 0;
   for (const g of GAL) {
     const items = g.experiments.filter(match); if (!items.length) continue;
     root.append(groupHead(g.phenomenon, items.length + (items.length === 1 ? " experiment" : " experiments")));
@@ -173,20 +187,45 @@ function renderGallery() {
   }
   if (!shown) root.append(elt("div", "muted", "No experiments match this filter."));
 }
+function renderPhenChips() {
+  const nav = $("#g-phen"); if (!nav) return; nav.innerHTML = "";
+  const mk = (label, value, n) => {
+    const b = elt("button", "chipbtn", label); b.type = "button"; b.append(elt("span", "n", String(n)));
+    b.setAttribute("aria-pressed", String((FILTER.phen || "") === value));
+    b.onclick = () => { FILTER.phen = value; renderGallery(); const sc = $("#gallery-scroll"); if (sc) sc.scrollTop = 0; const again = [...nav.children].find(x => x.firstChild.textContent === label); if (again) again.focus(); };
+    return b;
+  };
+  nav.append(mk("All", "", EXPS.length));
+  for (const g of GAL) nav.append(mk(g.phenomenon, g.phenomenon, g.experiments.length));
+}
+// The start rows keep to one line: cards that would wrap are hidden (and so not focusable).
+function fitRows() {
+  document.querySelectorAll("#gallery-start .startrow").forEach(row => {
+    const cols = (getComputedStyle(row).gridTemplateColumns || "").split(" ").filter(Boolean).length || 99;
+    [...row.children].forEach((c, i) => { c.hidden = i >= cols; });
+  });
+}
+window.addEventListener("resize", () => { fitRows(); });
 function groupHead(title, sub) {
   const h = el("div", "ghead"); h.append(elt("h2", null, title)); if (sub) h.append(elt("span", "muted", sub)); return h;
 }
+const STATUS_SHORT = { analytical: "Analytical", numerical: "Numerical", qualitative: "Qualitative" };   // full label in the tooltip
 function expCard(e, favset, openKey) {
-  const method = SHORT[e.method] || e.method, acc = ACC[e.method] || "#5b86f0";
+  const method = e.methods && e.methods.length > 1 ? e.methods.map(m => SHORT[m] || m).join(" · ") : (SHORT[e.method] || e.method);
+  const acc = ACC[e.method] || "#5b86f0";
   const c = el("div", "gcard"); c.tabIndex = 0; c.setAttribute("role", "button"); c.setAttribute("aria-label", e.name + " — " + e.question);
   const media = el("div", "media");
-  const auto = _lsGet("funoos.autoplay", true) && !REDUCED;
-  if (e.clip) { const v = el("video"); v.src = e.clip; v.loop = v.muted = true; v.playsInline = true; v.preload = "metadata"; if (e.poster) v.poster = e.poster; v.setAttribute("aria-hidden", "true"); media.append(v); if (auto) _vio.observe(v); }
-  else if (e.poster) { const im = el("img"); im.src = e.poster; im.alt = ""; media.append(im); }
+  const src = e.thumb || e.clip, poster = e.thumb_poster || e.poster;
+  if (poster) media.style.backgroundImage = 'url("' + poster + '")';   // shown while a clip loads
+  if (src) {
+    const v = el("video"); v.dataset.src = src; v.loop = v.muted = true; v.playsInline = true; v.preload = "none";
+    v.addEventListener("playing", () => v.classList.add("ready"));   // invisible until it has a frame: the poster shows meanwhile
+    if (poster) v.poster = poster; v.setAttribute("aria-hidden", "true"); media.append(v);
+    if (_lsGet("funoos.autoplay", true) && !REDUCED) _vio.observe(v);
+    c.addEventListener("mouseenter", () => { _hovered = v; _reconcilePlayback(); });
+    c.addEventListener("mouseleave", () => { if (_hovered === v) { _hovered = null; _reconcilePlayback(); } });
+  } else if (poster) { const im = el("img"); im.src = poster; im.alt = ""; media.append(im); }
   else { media.append(elt("div", "noclip", "no preview clip yet")); }
-  const pl = el("div", "pill left"); const dot = el("span", "dot"); dot.style.background = acc;
-  pl.append(dot, document.createTextNode(e.methods.length > 1 ? e.methods.map(m => SHORT[m] || m).join(" · ") : method));
-  media.append(pl, elt("div", "pill right status-" + e.status, e.n_presets > 1 ? e.n_presets + " presets" : e.status_label));
   const isFav = !!favset[e.id];
   const fav = elt("button", "favbtn" + (isFav ? " on" : ""), isFav ? "★" : "☆");
   fav.setAttribute("aria-label", (isFav ? "Remove from" : "Add to") + " favourites: " + e.name);
@@ -194,10 +233,12 @@ function expCard(e, favset, openKey) {
   fav.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") { ev.stopPropagation(); ev.preventDefault(); toggleFav(e.id, openKey || e.representative, ev); } };
   media.append(fav);
   const body = el("div", "gbody");
-  body.append(elt("div", "ttl", e.name));
-  const foot = el("div", "foot");
-  foot.append(elt("div", "sub", e.question), elt("div", "go", "↗"));
-  body.append(foot);
+  body.append(elt("div", "ttl", e.name), elt("div", "sub", e.question));
+  const meta = el("div", "gmeta"); const dot = el("span", "dot"); dot.style.background = acc;
+  meta.append(dot, elt("span", null, method));
+  if (e.n_presets > 1) meta.append(elt("span", "sep", "·"), elt("span", null, e.n_presets + " presets"));
+  const st = elt("span", "st status-" + e.status, STATUS_SHORT[e.status] || e.status_label); st.title = e.status_label;
+  meta.append(elt("span", "sep", "·"), st); body.append(meta);
   c.append(media, body);
   const key = openKey || e.representative;
   c.onclick = () => openDetail(key);
@@ -240,7 +281,7 @@ function renderDetail(d, key) {
   fillPresetSelector($("#d-preset"), ex, key, k => openDetail(k));   // openDetail is token-guarded
   const pl = $("#d-presetname"); if (pl) pl.textContent = ex && ex.presets.length > 1 ? "Preset: " + (ex.preset_label || d.name) : "";
   const cmpBox = $("#d-compare"); if (cmpBox) { cmpBox.innerHTML = ""; if (ex && ex.compare && ex.compare.length) { cmpBox.append(elt("div", "kicker", "GUIDED COMPARISONS")); for (const c of ex.compare) { const row = el("div", "gcmp"); row.append(elt("div", "read small", c.text)); if (c.b) { const b = elt("button", "linkbtn", "run both & compare"); b.onclick = () => guidedCompare(c.a, c.b); row.append(b); } else { const b = elt("button", "linkbtn", "open in Studio"); b.onclick = async () => { const dd = await call("scene_detail", c.a, nextReq("detail")); openStudio(dd); }; row.append(b); } cmpBox.append(row); } } }
-  const dv = $("#d-video"); if (d.clip) { dv.src = d.clip; dv.style.display = "block"; dv.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); if (!dv.autoplay) { dv.pause(); dv.controls = true; } } else { dv.removeAttribute("src"); dv.style.display = "none"; }
+  const dv = $("#d-video"); dv.poster = d.poster || ""; if (d.clip) { dv.src = d.clip; dv.style.display = "block"; dv.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); if (!dv.autoplay) { dv.pause(); dv.controls = true; } } else { dv.removeAttribute("src"); dv.style.display = "none"; }
   const q = $("#d-question"); if (q) q.textContent = d.question;
   const sb = $("#d-status"); if (sb) { sb.textContent = d.status_label; sb.className = "statusbadge status-" + d.status; }
   const box = $("#d-text"); box.innerHTML = "";
@@ -298,7 +339,7 @@ function buildRelated(t, key) {
   for (const e of related) {
     const s = { ...e, key: e.representative };                    // open an experiment through its representative preset
     const m = el("div", "rel"); m.tabIndex = 0; m.setAttribute("role", "button"); m.setAttribute("aria-label", s.name);
-    if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); v.playsInline = true; if (s.poster) v.poster = s.poster; v.preload = "metadata"; m.append(v); }
+    if (s.thumb || s.clip) { const v = el("video"); v.src = s.thumb || s.clip; v.loop = v.muted = true; v.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); v.playsInline = true; if (s.thumb_poster || s.poster) v.poster = s.thumb_poster || s.poster; v.preload = "metadata"; m.append(v); }
     m.append(elt("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); m.onkeydown = e => { if (e.key === "Enter") openDetail(s.key); }; rail.append(m);
   }
   sec.append(rail); t.append(sec);
@@ -336,19 +377,17 @@ async function studioPickExperiment(sel) {
 // "Custom setup" once the controls differ from the preset that was opened
 function markCustom() {
   const nm = $("#s-name"); if (!nm || !CUR_DETAIL) return;
-  const base = sceneDefaults(); const custom = SPEC.some(q => visible(q) && String(fmtNum(base[q.name])) !== String(fmtNum(PSTATE[q.name])));
+  const base = sceneDefaults(); const custom = SPEC.some(q => visible(q) && q.group !== "Render" && String(fmtNum(base[q.name])) !== String(fmtNum(PSTATE[q.name])));   // resolution/duration do not change the experiment
   const ex = CUR_DETAIL.experiment; const presetName = ex && ex.presets.length > 1 ? (ex.preset_label || CUR_DETAIL.name) : CUR_DETAIL.name;
   nm.textContent = ((ex ? ex.name : CUR_DETAIL.name) + " · " + (custom ? "Custom setup" : presetName)).toUpperCase();
   const ps = $("#s-preset"); if (ps && ps.style.display !== "none") { ps.dataset.custom = custom ? "1" : "0"; }
 }
-function toggleHelp() {
-  const h = $("#s-help"); if (!h) return;
-  if (h.style.display === "block") { h.style.display = "none"; return; }
-  h.innerHTML = "";
-  if (!CUR_DETAIL) { h.append(elt("div", "muted", "Pick a scene first.")); }
-  else { h.append(elt("div", "kicker", CUR_DETAIL.name)); h.append(elt("div", "read small", CUR_DETAIL.question)); renderLayers(h, CUR_DETAIL.layers || [], CUR_DETAIL); }
-  h.style.display = "block";
+function fillHelp() {
+  const h = $("#s-help"); if (!h) return; h.innerHTML = "";
+  if (!CUR_DETAIL) { h.append(elt("div", "muted", "Pick an experiment first.")); return; }
+  h.append(elt("div", "kicker", CUR_DETAIL.name)); h.append(elt("div", "read small", CUR_DETAIL.question)); renderLayers(h, CUR_DETAIL.layers || [], CUR_DETAIL);
 }
+function toggleHelp() { return setTab($("#s-help").style.display === "block" ? "field" : "explain"); }
 function openStudio(d) {
   // a running job keeps running (its result lands in the history); only the view state is reset
   if (CUR_EXH && CUR_SCENE) DRAFTS[CUR_SCENE] = { ...PSTATE };  // keep this scene's draft while browsing
@@ -365,7 +404,8 @@ function openStudio(d) {
   renderParams(); refreshEstimate(); refreshPresetMenu(); refreshHistory(); zoomReset();
   RUN = null; $("#s-video").style.display = "none"; $("#s-hint").style.display = "block"; hideStill();
   $("#s-views").innerHTML = ""; $("#s-cmap").innerHTML = ""; $("#s-plotpanel").style.display = "none";
-  $("#s-kpis").innerHTML = '<div class="muted" style="font-size:12px">Run a simulation to see live readouts.</div>';
+  { const rp = $("#s-runs"); if (rp) rp.style.display = "none"; }
+  $("#s-kpis").innerHTML = '<div class="muted rhint">Readouts appear after a run.</div>';
   if (JOB) $("#s-status").textContent = "⏳ " + (JOB_NAME || "another experiment") + " is still simulating — its result will appear in the run history";
   else $("#s-status").textContent = "Ready.";
   refreshJobUI(); show("studio");
@@ -393,9 +433,9 @@ function refreshEstimate() {
   }, 250);
 }
 function renderDerived(items) {
-  const box = $("#s-derived"); if (!box) return; box.innerHTML = "";
-  if (!items.length) return;
-  box.append(elt("div", "kicker", "derived quantities"));
+  const box = $("#s-derived"), sum = $("#s-derived-sum"), det = $("#s-derivedbox"); if (!box) return; box.innerHTML = "";
+  if (det) { det.style.display = items.length ? "" : "none"; if (!det.dataset.init) { det.dataset.init = "1"; det.open = !!_lsGet("funoos.derivedOpen", false); } }
+  if (sum) sum.textContent = items.slice(0, 2).map(it => it.label.split(/[=(]/)[0].trim() + " " + it.value + (it.units ? " " + it.units : "")).join(" · ");
   for (const it of items) {
     const row = el("div", "drow"); row.append(elt("span", "dl", it.label), elt("span", "dv", it.value + (it.units ? " " + it.units : "")));
     if (it.note) row.title = it.note;
@@ -414,7 +454,7 @@ function renderParams() {
     head.append(rst); blk.append(head);
     for (const q of groups[g]) blk.append(field(q)); root.append(blk);
   }
-  const advb = $("#s-adv"); if (advb) { advb.textContent = ADV ? "Advanced mode: on" : "Advanced mode: off"; advb.setAttribute("aria-pressed", ADV ? "true" : "false"); }
+  const advb = $("#s-adv"); if (advb) { advb.textContent = "Advanced"; advb.title = ADV ? "Advanced controls shown and values outside the recommended ranges allowed (click to hide)" : "Show the advanced controls and allow values outside the recommended ranges"; advb.setAttribute("aria-pressed", ADV ? "true" : "false"); }
   const hasAdv = SPEC.some(q => q.advanced); if (advb) advb.style.display = "inline-block";
   validateAll();
 }
@@ -449,10 +489,24 @@ function field(q) {
     inp.onchange = () => { if (inp.dataset.before !== JSON.stringify(PSTATE[q.name])) pushUndo(JSON.parse(inp.dataset.before), q.name); };
   }
   f.append(inp);
-  const help = elt("div", "help", (q.help || "") + (q.fixed ? "  Held fixed: " + q.fixed + "." : ""));
-  help.id = id + "-help"; inp.setAttribute("aria-describedby", help.id); f.append(help);
+  f.append(helpFor(q, id, f)); inp.setAttribute("aria-describedby", id + "-help");
   f.append(elt("div", "verr", "")); validateOne(q, f);
   return f;
+}
+// One line of help is always visible (what the control does); the rest opens on request.
+function helpFor(q, id, f) {
+  const full = ((q.help || "") + (q.fixed ? "  Held fixed: " + q.fixed + "." : "")).trim();
+  const help = el("div", "help"); help.id = id + "-help";
+  if (full.length <= 96) { help.textContent = full; return help; }
+  const m = /^(.{12,110}?[.;:])\s+([\s\S]+)$/.exec(full);
+  let head, rest;
+  if (m) { head = m[1]; rest = m[2]; }
+  else { const cut = full.lastIndexOf(" ", 90); head = full.slice(0, cut > 40 ? cut : 90) + "…"; rest = full.slice(cut > 40 ? cut : 90); }
+  help.append(elt("span", "hshort", head), elt("span", "hrest", " " + rest), document.createTextNode(" "));
+  const more = elt("button", "hmore", "more"); more.type = "button"; more.setAttribute("aria-expanded", "false");
+  more.setAttribute("aria-label", "More about " + (q.label || q.name));
+  more.onclick = () => { const o = f.classList.toggle("open"); more.textContent = o ? "less" : "more"; more.setAttribute("aria-expanded", String(o)); };
+  help.append(more); return help;
 }
 // client-side validation (the backend repeats it before any solver starts)
 function checkParam(q, v) { return FunoosLogic.checkParam(q, v, ADV); }
@@ -500,7 +554,7 @@ async function runSim() {
     toast("Run finished for " + JOB_SCENE + " — open it from the run history", "ok"); refreshHistory(); return;
   }
   if (r && r.ok) {                                             // the previous RUN is replaced only now
-    RUN = r; FPS = 26; leaveCompare(); markMatch();
+    RUN = r; FPS = 26; leaveCompare(); markMatch(); setTab("field");
     buildViewbar(r); setVideo(r.video, false); renderKPIs(r.stats || []);
     if (PENDING_PRES) {                                        // a loaded setup's presentation, applied once the view bar exists
       const pp = PENDING_PRES; PENDING_PRES = null;
@@ -543,19 +597,11 @@ function refreshJobUI() {
 }
 function renderKPIs(stats) {
   const k = $("#s-kpis"); k.innerHTML = "";
-  if (!stats.length) { k.append(elt("div", "muted small", "No readouts.")); return; }
+  if (!stats.length) { k.append(elt("div", "muted rhint", "No readouts for this run.")); return; }
   for (const s of stats) {
-    if (s.frac != null) {
-      const t = el("div", "kpi gauge" + (s.accent ? " accent" : ""));
-      const dial = el("div", "dial", kpiGauge(s.frac, s.accent));
-      const dv = elt("div", "dval", s.v); if (s.u) dv.append(elt("small", null, s.u)); dial.append(dv);
-      t.append(dial, elt("div", "l", s.l)); k.append(t);
-    } else {
-      const t = el("div", "kpi" + (s.accent ? " accent" : ""));
-      const v = elt("div", "v", s.v); if (s.u) { v.append(" ", elt("small", null, s.u)); }
-      t.append(elt("div", "l", s.l), v);
-      k.append(t);
-    }
+    const t = el("div", "kpi" + (s.accent ? " accent" : "")); if (s.note) t.title = s.note;
+    const v = elt("div", "v", s.v); if (s.u) v.append(" ", elt("small", null, s.u));
+    t.append(elt("div", "l", s.l), v); k.append(t);
   }
 }
 // 270° speedometer-style SVG dial filled to `frac`
@@ -637,7 +683,7 @@ async function saveClip(fmt) {
   } catch (e) { $("#s-status").textContent = "⚠ " + errText(e); toast("Save failed: " + errText(e), "err"); }
 }
 async function exportAction(sel) {
-  const what = sel.value; sel.value = "";
+  const what = typeof sel === "string" ? sel : sel.value; if (typeof sel !== "string") sel.value = "";
   if (!RUN) { toast("Run a simulation first", "err"); return; }
   if (CMP && what !== "project" && what !== "options") { toast("Exports refer to a single run: switch a view to leave the comparison first", "err"); return; }
   const idx = curFrame(), frac = idx == null ? 1.0 : { index: idx, frac: 1.0 }, cmap = $("#s-cmap").value;
@@ -665,11 +711,12 @@ async function applyLimits() {
     hideStill(); setVideo(r.video, true); $("#s-status").textContent = "✓ colour limits applied";
   } catch (e) { if (isCurrent("view", t) && !/superseded/.test(errText(e))) toast(errText(e), "err"); }
 }
-async function togglePlots() {
-  if (!RUN) { toast("Run a simulation first", "err"); return; }
+async function togglePlots() { return setTab($("#s-plotpanel").style.display === "block" ? "field" : "plots"); }
+async function showDiagnostics() {
+  if (!RUN) { toast("Run a simulation first", "err"); return false; }
   $("#s-plots").classList.remove("ready");           // attention cue consumed
   const p = $("#s-plotpanel");
-  if (p.style.display === "block") { p.style.display = "none"; return; }
+  if (p.dataset.run === RUN.run_id && p.querySelector(".diagcard")) { p.style.display = "block"; return true; }
   const t = nextReq("diag"), rid = RUN.run_id; setBusy("computing diagnostics…");
   try {
     const r = await call("diagnostics", rid, t);
@@ -677,15 +724,87 @@ async function togglePlots() {
     p.innerHTML = ""; p.dataset.run = rid;
     if (!r.plots.length) p.append(elt("div", "muted", "No diagnostics for this case."));
     for (const pl of r.plots) {
-      const card = el("div", "plot");
+      const card = el("div", "plot diagcard");
       card.append(elt("div", "kicker", pl.title));
       const i = el("img"); i.src = pl.img; card.append(i);
       if (pl.explain) card.append(el("div", "explain", pl.explain));
       p.append(card);
     }
     p.style.display = "block"; $("#s-status").textContent = "✓ diagnostics ready.";
+    if (!JOB) $("#s-skel").classList.remove("on");
+    return true;
   } catch (e) { if (isCurrent("diag", t)) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
   if (isCurrent("diag", t) && !JOB) $("#s-skel").classList.remove("on");
+  return false;
+}
+
+/* stage tabs: Field · Plots · Explain · Runs. The panels cover the field; on a wide window the
+   plots and the explanation sit beside it. A panel opened elsewhere (probe, profile, sweep)
+   becomes the active tab. */
+const TAB_PANELS = { plots: "#s-plotpanel", explain: "#s-help", runs: "#s-runs" };
+async function setTab(tab) {
+  if (tab === "plots") { if (!(await showDiagnostics())) { syncTabs(); return; } }
+  else if (tab === "explain") { fillHelp(); $("#s-help").style.display = "block"; }
+  else if (tab === "runs") { $("#s-runs").style.display = "block"; refreshHistory(); }
+  for (const [k, sel] of Object.entries(TAB_PANELS)) if (k !== tab) { const p = $(sel); if (p && p.style.display !== "none") p.style.display = "none"; }
+  syncTabs();
+}
+function syncTabs() {
+  const vis = k => { const p = $(TAB_PANELS[k]); return !!p && p.style.display === "block"; };
+  const cur = vis("plots") ? "plots" : vis("explain") ? "explain" : vis("runs") ? "runs" : "field";
+  const ids = { field: "#tab-field", plots: "#s-plots", explain: "#tab-explain", runs: "#tab-runs" };
+  for (const [k, id] of Object.entries(ids)) { const b = $(id); if (b) { b.setAttribute("aria-selected", String(k === cur)); b.tabIndex = k === cur ? 0 : -1; } }
+  const sc = $("#s-screen"); if (sc) sc.classList.toggle("split", (cur === "plots" || cur === "explain") && !!RUN && window.innerWidth >= 1500);
+}
+(function watchPanels() {
+  const obs = new MutationObserver(recs => {
+    for (const r of recs) {
+      const t = r.target; if (t.style.display !== "block") continue;
+      for (const sel of Object.values(TAB_PANELS)) { const p = $(sel); if (p && p !== t && p.style.display === "block") p.style.display = "none"; }
+    }
+    syncTabs();
+  });
+  for (const sel of Object.values(TAB_PANELS)) { const p = $(sel); if (p) obs.observe(p, { attributes: true, attributeFilter: ["style"] }); }
+})();
+window.addEventListener("resize", syncTabs);
+document.addEventListener("keydown", e => {                   // arrow keys move between tabs
+  const tab = e.target.closest && e.target.closest('[role="tab"]'); if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+  const tabs = [...tab.parentElement.querySelectorAll('[role="tab"]')]; let i = tabs.indexOf(tab);
+  i = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  e.preventDefault(); tabs[i].focus(); tabs[i].click();
+});
+
+/* menus (More, Export): open on click, close on Escape, outside click or a choice; arrow keys move */
+function toggleMenu(id, btn) {
+  const m = document.getElementById(id); if (!m) return;
+  const open = m.hidden; closeMenus();
+  if (open) { m.hidden = false; if (btn) btn.setAttribute("aria-expanded", "true"); const first = m.querySelector('[role="menuitem"]'); if (first) first.focus(); }
+}
+function closeMenus() {
+  document.querySelectorAll(".menupop").forEach(m => { if (!m.hidden) { m.hidden = true; const b = document.querySelector(`[aria-controls="${m.id}"]`); if (b) b.setAttribute("aria-expanded", "false"); } });
+}
+document.addEventListener("click", e => {
+  const ex = e.target.closest && e.target.closest("[data-export]");
+  if (ex) { closeMenus(); exportAction(ex.dataset.export); return; }
+  if (!(e.target.closest && e.target.closest(".menu"))) closeMenus();
+});
+document.addEventListener("keydown", e => {
+  const open = document.querySelector(".menupop:not([hidden])"); if (!open) return;
+  if (e.key === "Escape") { e.preventDefault(); closeMenus(); const b = document.querySelector(`[aria-controls="${open.id}"]`); if (b) b.focus(); return; }
+  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && e.target.matches && e.target.matches('[role="menuitem"]')) {
+    const items = [...open.querySelectorAll('[role="menuitem"]')]; let i = items.indexOf(e.target);
+    i = (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length; e.preventDefault(); items[i].focus();
+  }
+});
+
+/* setup panel: hide it to give the field the whole width (remembered) */
+function toggleSetup(force) {
+  const d = $("#s-dash"); if (!d) return;
+  const collapsed = force != null ? !!force : !d.classList.contains("collapsed");
+  d.classList.toggle("collapsed", collapsed); _lsSet("funoos.setupCollapsed", collapsed);
+  const ex = $("#s-expand"); if (ex) ex.hidden = !collapsed;
+  const target = collapsed ? ex : $("#s-collapse"); if (target && force == null) target.focus();
+  syncTabs();
 }
 
 /* ───────── experiments: presets · projects · history · sweeps · compare · probes · zoom ───────── */
@@ -751,22 +870,22 @@ async function applyProject(cfg) {
 async function refreshHistory() {
   const box = $("#s-history"); if (!box) return;
   let r; try { r = await call("runs"); } catch (e) { return; }
-  box.innerHTML = "";
-  if (!r.runs.length) return;
+  box.innerHTML = ""; const rc = $("#s-runcount"); if (rc) rc.textContent = r.runs.length ? String(r.runs.length) : "";
+  if (!r.runs.length) { box.append(elt("div", "muted", "No runs yet. Every result you run is kept here, within the limits set in Settings, to reopen, pin, load its setup or compare.")); return; }
   box.append(elt("div", "kicker", "run history"));
   for (const run of r.runs.slice().reverse()) {
     const row = el("div", "hrow" + (RUN && RUN.run_id === run.run_id ? " cur" : ""));
     const nm = elt("span", "hname", run.info); nm.title = run.info; row.append(nm);
-    const pin = elt("button", "linkbtn", run.pinned ? "★" : "☆"); pin.title = run.pinned ? "Unpin (may be evicted)" : "Pin (never evicted)";
+    const pin = elt("button", "linkbtn", run.pinned ? "★ Pinned" : "☆ Pin"); pin.title = run.pinned ? "Unpin (may be evicted)" : "Pin (never evicted)";
     pin.setAttribute("aria-label", (run.pinned ? "Unpin" : "Pin") + " run " + run.info);
     pin.onclick = async () => { try { await call("pin_run", run.run_id, !run.pinned); refreshHistory(); } catch (e) { toast(errText(e), "err"); } };
-    const dup = elt("button", "linkbtn", "⧉"); dup.title = "Duplicate: load this run's setup into the controls";
+    const dup = elt("button", "linkbtn", "⧉ Load setup"); dup.title = "Duplicate: load this run's setup into the controls";
     dup.setAttribute("aria-label", "Load setup of run " + run.info);
     dup.onclick = () => duplicateRun(run.run_id);
-    const op = elt("button", "linkbtn", "▶"); op.title = "Open this result (loads its complete descriptor)";
+    const op = elt("button", "linkbtn", "▶ Open"); op.title = "Open this result (loads its complete descriptor)";
     op.setAttribute("aria-label", "Open run " + run.info); op.onclick = () => openRun(run.run_id);
     row.append(op);
-    const cmp = elt("button", "linkbtn", "⇄"); cmp.title = "Compare this run with the current one, side by side";
+    const cmp = elt("button", "linkbtn", "⇄ Compare"); cmp.title = "Compare this run with the current one, side by side";
     cmp.setAttribute("aria-label", "Compare run " + run.info + " with the current run");
     cmp.onclick = () => compareWith(run.run_id);
     row.append(pin, dup, cmp); box.append(row);
@@ -787,7 +906,7 @@ async function openRun(rid, viewWanted) {
     else if (info.exhibit !== CUR_EXH) { toast("Result belongs to " + info.exhibit + "; showing it without its controls", ""); }
     const r = await call("render_view", rid, viewWanted || info.view || null, $("#s-cmap").value, 26, t, $("#x-vmin").value, $("#x-vmax").value);
     if (!isCurrent("view", t)) return;
-    leaveCompare();
+    leaveCompare(); setTab("field");
     RUN = { ...info, run_id: rid, view: r.view, defcmap: r.cmap, field_rect: r.field_rect || null, video: null };
     buildViewbar(RUN); hideStill(); setVideo(r.video, false); renderKPIs(info.stats || []); $("#s-plotpanel").style.display = "none";
     $("#s-status").textContent = "✓ " + info.info; markMatch(); refreshHistory(); zoomReset();
@@ -939,6 +1058,7 @@ function applyZoom() {
 function zoomBy(f) { ZOOM.k = Math.min(8, Math.max(1, ZOOM.k * f)); if (ZOOM.k === 1) { ZOOM.x = ZOOM.y = 0; } applyZoom(); }
 function zoomReset() { ZOOM.k = 1; ZOOM.x = ZOOM.y = 0; applyZoom(); }
 function initStage() {
+  if (_lsGet("funoos.setupCollapsed", false)) { const d = $("#s-dash"); if (d) d.classList.add("collapsed"); const ex = $("#s-expand"); if (ex) ex.hidden = false; }
   const sc = $("#s-screen"); if (!sc) return;
   sc.addEventListener("wheel", e => { if (!RUN) return; e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
   sc.addEventListener("pointerdown", e => { if (ZOOM.k === 1) return; ZOOM.dragging = false; ZOOM.sx = e.clientX; ZOOM.sy = e.clientY; ZOOM.ox = ZOOM.x; ZOOM.oy = ZOOM.y; sc.setPointerCapture(e.pointerId); sc.dataset.down = "1"; });
@@ -947,7 +1067,7 @@ function initStage() {
   sc.addEventListener("click", stageClick);
 }
 document.addEventListener("keydown", e => {
-  if (CUR !== "studio" || e.target.matches("input,select,textarea,button,a,[role=button],summary")) return;
+  if (CUR !== "studio" || !e.target.matches || e.target.matches("input,select,textarea,button,a,[role=button],summary")) return;
   if (e.key === " ") { e.preventDefault(); vToggle(); }
   else if (e.key === "ArrowLeft") { vStep(-1); } else if (e.key === "ArrowRight") { vStep(1); }
   else if (e.key === "+" || e.key === "=") { zoomBy(1.15); } else if (e.key === "-") { zoomBy(1 / 1.15); } else if (e.key === "0") { zoomReset(); }

@@ -46,6 +46,27 @@ jobs:
           npm install --no-save --no-package-lock jsdom@24
           node tests/test_frontend_ui.js
 
+  ui-layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build solvers, install dependencies and a headless Chromium
+        run: |
+          make -C solvers/lbm && make -C solvers/incompressible && make -C solvers/compressible && make -C solvers/sph
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt playwright
+          python -m playwright install --with-deps chromium
+      - name: Layout check at 11 window sizes (real page, real backend, one real run)
+        run: python tools/check_layout.py --shots layout-shots --json layout-shots/layout.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: layout-shots
+          path: layout-shots
+
   package-linux:
     runs-on: ubuntu-latest
     steps:

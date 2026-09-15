@@ -76,18 +76,22 @@
     <section class="view" id="gallery">
       <div class="body scroll" id="gallery-scroll">
         <div class="gal-head">
-          <div class="kicker">gallery</div>
-          <h1>Explore the simulations</h1>
-          <div class="gal-sub" id="gal-sub">Experiments organised by phenomenon.</div>
+          <div class="gal-titles">
+            <div class="kicker">gallery</div>
+            <h1>Explore the simulations</h1>
+            <div class="gal-sub" id="gal-sub">Experiments organised by phenomenon.</div>
+          </div>
           <div class="galtools" role="search">
-            <label class="sr" for="g-search">Search scenes</label>
-            <input id="g-search" type="search" placeholder="search scenes, questions, methods…" oninput="setFilter('q', this.value)">
+            <label class="sr" for="g-search">Search experiments</label>
+            <input id="g-search" type="search" placeholder="Search experiments, questions, methods" oninput="setFilter('q', this.value)">
             <label class="sr" for="g-method">Filter by numerical method</label>
             <select id="g-method" onchange="setFilter('method', this.value)"></select>
-            <button class="linkbtn" type="button" aria-pressed="false" onclick="this.setAttribute('aria-pressed', !FILTER.fav); setFilter('fav', !FILTER.fav)">★ favourites</button>
-            <button class="linkbtn" type="button" aria-pressed="false" onclick="this.setAttribute('aria-pressed', !FILTER.quick); setFilter('quick', !FILTER.quick)">⚡ under a minute</button>
+            <button class="chipbtn" type="button" aria-pressed="false" onclick="this.setAttribute('aria-pressed', !FILTER.fav); setFilter('fav', !FILTER.fav)">★ Favourites</button>
+            <button class="chipbtn" type="button" aria-pressed="false" onclick="this.setAttribute('aria-pressed', !FILTER.quick); setFilter('quick', !FILTER.quick)">⚡ Under a minute</button>
           </div>
+          <nav class="phenchips" id="g-phen" aria-label="Show one phenomenon"></nav>
         </div>
+        <div id="gallery-start"></div>
         <div class="cargrid" id="gallery-grid"></div>
       </div>
     </section>
@@ -98,7 +102,7 @@
         <button class="back" type="button" onclick="show('gallery')">‹ Gallery</button>
         <span class="brand"><b>FUN</b>OOS</span>
       </div>
-      <div class="body">
+      <div class="body dbody">
         <div class="media">
           <div class="kicker" id="d-method"></div>
           <h1 id="d-title" style="margin:6px 0 6px"></h1>
@@ -112,27 +116,37 @@
       </div>
     </section>
 
-    <!-- ───────── studio (bento dashboard) ───────── -->
+    <!-- ───────── studio: setup panel · stage with tabs and readouts · transport ───────── -->
     <section class="view" id="studio">
-      <div class="dash">
-        <div class="glass tile t-params">
-          <div class="kicker" id="s-name">parameters</div>
-          <div class="ptools">
+      <div class="dash" id="s-dash">
+        <aside class="glass tile t-params" id="s-panel" aria-label="Setup">
+          <div class="phead">
+            <div class="kicker" id="s-name">parameters</div>
+            <button class="iconbtn" type="button" id="s-collapse" onclick="toggleSetup()" aria-label="Hide the setup panel" title="Hide the setup panel (more room for the field)">⟨</button>
+          </div>
+          <div class="ppick">
             <label class="sr" for="s-scene">Experiment</label>
-            <select class="linkbtn" id="s-scene" onchange="studioPickExperiment(this)" aria-label="Experiment"></select>
+            <select id="s-scene" onchange="studioPickExperiment(this)" aria-label="Experiment"></select>
             <label class="sr" for="s-preset">Preset</label>
-            <select class="linkbtn" id="s-preset" aria-label="Preset" style="display:none"></select>
-            <button class="linkbtn" type="button" onclick="toggleHelp()" aria-label="Show the scene explanation and control help">? explain</button>
+            <select id="s-preset" aria-label="Preset" style="display:none"></select>
           </div>
           <div class="ptools">
-            <button class="linkbtn" id="s-adv" type="button" onclick="toggleAdvanced()" aria-pressed="false">Advanced mode: off</button>
-            <button class="linkbtn" id="s-undo" type="button" onclick="undoParams()" disabled aria-label="Undo setup change">↶ undo</button>
-            <button class="linkbtn" id="s-redo" type="button" onclick="redoParams()" disabled aria-label="Redo setup change">↷ redo</button>
-            <button class="linkbtn" type="button" onclick="resetAll()" aria-label="Restore scene defaults">⟲ defaults</button>
-            <select class="linkbtn" id="s-presets" aria-label="Named presets" onchange="presetAction(this)"></select>
-            <button class="linkbtn" type="button" onclick="saveProject()" aria-label="Save setup to a file">💾 save setup</button>
-            <button class="linkbtn" type="button" onclick="loadProject()" aria-label="Load setup from a file">📂 load setup</button>
-            <button class="linkbtn" type="button" onclick="openSweep()" aria-label="Parameter sweep">📈 sweep…</button>
+            <button class="linkbtn" id="s-undo" type="button" onclick="undoParams()" disabled aria-label="Undo setup change" title="Undo (Ctrl+Z)">↶</button>
+            <button class="linkbtn" id="s-redo" type="button" onclick="redoParams()" disabled aria-label="Redo setup change" title="Redo (Ctrl+Shift+Z)">↷</button>
+            <button class="linkbtn" id="s-adv" type="button" onclick="toggleAdvanced()" aria-pressed="false">Advanced</button>
+            <span class="spacer"></span>
+            <div class="menu">
+              <button class="linkbtn" id="s-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="s-moremenu" onclick="toggleMenu('s-moremenu', this)">More ▾</button>
+              <div class="menupop" id="s-moremenu" role="menu" aria-label="More setup actions" hidden>
+                <button role="menuitem" type="button" onclick="closeMenus(); resetAll()">⟲ Restore the preset values</button>
+                <button role="menuitem" type="button" onclick="closeMenus(); saveProject()">💾 Save setup to a file…</button>
+                <button role="menuitem" type="button" onclick="closeMenus(); loadProject()">📂 Load setup from a file…</button>
+                <button role="menuitem" type="button" onclick="closeMenus(); openSweep()">📈 Parameter sweep…</button>
+                <div class="menusep" role="separator"></div>
+                <label class="menulabel" for="s-presets">My saved setups</label>
+                <select id="s-presets" onchange="closeMenus(); presetAction(this)"></select>
+              </div>
+            </div>
           </div>
           <div class="sweep" id="s-sweep" style="display:none">
             <label for="s-sweep-param">Sweep parameter</label>
@@ -143,35 +157,49 @@
               <button class="linkbtn" type="button" onclick="openSweep()">close</button></div>
           </div>
           <div class="params" id="s-params"></div>
-          <div class="derived" id="s-derived"></div>
-          <button class="btn btn-primary runbtn" id="s-run" onclick="runSim()">▶  Run simulation</button>
-          <button class="btn btn-ghost runbtn cancelbtn" id="s-cancel" onclick="cancelSim()" style="display:none">■  Cancel</button>
-          <div class="status" id="s-status">Ready.</div>
-          <div class="estimate muted" id="s-estimate" aria-live="polite"></div>
-          <div class="match" id="s-match" aria-live="polite"></div>
-        </div>
+          <details class="derivedbox" id="s-derivedbox" ontoggle="_lsSet('funoos.derivedOpen', this.open)">
+            <summary><span class="kicker">derived quantities</span><span class="dsum" id="s-derived-sum"></span></summary>
+            <div class="derived" id="s-derived"></div>
+          </details>
+          <div class="runblock">
+            <button class="btn btn-primary runbtn" id="s-run" onclick="runSim()">▶  Run simulation</button>
+            <button class="btn btn-ghost runbtn cancelbtn" id="s-cancel" onclick="cancelSim()" style="display:none">■  Cancel</button>
+            <div class="status" id="s-status" role="status">Ready.</div>
+            <div class="estimate muted" id="s-estimate" aria-live="polite"></div>
+            <div class="match" id="s-match" aria-live="polite"></div>
+          </div>
+        </aside>
 
         <div class="tile t-stage">
           <div class="viewbar">
-            <div class="seg" id="s-views"></div>
-            <select id="s-cmap" onchange="recolor()"></select>
+            <button class="linkbtn setupbtn" type="button" id="s-expand" onclick="toggleSetup()" aria-label="Show the setup panel" hidden>☰ Setup</button>
+            <div class="seg tabs" role="tablist" aria-label="What the stage shows">
+              <button role="tab" type="button" id="tab-field" aria-selected="true" aria-controls="s-screen" onclick="setTab('field')" title="The simulated field"><span class="ti" aria-hidden="true">◧</span><span class="tl">Field</span></button>
+              <button role="tab" type="button" id="s-plots" aria-selected="false" aria-controls="s-plotpanel" tabindex="-1" onclick="setTab('plots')" title="Diagnostic plots and measurements"><span class="ti" aria-hidden="true">📊</span><span class="tl">Plots</span></button>
+              <button role="tab" type="button" id="tab-explain" aria-selected="false" aria-controls="s-help" tabindex="-1" onclick="setTab('explain')" title="What this experiment shows and how it is modelled"><span class="ti" aria-hidden="true">?</span><span class="tl">Explain</span></button>
+              <button role="tab" type="button" id="tab-runs" aria-selected="false" aria-controls="s-runs" tabindex="-1" onclick="setTab('runs')" title="Run history: open, pin, load a setup, compare"><span class="ti" aria-hidden="true">≡</span><span class="tl">Runs</span><span class="badge" id="s-runcount"></span></button>
+            </div>
+            <div class="seg views" id="s-views" aria-label="View"></div>
+            <select id="s-cmap" onchange="recolor()" aria-label="Colour palette"></select>
             <span class="spacer"></span>
-            <label class="sr" for="s-export">Export</label>
-            <select class="btn btn-ghost" style="padding:9px 13px" id="s-export" onchange="exportAction(this)" aria-label="Export">
-              <option value="">⬇ export…</option>
-              <option value="mp4">MP4 clip</option>
-              <option value="gif">GIF clip</option>
-              <option value="png">PNG of this frame</option>
-              <option value="svg">Diagnostic plots (SVG)</option>
-              <option value="csv">Time series (CSV)</option>
-              <option value="npz">Fields with coordinates (NPZ)</option>
-              <option value="report">Experiment report (HTML)</option>
-              <option value="project">Setup file (JSON)</option>
-              <option value="options">Export & colour options…</option>
-            </select>
-            <button class="btn btn-ghost" style="padding:9px 13px" id="s-probe" onclick="toggleProbe()" aria-pressed="false" title="Click the field to read values, probe a point, or draw profiles (Shift/Alt-click)">📍 Probe</button>
-            <span class="zoomctl"><button class="linkbtn" type="button" onclick="zoomBy(1/1.15)" aria-label="Zoom out">−</button><span id="s-zoom" class="tlabel" style="min-width:44px">100%</span><button class="linkbtn" type="button" onclick="zoomBy(1.15)" aria-label="Zoom in">＋</button><button class="linkbtn" type="button" onclick="zoomReset()" aria-label="Reset zoom">⟲</button></span>
-            <button class="btn btn-blue" style="padding:9px 18px" id="s-plots" onclick="togglePlots()">📊 Diagnostic plots</button>
+            <button class="btn btn-ghost tbtn" id="s-probe" onclick="toggleProbe()" aria-pressed="false" aria-label="Probe" title="Click the field to read values, probe a point, or draw profiles (Shift/Alt-click)">📍<span class="tl"> Probe</span></button>
+            <div class="menu">
+              <button class="btn btn-ghost tbtn" id="s-exportbtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="s-exportmenu" aria-label="Export and zoom" onclick="toggleMenu('s-exportmenu', this)">⬇<span class="tl"> Export</span> ▾</button>
+              <div class="menupop right" id="s-exportmenu" role="menu" aria-label="Export and zoom" hidden>
+                <button role="menuitem" type="button" data-export="mp4">MP4 clip</button>
+                <button role="menuitem" type="button" data-export="gif">GIF clip</button>
+                <button role="menuitem" type="button" data-export="png">PNG of this frame</button>
+                <button role="menuitem" type="button" data-export="svg">Diagnostic plots (SVG)</button>
+                <button role="menuitem" type="button" data-export="csv">Time series (CSV)</button>
+                <button role="menuitem" type="button" data-export="npz">Fields with coordinates (NPZ)</button>
+                <button role="menuitem" type="button" data-export="report">Experiment report (HTML)</button>
+                <button role="menuitem" type="button" data-export="project">Setup file (JSON)</button>
+                <div class="menusep" role="separator"></div>
+                <button role="menuitem" type="button" data-export="options">Export and colour options…</button>
+                <div class="menusep" role="separator"></div>
+                <div class="zoomctl" role="group" aria-label="Zoom"><span class="menulabel">zoom</span><button class="linkbtn" type="button" onclick="zoomBy(1/1.15)" aria-label="Zoom out">−</button><span id="s-zoom" class="tlabel">100%</span><button class="linkbtn" type="button" onclick="zoomBy(1.15)" aria-label="Zoom in">＋</button><button class="linkbtn" type="button" onclick="zoomReset()" aria-label="Reset zoom">⟲</button></div>
+              </div>
+            </div>
           </div>
           <div class="xopts" id="x-opts" style="display:none">
             <label>fps <input id="x-fps" type="number" min="1" max="60" value="26"></label>
@@ -185,21 +213,17 @@
           <div class="screen glass" id="s-screen">
             <video id="s-video" loop playsinline></video>
             <img id="s-still" class="still" alt="" style="display:none">
-            <div class="hint" id="s-hint">Pick a scene from the Gallery, set parameters,<br>then Run ▶ — switch views live.</div>
+            <div class="hint" id="s-hint">Set the controls on the left, then Run ▶.<br>Switch views, palettes and tabs while the result plays.</div>
             <div class="skel" id="s-skel">
               <div class="msg" id="s-skelmsg">simulating…</div>
               <div class="pbar"><div class="pfill" id="s-pfill"></div></div>
             </div>
-            <div class="plots scroll" id="s-plotpanel"></div>
-            <div class="plots scroll helppanel" id="s-help" style="display:none"></div>
+            <div class="plots scroll" id="s-plotpanel" role="tabpanel" aria-labelledby="s-plots"></div>
+            <div class="plots scroll helppanel" id="s-help" role="tabpanel" aria-labelledby="tab-explain" style="display:none"></div>
+            <div class="plots scroll runspanel" id="s-runs" role="tabpanel" aria-labelledby="tab-runs" style="display:none"><div class="history" id="s-history"></div></div>
             <div class="cmpinfo" id="s-cmpinfo" style="display:none" role="status"></div>
           </div>
-        </div>
-
-        <div class="glass tile t-kpis">
-          <div class="kicker">readouts</div>
-          <div class="kpis" id="s-kpis"><div class="muted" style="font-size:12px">Run a simulation to see live readouts.</div></div>
-          <div class="history" id="s-history"></div>
+          <div class="readouts" id="s-kpis" aria-label="Readouts"><div class="muted rhint">Readouts appear after a run.</div></div>
         </div>
 
         <div class="glass tile t-transport">

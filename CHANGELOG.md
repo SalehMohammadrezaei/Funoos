@@ -1,5 +1,63 @@
 # Changelog
 
+## 1.2.0
+
+A layout review of the real page at eleven window sizes (MacBook Air and Pro defaults, Windows
+laptops at 100, 125 and 150 % scaling, 1080p and 1440p monitors) found the Studio crowded and
+parts of it outside the window. The interface was restructured and the same measurements are
+now a CI job (docs/ui_layout.md).
+
+Studio
+* One setup panel: experiment and preset pickers, undo, redo and Advanced on one line; defaults,
+  save, load, sweep and saved setups in a More menu. The panel can be hidden to give the field
+  the whole width.
+* Each control shows one line of help with "more" for the rest; derived quantities are
+  collapsed to a one-line summary; Run stays in view.
+* The stage has tabs: Field, Plots, Explain and Runs. Plots and the explanation sit beside the
+  field on windows 1500 px and wider instead of covering it; run history has labelled actions.
+* Readouts under the stage show the run's measurements (lift, drag, Strouhal number,
+  permeability, Nusselt number, energy, errors against exact solutions) and the simulated time,
+  instead of the frame count, view count and method name.
+* Export and zoom moved into one menu; nothing in the stage bar has a fixed minimum width.
+  Before, the bar forced 775 px and pushed the readouts and run history out of windows up to
+  1366 px wide.
+* Column widths and spacing follow the window: 340, 300, 280 and 258 px setup panels, icon tabs
+  up to 1366 px, compact spacing up to 780 px of height. The first window fits the screen
+  (at most 1440 x 900, at most 92 % x 86 % of the screen); the minimum is 1024 x 640.
+* Changing only the resolution or duration no longer relabels a preset as a custom setup.
+
+Measured at the same sizes (tools/check_layout.py):
+* controls fully visible without scrolling: 1 to 3 of 7 on laptops before, 4 to 7 now;
+* stage area: 41 to 55 % of the window before, 49 to 70 % now; field area 13 to 23 % before,
+  18 to 35 % now;
+* readouts column outside the window at 1024 to 1366 px before; inside at every size now.
+
+Gallery
+* Picture-first cards: 16:10 thumbnails made from the gallery clips without their colour bar,
+  wide fields cut to the inflow side, fitted over a blurred copy (tools/make_thumbs.py). One
+  metadata line (method, presets, status) replaces the overlapping badges; no separate arrow
+  button.
+* A card that is not playing shows its poster (a developed frame), never the initial state;
+  at most six clips play, the hovered card first.
+* Phenomenon chips filter the gallery; a Start here row shows one experiment of each kind of flow.
+
+Detail
+* Explanation text used 45 % of its box: the page layout rule also applied to every paragraph.
+  It now uses the full width.
+
+Tests and tooling
+* tools/check_layout.py (CI job ui-layout): real page, real backend, one real run, eleven sizes;
+  fails on horizontal overflow, a wrapped stage toolbar, Run, readouts or transport outside the
+  window, too few visible controls, clipped card titles or narrow detail text.
+* tests/test_frontend_ui.js: start row, chips and poster-first cards; tabs with arrow keys;
+  menus with Escape and outside clicks; the collapsible panel; readout chips; resolution
+  keeps the preset name; one-line help.
+* tests/test_jobs.py: readouts are measurements; every card has a thumbnail and poster; the first
+  window fits the screen.
+* tools/record_walkthrough.py records the app walkthrough against the real backend (replaces the
+  mock-data recorder); the promo builders use the 27 experiments and write their work files to
+  $FUNOOS_PROMO_WORK.
+
 ## 1.1.2
 
 Gallery navigation (regression in 1.1.1, fixed)

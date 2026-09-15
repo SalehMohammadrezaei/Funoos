@@ -63,6 +63,7 @@ const api = {
   compare: async (a, b, view, cmap, fps, req) => { calls.push(["compare", a, b, view, cmap]); return { ok: true, req, video: fakeVideo, times: [10, 20, 30, 40], run_a: a, run_b: b, view, cmap, vmin: 0, vmax: 1, time_unit: "lattice steps", note: "shared interval [10, 40]", label_a: "A", label_b: "B", info: "A | B", frames: 4 }; },
   job: async rid => ({ ok: true, job_id: rid, exhibit: stored[rid] && stored[rid].exhibit, params: stored[rid] ? stored[rid].params : {}, state: "completed" }),
   pin_run: async () => ({ ok: true }),
+  diagnostics: async (rid, req) => ({ ok: true, req, plots: [{ title: "Lift from the bound circulation", img: "data:image/png;base64,AAAA", explain: "definition" }] }),
   settings: async () => ({ ok: true, threads: 4, cpus: 8 }),
   about: async () => ({ ok: true, author: "x", version: "t", license: "MIT", python: "3", links: [], citation: "c", acknowledgements: "a" }),
 };
@@ -92,6 +93,21 @@ const api = {
   const cards = $$("#gallery-grid .gcard");
   const exps = fixtures.catalog.groups.flatMap(g => g.experiments);
   await t("27 experiment cards rendered", async () => { assert.strictEqual(cards.length, exps.length); assert.strictEqual(cards.length, 27); });
+  await t("gallery: start row, phenomenon chips, one metadata line and poster-first cards", async () => {
+    $('.railbtn[data-view="gallery"]').click(); await sleep(20);
+    assert.ok($$("#gallery-start .gcard").length >= 4, "start row cards");
+    const v = $("#gallery-grid .gcard video");
+    assert.ok(v.getAttribute("poster") && !v.getAttribute("src") && /thumbs\//.test(v.dataset.src), "a card that is not playing has a poster and no source");
+    assert.ok(/presets|Numerical|Analytical|Qualitative/.test($("#gallery-grid .gcard .gmeta").textContent), "metadata line");
+    const chips = $$("#g-phen .chipbtn"); assert.strictEqual(chips.length, fixtures.catalog.groups.length + 1);
+    const g1 = fixtures.catalog.groups[1];
+    chips.find(c => c.textContent.startsWith(g1.phenomenon)).click();
+    assert.strictEqual($$("#gallery-grid .gcard").length, g1.experiments.length, "chip filters to one phenomenon");
+    assert.strictEqual($("#gallery-start").children.length, 0, "no start row while filtered");
+    assert.strictEqual($$("#g-phen .chipbtn").find(c => c.textContent.startsWith(g1.phenomenon)).getAttribute("aria-pressed"), "true");
+    $$("#g-phen .chipbtn")[0].click();
+    assert.strictEqual($$("#gallery-grid .gcard").length, 27, "All shows every experiment again");
+  });
 
   await t("every card opens its detail page by click, with layers and related experiments", async () => {
     for (const e of exps) {
@@ -202,6 +218,33 @@ const api = {
     await w.applyProject({ scene: G("CUR_SCENE"), exhibit: G("CUR_EXH"), params: {}, advanced: false, presentation: { view: "Speed", cmap: "Turbo", vmin: null, vmax: null, fps: 12, zoom: 2 }, validation: { warnings: [] } });
     assert.strictEqual($("#x-vmin").value, ""); assert.strictEqual($("#x-vmax").value, "");
     assert.strictEqual($("#x-fps").value, "12"); assert.strictEqual(G("ZOOM").k, 2);
+  });
+  await t("studio: Plots, Explain and Runs tabs with arrow keys; More and Export menus; collapsible setup; readout chips", async () => {
+    $('.railbtn[data-view="studio"]').click(); await sleep(20);
+    assert.ok($$("#s-kpis .kpi").length >= 1, "readout chips");
+    $("#s-plots").click(); await until(() => $("#s-plotpanel").style.display === "block" && $$("#s-plotpanel .diagcard").length >= 1, "plots tab");
+    assert.strictEqual($("#s-plots").getAttribute("aria-selected"), "true");
+    $("#tab-explain").click(); await until(() => $("#s-help").style.display === "block" && $("#s-plotpanel").style.display === "none", "explain tab");
+    assert.ok($$("#s-help .layer").length >= 3, "explanation layers");
+    $("#tab-runs").click(); await until(() => $("#s-runs").style.display === "block" && $$("#s-history .hrow").length >= 1, "runs tab");
+    assert.ok(/Open/.test($("#s-history .hrow").textContent) && $("#s-runcount").textContent !== "", "labelled history and count");
+    $("#tab-field").click(); await until(() => $("#s-runs").style.display === "none" && $("#tab-field").getAttribute("aria-selected") === "true", "field tab");
+    $("#tab-field").focus(); $("#tab-field").dispatchEvent(new w.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    await until(() => $("#s-plotpanel").style.display === "block", "ArrowRight moves to Plots");
+    $("#tab-field").click(); await until(() => $("#s-plotpanel").style.display === "none", "back to field");
+    $("#s-more").click(); assert.strictEqual($("#s-moremenu").hidden, false); assert.strictEqual($("#s-more").getAttribute("aria-expanded"), "true");
+    d.body.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); assert.strictEqual($("#s-moremenu").hidden, true, "Escape closes the menu");
+    $("#s-exportbtn").click(); assert.strictEqual($("#s-exportmenu").hidden, false); d.body.click(); assert.strictEqual($("#s-exportmenu").hidden, true, "outside click closes the menu");
+    $("#s-collapse").click(); assert.ok($("#s-dash").classList.contains("collapsed") && !$("#s-expand").hidden, "setup panel hidden");
+    $("#s-expand").click(); assert.ok(!$("#s-dash").classList.contains("collapsed") && $("#s-expand").hidden, "setup panel shown");
+  });
+  await t("changing only the resolution keeps the preset name; long help shows one line with more", async () => {
+    const rq = $$("#s-params select").find(x => [...x.options].some(o => o.value === "Low (fast)"));
+    assert.ok(rq, "resolution control");
+    rq.value = "Low (fast)"; rq.dispatchEvent(new w.Event("change")); await sleep(50);
+    assert.ok(!/CUSTOM SETUP/.test($("#s-name").textContent), $("#s-name").textContent);
+    const more = $("#s-params .hmore"); assert.ok(more, "a long help text has a more button");
+    more.click(); assert.ok(more.closest(".field").classList.contains("open") && more.getAttribute("aria-expanded") === "true");
   });
   console.log(`${n} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

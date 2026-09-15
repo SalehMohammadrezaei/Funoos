@@ -389,19 +389,44 @@ def _eq_b64(exhibit):
     return None
 
 
+# Readouts shown under the stage: measurement key, label, unit, scale (first four available are shown).
+_READOUTS = [
+    ("cl_circulation", "Lift C_l", "", 1.0), ("cd_wake_approx", "Drag C_d (wake estimate)", "", 1.0), ("strouhal", "Strouhal St", "", 1.0),
+    ("permeability_cells2", "Permeability k", "cells²", 1.0), ("porosity", "Porosity φ", "", 1.0),
+    ("nusselt", "Nusselt Nu", "", 1.0), ("mixing_width_final_frac", "Mixing width (end)", "of height", 1.0),
+    ("shock_radius_final_cells", "Shock radius (end)", "cells", 1.0),
+    ("sod_err_rho", "Density error vs exact", "", 1.0), ("sod_err_u", "Velocity error vs exact", "", 1.0),
+    ("ke_peak", "Peak kinetic energy", "", 1.0), ("ke_final", "Kinetic energy (end)", "", 1.0), ("ke_drift_rel", "Energy change", "%", 100.0),
+    ("enstrophy_final", "Enstrophy (end)", "", 1.0), ("pattern_coverage_pct", "Pattern coverage", "%", 1.0),
+    ("dye_variance_final", "Dye variance (end)", "", 1.0), ("particles_final", "Particles", "", 1.0), ("norm_drift", "Norm drift", "", 1.0),
+]
+
+
 def _stats(res, exhibit):
-    """Live KPI readouts for the Studio dashboard tiles."""
-    h = res.hints
-    meth = engine.META.get(exhibit, {}).get("method", "").split("·")[0].strip()
+    """Readouts for the strip under the stage: the run's measurements (postproc.metrics, the same
+    numbers the diagnostics explain), then the simulated time and the number of frames. Missing or
+    non-finite measurements are left out rather than shown as zero."""
     out = []
-    if res.kind == "porous":
-        k_val = h.get("permeability", 0); phi = h.get("porosity", 0)
-        out.append({"l": "permeability k", "v": f"{k_val:.2f}", "u": "cells²", "accent": True,
-                    "frac": float(min(1.0, k_val / 20.0))})
-        out.append({"l": "porosity φ", "v": f"{phi:.2f}", "frac": float(min(1.0, max(0.0, phi)))})
+    try:
+        m = postproc.metrics(res)
+    except Exception:                                   # noqa: BLE001 - readouts are advisory
+        m = {}
+    for key, label, unit, scale in _READOUTS:
+        v = m.get(key)
+        if v is None or not np.isfinite(v):
+            continue
+        val = float(v) * scale
+        txt = str(int(round(val))) if key == "particles_final" else f"{val:.3g}"
+        out.append({"l": label, "v": txt, "u": unit, "accent": not out})
+        if len(out) >= 4:
+            break
+    try:
+        times = [float(t) for t in (getattr(res, "times", None) or [])]
+        if times:
+            out.append({"l": "simulated time", "v": f"{times[-1]:.4g}", "u": (res.hints or {}).get("time_unit", "")})
+    except Exception:                                   # noqa: BLE001
+        pass
     out.append({"l": "frames", "v": str(len(res.raw))})
-    out.append({"l": "views", "v": str(len(res.views))})
-    out.append({"l": "method", "v": meth})
     return out
 
 
@@ -442,6 +467,22 @@ def _api_method(fn):
 
 
 
+def _initial_window_size(pref=(1440, 900)):
+    """A window that fits the screen it opens on: at most 1440x900 and at most 92 % x 86 % of the
+    screen (room for the taskbar or menu bar and the title bar); 1440x900 when the screen size is
+    unknown. pywebview sizes are logical pixels, so display scaling (125 %, 150 %) is respected."""
+    try:
+        import webview
+        screens = webview.screens() if callable(webview.screens) else webview.screens
+        scr = screens[0]
+        sw, sh = int(scr.width), int(scr.height)
+        if sw < 640 or sh < 480:
+            return pref
+        return int(min(pref[0], sw * 0.92)), int(min(pref[1], sh * 0.86))
+    except Exception:                                   # noqa: BLE001 - no display information yet
+        return pref
+
+
 def scene_for_run(exhibit, params):
     """The catalogue scene a run belongs to: the most specific preset of its exhibit whose values
     are all contained in the run's parameters (None when no preset of that exhibit matches)."""
@@ -473,10 +514,14 @@ class Api:
                 sc = catalog.scene(pz["key"]); mp4 = ROOT / "results" / "gallery" / (pz["key"] + ".mp4")
                 pz["clip"] = ("results/gallery/" + pz["key"] + ".mp4") if mp4.exists() else None
                 pz["poster"] = ("results/gallery/" + pz["key"] + ".jpg") if (ROOT / "results" / "gallery" / (pz["key"] + ".jpg")).exists() else None
+                th = ROOT / "results" / "gallery" / "thumbs"      # card thumbnails (tools/make_thumbs.py)
+                pz["thumb"] = ("results/gallery/thumbs/" + pz["key"] + ".mp4") if (th / (pz["key"] + ".mp4")).exists() else None
+                pz["thumb_poster"] = ("results/gallery/thumbs/" + pz["key"] + ".jpg") if (th / (pz["key"] + ".jpg")).exists() else None
                 pz["question"] = sc["question"]; pz["blurb"] = sc["blurb"]
                 pz["estimate_s"] = engine.estimate(sc["exhibit"], sc["preset"]).get("seconds")
             rep = next((pz for pz in e["presets"] if pz["key"] == e["representative"]), e["presets"][0])
             e["clip"] = rep["clip"]; e["poster"] = rep["poster"]; e["status"] = rep["status"]; e["status_label"] = rep["status_label"]
+            e["thumb"] = rep["thumb"] or rep["clip"]; e["thumb_poster"] = rep["thumb_poster"] or rep["poster"]
             e["estimate_s"] = min([pz["estimate_s"] for pz in e["presets"] if pz["estimate_s"] is not None] or [None])
             by_phen.setdefault(e["phenomenon"], []).append(e)
         groups = [{"phenomenon": p, "experiments": by_phen[p]} for p in catalog.PHENOMENA if p in by_phen]
@@ -497,6 +542,7 @@ class Api:
                 "ic": setup.get("ic", ""), "bc": setup.get("bc", ""),
                 "validation": s.get("checks", m.get("validation", "")), "eq": _eq_b64(ex),
                 "clip": ("results/gallery/" + key + ".mp4") if (ROOT / "results" / "gallery" / (key + ".mp4")).exists() else None,
+                "poster": ("results/gallery/" + key + ".jpg") if (ROOT / "results" / "gallery" / (key + ".jpg")).exists() else None,
                 "preset": s["preset"], "layers": catalog.scene_layers(key)["layers"],
                 "experiment": self._experiment_ctx(key),
                 "cmap": s.get("cmap"), "params": _param_spec(ex), "method_label": m.get("method", "")}
@@ -1349,9 +1395,10 @@ def main():
         print("WebView2 runtime not found: install the Evergreen runtime from Microsoft, then start Funoos again.")
     import atexit
     api = Api()
+    width, height = _initial_window_size()
     win = webview.create_window("Funoos — fluid simulation laboratory",
                                 str(ROOT / "index.html"), js_api=api,
-                                width=1440, height=900, min_size=(1120, 720),
+                                width=width, height=height, min_size=(min(1024, width), min(640, height)),
                                 background_color="#0A1322")
     api._win = win
     def on_close():                                              # stop solvers when the window closes

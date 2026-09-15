@@ -1,31 +1,31 @@
 """Wrap the recorded app walkthrough into a polished promo:
-title card -> walkthrough (with burned-in headlines) -> all-29-scenes tile wall
+title card -> walkthrough (tools/record_walkthrough.py) -> tile wall of the 27 experiments
 -> end card.  2560x1440. -> funoos_app_promo.mp4
 """
 from pathlib import Path
-import glob, os, subprocess
+import glob, os, shutil, subprocess, sys
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = str(Path(__file__).resolve().parent)
-FF = "/usr/bin/ffmpeg"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from flowzoo import render as _render   # noqa: E402
+FF = shutil.which("ffmpeg") or _render._ffmpeg()
 FB = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 W, H, FPS, TR = 2560, 1440, 30, 0.6
 GAL = os.path.join(ROOT, "results", "gallery")
-demo = os.path.join(ROOT, "results", "_demo")
+demo = os.environ.get("FUNOOS_PROMO_WORK") or os.path.join(ROOT, "results", "_demo")
 webm = sorted(glob.glob(os.path.join(demo, "rec", "*.webm")), key=os.path.getmtime)[-1]
 tmp = os.path.join(demo, "_promo"); os.makedirs(tmp, exist_ok=True)
 
-MOSAIC = ["lbm_cylinder", "ns_smoke", "euler_city", "sph_dam", "spec_kh", "rd_mitosis",
-          "lbm_name", "ns_flame", "euler_blast", "sph_waves", "spec_decay", "rd_maze",
-          "lbm_f1", "ns_rb", "euler_bubble", "sph_ship", "mix_bands", "rd_spots",
-          "lbm_airfoil", "ns_rt", "euler_twin", "sph_slosh", "porous_phi60", "rd_stripes",
-          "lbm_cyclist", "ns_chimney", "lbm_peloton", "sph_drop", "sph_pour"]
+MOSAIC = [e["representative"] for e in __import__("flowzoo.catalog", fromlist=["EXPERIMENTS"]).EXPERIMENTS]        # one tile per experiment (card thumbnails)
 
 
 def run(a): subprocess.run(a, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-def dur_of(p): return float(subprocess.check_output([FF.replace("ffmpeg", "ffprobe"), "-v", "error",
-    "-show_entries", "format=duration", "-of", "csv=p=0", p]).decode().strip())
+def dur_of(p):
+    out = subprocess.run([FF, "-i", p], capture_output=True, text=True).stderr
+    h, m, s_ = out.split("Duration:")[1].split(",")[0].strip().split(":")
+    return int(h) * 3600 + int(m) * 60 + float(s_)
 
 
 # ---------- cards ----------
@@ -42,8 +42,8 @@ def center(d, y, text, font, fill):
 
 def title(d):
     center(d, H * 0.35, "FUNOOS", ImageFont.truetype(FB, 200), (126, 155, 255))
-    center(d, H * 0.56, "a fluid-dynamics studio you can watch", ImageFont.truetype(FR, 56), (226, 233, 247))
-    center(d, H * 0.64, "six methods · 29 scenes · run it, switch views, recolour", ImageFont.truetype(FR, 32), (132, 147, 173))
+    center(d, H * 0.56, "explore fluid motion through simulation", ImageFont.truetype(FR, 56), (226, 233, 247))
+    center(d, H * 0.64, "27 experiments · 48 presets · run it, switch views, recolour, measure", ImageFont.truetype(FR, 32), (132, 147, 173))
 
 
 def endcard(d):
@@ -66,7 +66,7 @@ def cardvid(png, out, dur, fin, fout):
 
 # ---------- all-29-scenes tile wall ----------
 def build_mosaic(out, dur):
-    cols, rows = 6, 5; tw, th = W // cols, H // rows
+    cols, rows = 7, 4; tw, th = W // cols, H // rows
     logo = os.path.join(tmp, "logo_tile.png")
     img = Image.new("RGB", (tw, th), (10, 19, 34)); ImageDraw.Draw(img).text(
         (tw // 2, th // 2), "FUNOOS", font=ImageFont.truetype(FB, 52), fill=(138, 162, 255), anchor="mm")
@@ -74,7 +74,9 @@ def build_mosaic(out, dur):
     n = len(MOSAIC) + 1
     coords = [(c * tw, r * th) for r in range(rows) for c in range(cols)][:n]
     inputs = []
-    for k in MOSAIC: inputs += ["-stream_loop", "-1", "-i", os.path.join(GAL, k + ".mp4")]
+    for k in MOSAIC:
+        th_clip = os.path.join(GAL, "thumbs", k + ".mp4")
+        inputs += ["-stream_loop", "-1", "-i", th_clip if os.path.exists(th_clip) else os.path.join(GAL, k + ".mp4")]
     inputs += ["-loop", "1", "-framerate", str(FPS), "-i", logo]
     # blurred-fill each tile so the WHOLE scene shows (no cropping)
     parts = []
@@ -89,7 +91,7 @@ def build_mosaic(out, dur):
     parts.append("".join(f"[s{i}]" for i in range(n)) + f"xstack=inputs={n}:layout={layout}[wall]")
     post = (f"[wall]drawgrid=w={tw}:h={th}:t=3:color=0x0a1322,"
             f"zoompan=z='min(zoom+0.0003,1.04)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
-            f"drawtext=fontfile={FB}:text='29 scenes · one app':fontcolor=white:fontsize=52:x=(w-text_w)/2:y=64"
+            f"drawtext=fontfile={FB}:text='27 experiments · one app':fontcolor=white:fontsize=52:x=(w-text_w)/2:y=64"
             ":alpha='if(lt(t,0.5),t/0.5,1)':box=1:boxcolor=0x0a1322@0.6:boxborderw=18,"
             "fade=t=in:st=0:d=0.5[v]")
     run([FF, "-y", *inputs, "-filter_complex", ";".join(parts) + ";" + post, "-map", "[v]",
@@ -128,10 +130,10 @@ cardvid(os.path.join(tmp, "end.png"), ec, 3.0, False, True)
 mo = os.path.join(tmp, "mosaic.mp4"); build_mosaic(mo, 6.0)
 
 # spotlight a few scenes large after the wall
-FEAT = [("ns_smoke", "Rising Smoke Plume", "Incompressible Navier–Stokes"),
-        ("ns_rb", "Rayleigh–Bénard Convection", "Incompressible Navier–Stokes"),
-        ("sph_ship", "Floating Ship", "Smoothed-Particle Hydrodynamics"),
-        ("rd_maze", "Labyrinth", "Reaction–Diffusion")]
+FEAT = [("ns_smoke", "Rising smoke", "Incompressible Navier–Stokes"),
+        ("ns_rb", "Heated-layer convection", "Incompressible Navier–Stokes"),
+        ("sph_ship", "Floating hull", "Smoothed-Particle Hydrodynamics"),
+        ("rd_spots", "Gray–Scott patterns", "Reaction–Diffusion")]
 feats = []
 for k, n, m in FEAT:
     fo = os.path.join(tmp, "feat_" + k + ".mp4"); featured(k, n, m, fo, 3.0); feats.append(fo)
@@ -146,8 +148,8 @@ for k in range(1, len(segs)):
     off += durs[k - 1] - TR
     lab = "v" if k == len(segs) - 1 else f"v{k}"
     fc.append(f"[{prev}][{k}:v]xfade=transition=fade:duration={TR}:offset={off:.2f}[{lab}]"); prev = lab
-out = os.path.join(ROOT, "funoos_app_promo.mp4")
+out = os.path.join(ROOT, "docs", "funoos_app_promo.mp4")
 run([FF, "-y", *inputs, "-filter_complex", ";".join(fc), "-map", "[v]",
-     "-c:v", "libx264", "-crf", "17", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out])
+     "-c:v", "libx264", "-crf", "20", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out])
 total = sum(durs) - TR * (len(segs) - 1)
 print(f"DONE -> {out}  ({W}x{H}, ~{total:.0f}s, {os.path.getsize(out)//1024} KB)")

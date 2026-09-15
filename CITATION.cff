@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use Funoos in teaching or research, please cite it as below."
 title: "Funoos — fluid simulation laboratory"
 type: software
-version: 1.1.2
+version: 1.2.0
 date-released: 2026-09-15
 license: MIT
 repository-code: "https://github.com/SalehMohammadrezaei/Funoos"

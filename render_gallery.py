@@ -56,6 +56,8 @@ for s in catalog.SCENES:
         import subprocess as _sp
         _sp.run([render._ffmpeg(), "-v", "error", "-y", "-ss", "0.5", "-i", str(OUT / f"{key}.mp4"), "-frames:v", "1", "-q:v", "4",
                  "-vf", "scale=480:-2", str(OUT / f"{key}.jpg")], check=True)   # poster for the gallery card
+        if key in {e["representative"] for e in catalog.EXPERIMENTS}:           # card thumbnail (tools/make_thumbs.py)
+            _sp.run([sys.executable, str(ROOT / "tools" / "make_thumbs.py"), key], check=True)
         print(f"   ✓ {len(frames)} frames in {time.time()-t0:.0f}s -> gallery/{key}.gif", flush=True)
     except Exception as e:
         failed.append(key); print(f"   ✗ FAILED: {e}", flush=True)

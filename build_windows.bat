@@ -40,7 +40,7 @@ pyinstaller --noconfirm --onedir --windowed --name Funoos ^
   --add-data "index.html;." --add-data "web;web" ^
   --add-data "solvers\lbm\lbm2d.exe;solvers\lbm" --add-data "solvers\incompressible\ins2d.exe;solvers\incompressible" ^
   --add-data "solvers\compressible\euler2d.exe;solvers\compressible" --add-data "solvers\sph\sph2d.exe;solvers\sph" ^
-  --add-data "docs\eq;docs\eq" --add-data "results\gallery\*.mp4;results\gallery" --add-data "results\gallery\*.jpg;results\gallery" ^
+  --add-data "docs\eq;docs\eq" --add-data "results\gallery\*.mp4;results\gallery" --add-data "results\gallery\*.jpg;results\gallery" --add-data "results\gallery\thumbs\*;results\gallery\thumbs" ^
   --add-data "LICENSE;." --add-data "THIRD_PARTY_NOTICES.md;." --add-data "CITATION.cff;." ^
   --collect-all webview --collect-all imageio_ffmpeg ^
   %FF% funoos_app.py || goto :err

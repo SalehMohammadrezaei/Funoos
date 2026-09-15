@@ -557,6 +557,29 @@ def test_run_info_descriptor_and_scene():
     assert scene_for_run("no such exhibit", {}) is None
 
 
+def test_readouts_are_measurements_and_cards_have_thumbnails():
+    """The readouts strip shows measurements and the simulated time (not a view count or the
+    method name); every gallery card has a thumbnail and poster that exist; the first window
+    fits the screen (1440x900 at most)."""
+    api = _api()
+    r = api.run("__quick__", {}, None, None, 26, "rd1")
+    labels = [x["l"] for x in r["stats"]]
+    assert labels and labels[-1] == "frames" and "views" not in labels and "method" not in labels, labels
+    assert all(str(x["v"]).lower() not in ("nan", "inf", "-inf") for x in r["stats"])
+    cat = api.catalog()
+    exps = [e for g in cat["groups"] for e in g["experiments"]]
+    assert len(exps) == 27
+    missing = [e["id"] for e in exps if not (e.get("thumb") and e.get("thumb_poster")
+                                             and (funoos_app.ROOT / e["thumb"]).exists()
+                                             and (funoos_app.ROOT / e["thumb_poster"]).exists())]
+    assert not missing, missing
+    assert all("/thumbs/" in e["thumb"] for e in exps)
+    d = api.scene_detail("lbm_cylinder")
+    assert d["poster"] and (funoos_app.ROOT / d["poster"]).exists()
+    w, h = funoos_app._initial_window_size()
+    assert 640 <= w <= 1440 and 480 <= h <= 900
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

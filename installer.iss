@@ -6,7 +6,7 @@
 
 [Setup]
 AppName=Funoos
-AppVersion=1.1.2
+AppVersion=1.2.0
 AppPublisher=Saleh Mohammadrezaei
 DefaultDirName={autopf}\Funoos
 DefaultGroupName=Funoos

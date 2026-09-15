@@ -51,6 +51,21 @@ building and report it.
 * `prefers-reduced-motion` disables the hero animation, staged reveals, counter
   animation, the card morph and preview autoplay; autoplay and instant previews can
   also be switched off in Settings.
-* Layout collapses to two, then one column below 1100 px / 860 px; the minimum window
-  is 1120 × 720 and controls stay reachable at 125 % text scaling (CSS rem/px mix;
-  checked by resizing, not by an automated test).
+* The Studio stage has tabs (Field, Plots, Explain, Runs) with `role="tab"`,
+  `aria-selected` and `aria-controls`; Left/Right/Home/End move between them. A panel
+  opened from elsewhere (a probe, a profile, a sweep) becomes the selected tab.
+* The More and Export menus are buttons with `aria-haspopup="menu"` and
+  `aria-expanded`; the first item takes focus, Up/Down move, Escape closes and returns
+  focus to the button, a click outside closes.
+* The setup panel can be hidden (⟨) and shown again (☰ Setup); the choice is remembered.
+* Each control shows one line of help; "more" (a button with `aria-expanded`) opens the
+  rest. The line that is always visible is the control's `aria-describedby` text.
+* Gallery cards that are not playing show a poster frame; clips play only when on screen
+  (at most six, the hovered card first) and never under reduced motion or when autoplay
+  is off in Settings.
+* Layout follows the window, not the screen: the setup panel is 340 px from 1700 px,
+  300 px by default, 280 px up to 1366 px and 258 px up to 1100 px; tab and button
+  labels become icons (with accessible names) up to 1366 px; heights up to 780 px use
+  compact spacing. The first window is at most 1440 × 900 and at most 92 % × 86 % of
+  the screen; the minimum is 1024 × 640. `tools/check_layout.py` measures eleven window
+  sizes (docs/ui_layout.md) and runs in CI.

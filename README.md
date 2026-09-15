@@ -123,7 +123,7 @@ flowzoo/             engine (exhibits, runners, Result), schema (parameters), ca
 solvers/             lbm2d, ins2d, euler2d, sph2d (C++/OpenMP)
 tests/               smoke, numerics, cases, schema, jobs, media suites (all run in CI)
 docs/                theory, performance, result schema, testing, Windows build
-tools/               pipeline profiler
+tools/               pipeline profiler, layout check at eleven window sizes, card thumbnails, walkthrough recorder
 studio.py            legacy CustomTkinter UI — unsupported
 ```
 
@@ -133,7 +133,7 @@ MIT (see `LICENSE`; third-party components in `THIRD_PARTY_NOTICES.md`). Created
 Saleh Mohammadrezaei (salehmrezaee@gmail.com). If Funoos is useful in teaching or
 research, please cite it (`CITATION.cff`):
 
-> Mohammadrezaei, S. (2026). Funoos — fluid simulation laboratory (version 1.1.2)
+> Mohammadrezaei, S. (2026). Funoos — fluid simulation laboratory (version 1.2.0)
 > [Computer software]. https://github.com/SalehMohammadrezaei/Funoos
 
 Readability and keyboard access are documented in [docs/accessibility.md](docs/accessibility.md).

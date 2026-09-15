@@ -4,22 +4,22 @@ Shows what the app does, across DIFFERENT cases:
   • MANY WAYS TO SEE IT — a different view on a different scene
       (cylinder→vorticity, airfoil→streamlines, Bénard→speed, smoke→dye)
   • RECOLOR INSTANTLY — one field (Kelvin–Helmholtz) cycled through palettes
-  • EXPLORE — all 29 scenes as a live tile wall
+  • EXPLORE — all 27 experiments as a live tile wall
 Every shot uses a blurred-fill background so the whole scene shows fully (no
 black bands, nothing cropped).  Footage rendered fresh & high-res via lossless
 PNG sequences.  Clean grade — no bloom/vignette/scope bars.
-Run: ./.venv/bin/python make_promo.py
+Run: python make_promo.py   (work files in $FUNOOS_PROMO_WORK if set)
 """
-import os, subprocess, tempfile, numpy as np
+import os, shutil, subprocess, tempfile, numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import flowzoo.engine as E, flowzoo.render as R, flowzoo.catalog as C
 
-FF = "/usr/bin/ffmpeg"
+FF = shutil.which("ffmpeg") or R._ffmpeg()
 FB = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 W, H, FPS, FS, TR = 1920, 1080, 30, 28, 0.7
 ROOT = os.path.dirname(os.path.abspath(__file__)); GAL = os.path.join(ROOT, "results", "gallery")
-TMP = tempfile.mkdtemp(prefix="promo_")
+TMP = tempfile.mkdtemp(prefix="promo_", dir=os.environ.get("FUNOOS_PROMO_WORK") or None)
 SC = {s["key"]: s for s in C.SCENES}
 
 # (scene key, view, colormap, dump name, solve resolution, dump seconds)
@@ -33,11 +33,7 @@ VIEWSHOTS = [
 SHOTSUB = {"Vorticity": "2-D turbulence · pseudo-spectral", "Speed": "Rayleigh–Bénard · Navier–Stokes",
            "Streamlines": "flow through rock · lattice-Boltzmann", "Schlieren": "open-air blast · compressible Euler"}
 RECOLOR = [("Curl (cyan–amber)", "Curl"), ("Inferno", "Inferno"), ("Twilight", "Twilight"), ("Turbo", "Turbo")]
-MOSAIC = ["lbm_cylinder", "ns_smoke", "euler_city", "sph_dam", "spec_kh", "rd_mitosis",
-          "lbm_name", "ns_flame", "euler_blast", "sph_waves", "spec_decay", "rd_maze",
-          "lbm_f1", "ns_rb", "euler_bubble", "sph_ship", "mix_bands", "rd_spots",
-          "lbm_airfoil", "ns_rt", "euler_twin", "sph_slosh", "porous_phi60", "rd_stripes",
-          "lbm_cyclist", "ns_chimney", "lbm_peloton", "sph_drop", "sph_pour"]
+MOSAIC = [e["representative"] for e in C.EXPERIMENTS]        # one tile per experiment (card thumbnails)
 
 
 def run(a): subprocess.run(a, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
@@ -118,7 +114,7 @@ def intro(out):
         f"drawtext=fontfile={FB}:text='FUNOOS':fontcolor=0x8aa2ff"
         ":fontsize='if(lt(t,0.9),90+110*(t/0.9),200)':x=(w-text_w)/2:y=(h-text_h)/2-30"
         ":alpha='if(lt(t,0.25),0,if(lt(t,0.9),(t-0.25)/0.65,1))':shadowcolor=black@0.55:shadowx=0:shadowy=4,"
-        f"drawtext=fontfile={FR}:text='a fluid-dynamics studio you can watch'"
+        f"drawtext=fontfile={FR}:text='explore fluid motion through simulation'"
         ":fontcolor=0xe6ecf9:fontsize=40:x=(w-text_w)/2:y='h*0.60+26*(1-min(max((t-1.0)/0.7,0),1))'"
         ":alpha='if(lt(t,1.0),0,if(lt(t,1.7),(t-1.0)/0.7,1))',"
         f"drawtext=fontfile={FR}:text='run it · switch how you see it · recolor · measure'"
@@ -151,7 +147,7 @@ def outro(out):
 
 # ---------- scene-library tile wall: every scene shown fully (blurred-fill tiles) ----------
 def build_mosaic(keys, out, dur):
-    cols, rows = 6, 5; tw, th = W // cols, H // rows
+    cols, rows = 7, 4; tw, th = W // cols, H // rows
     logo = os.path.join(TMP, "logo_tile.png")
     img = Image.new("RGB", (tw, th), (10, 19, 34)); ImageDraw.Draw(img).text(
         (tw // 2, th // 2), "FUNOOS", font=ImageFont.truetype(FB, 38), fill=(138, 162, 255), anchor="mm")
@@ -159,7 +155,9 @@ def build_mosaic(keys, out, dur):
     n = len(keys) + 1
     coords = [(c * tw, r * th) for r in range(rows) for c in range(cols)][:n]
     inputs = []
-    for k in keys: inputs += ["-stream_loop", "-1", "-i", os.path.join(GAL, k + ".mp4")]
+    for k in keys:
+        th_clip = os.path.join(GAL, "thumbs", k + ".mp4")
+        inputs += ["-stream_loop", "-1", "-i", th_clip if os.path.exists(th_clip) else os.path.join(GAL, k + ".mp4")]
     inputs += ["-loop", "1", "-framerate", str(FPS), "-i", logo]
     parts = []
     for i in range(len(keys)):
@@ -173,7 +171,7 @@ def build_mosaic(keys, out, dur):
     parts.append("".join(f"[s{i}]" for i in range(n)) + f"xstack=inputs={n}:layout={layout}[wall]")
     post = (f"[wall]drawgrid=w={tw}:h={th}:t=3:color=0x0a1322,"
             f"zoompan=z='min(zoom+0.00035,1.045)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
-            f"drawtext=fontfile={FB}:text='29 SCENES TO EXPLORE':fontcolor=white:fontsize=36:x=96:y=60"
+            f"drawtext=fontfile={FB}:text='27 EXPERIMENTS · 48 PRESETS':fontcolor=white:fontsize=36:x=96:y=60"
             ":alpha='if(lt(t,0.5),t/0.5,1)':shadowcolor=black@0.85:shadowx=0:shadowy=3,"
             f"drawtext=fontfile={FR}:text='six methods · one app · free & open source':fontcolor=0xcdd9f2:fontsize=27"
             f":x=(w-text_w)/2:y={H-64}:alpha='if(lt(t,0.6),t/0.6,1)':shadowcolor=black@0.9:shadowx=0:shadowy=3,"
@@ -208,8 +206,8 @@ fc = []; prev = "0:v"; off = 0.0
 for k in range(1, len(segs)):
     off += durs[k - 1] - TR
     fc.append(f"[{prev}][{k}:v]xfade=transition={TRANS[k-1]}:duration={TR}:offset={off:.3f}[v{k}]"); prev = f"v{k}"
-out_mp4 = os.path.join(ROOT, "funoos_promo.mp4")
+out_mp4 = os.path.join(ROOT, "docs", "funoos_promo.mp4")
 run([FF, "-y", *inputs, "-filter_complex", ";".join(fc), "-map", f"[{prev}]",
-     "-c:v", "libx264", "-crf", "16", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_mp4])
+     "-c:v", "libx264", "-crf", "20", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_mp4])
 total = sum(durs) - TR * (len(segs) - 1)
 print(f"DONE -> {out_mp4}  ({W}x{H}, ~{total:.0f}s, {os.path.getsize(out_mp4)//1024} KB)")
