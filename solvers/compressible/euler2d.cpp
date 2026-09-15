@@ -40,6 +40,16 @@ static Args parse(int c,char**v){ Args a;
         else if(k=="--strength")a.strength=atof(x.c_str());
         else if(k=="--building")a.building=atoi(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
+    auto fail=[](const std::string& m){ fprintf(stderr,"error: %s\n",m.c_str()); exit(2); };
+    if(a.mode!="sod"&&a.mode!="blast"&&a.mode!="bubble") fail("unknown --mode (sod|blast|bubble)");
+    if(a.nx<4||a.ny<2||(long long)a.nx*a.ny>400000000LL) fail("--nx >= 4, --ny >= 2 and nx*ny <= 4e8 required");
+    if(a.steps<1||a.save_every<1) fail("--steps and --save_every must be >= 1");
+    for(double v: {a.cfl,a.tend,a.p0,a.brad,a.bubr,a.bubrho,a.mach,a.strength}) if(!std::isfinite(v)) fail("non-finite numeric argument");
+    if(a.cfl<=0||a.cfl>1.0) fail("--cfl must be in (0, 1]");
+    if(a.tend<=0) fail("--tend must be > 0");
+    if(a.p0<=0||a.bubrho<=0||a.mach<1.0) fail("--p0 and --bubrho must be > 0 and --mach >= 1");
+    if(a.brad<=0||a.brad>0.5||a.bubr<=0||a.bubr>0.5) fail("--radius/--bubr must be in (0, 0.5]");
+    if(a.nbub<1||a.nbub>2) fail("--nbub must be 1 or 2");
     return a; }
 
 struct St{ double r,u,v,p; };

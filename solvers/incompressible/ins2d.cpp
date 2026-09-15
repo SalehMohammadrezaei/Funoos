@@ -44,6 +44,15 @@ static Args parse(int c, char** v){
         else if(k=="--wind")a.wind=atof(x.c_str()); else if(k=="--zst")a.zst=atof(x.c_str());
         else if(k=="--modes")a.modes=atoi(x.c_str());
         else if(k=="--mode")a.mode=x; else if(k=="--out")a.out=x; }
+    auto fail=[](const std::string& m){ fprintf(stderr,"error: %s\n",m.c_str()); exit(2); };
+    if(a.mode!="smoke"&&a.mode!="rt"&&a.mode!="rb"&&a.mode!="flame"&&a.mode!="wind") fail("unknown --mode (smoke|rt|rb|flame|wind)");
+    if(a.nx<4||a.ny<4||(long long)a.nx*a.ny>400000000LL) fail("--nx/--ny must be >= 4 and nx*ny <= 4e8");
+    if(a.steps<1||a.save_every<1||a.iters<1) fail("--steps, --save_every and --iters must be >= 1");
+    for(double v: {a.dt,a.visc,a.buoy,a.grav,a.conf,a.srcw,a.pert,a.atwood,a.flicker,a.wind,a.zst,a.kappa})
+        if(!std::isfinite(v)) fail("non-finite numeric argument");
+    if(a.dt<=0||a.visc<0||a.kappa<0||a.srcw<=0) fail("--dt and --srcw must be > 0; --visc and --kappa >= 0");
+    if(a.kappa*a.dt>0.25) fail("--kappa*dt must be <= 0.25 (explicit diffusion stability)");
+    if(a.modes<0) fail("--modes must be >= 0");
     return a;
 }
 

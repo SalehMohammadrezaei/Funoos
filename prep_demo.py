@@ -8,11 +8,11 @@ browser. Output under results/_demo/.
 import json, sys
 from pathlib import Path
 import numpy as np
-sys.path.insert(0, "/home/impres/Saleh/FlowZoo")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import flowzoo.engine as E, flowzoo.render as R, flowzoo.postproc as P, flowzoo.catalog as C
 import funoos_app
 
-ROOT = Path("/home/impres/Saleh/FlowZoo")
+ROOT = Path(__file__).resolve().parent
 demo = ROOT / "results" / "_demo"; demo.mkdir(parents=True, exist_ok=True)
 api = funoos_app.Api()
 

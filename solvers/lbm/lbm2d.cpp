@@ -62,6 +62,15 @@ static Args parse(int argc, char** argv) {
     }
     if (a.probe_x<0) a.probe_x = a.nx*2/5;
     if (a.probe_y<0) a.probe_y = a.ny/2;
+    // validate before allocating anything (bad sizes, non-finite numbers, unstable tau, bad intervals)
+    auto fail=[](const std::string& m){ fprintf(stderr,"error: %s\n",m.c_str()); exit(2); };
+    if (a.nx<4||a.ny<4||(long long)a.nx*a.ny>400000000LL) fail("--nx/--ny must be >= 4 and nx*ny <= 4e8");
+    if (a.steps<1||a.save_every<1) fail("--steps and --save_every must be >= 1");
+    if (!std::isfinite(a.U)||!std::isfinite(a.tau)||!std::isfinite(a.force)) fail("non-finite --U/--tau/--force");
+    if (a.tau<=0.5||a.tau>10.0) fail("--tau must be in (0.5, 10] (nu = (tau-0.5)/3 > 0)");
+    if (std::fabs(a.U)>0.5) fail("--U must satisfy |U| <= 0.5 (lattice units; keep well below 0.3)");
+    if (a.fdir!=0&&a.fdir!=1) fail("--fdir must be 0 (x) or 1 (y)");
+    if (a.probe_x<0||a.probe_x>=a.nx||a.probe_y<0||a.probe_y>=a.ny) fail("probe outside the grid");
     return a;
 }
 
@@ -73,6 +82,9 @@ int main(int argc, char** argv) {
     std::vector<unsigned char> solid(N, 0);
     if (!a.mask.empty()) {
         std::ifstream f(a.mask, std::ios::binary);
+        if (!f) { fprintf(stderr,"error: mask file not found: %s\n", a.mask.c_str()); return 2; }
+        f.seekg(0, std::ios::end); long long sz=f.tellg(); f.seekg(0, std::ios::beg);
+        if (sz < (long long)a.nx*a.ny) { fprintf(stderr,"error: mask file truncated (%lld bytes, need %lld)\n", sz, (long long)a.nx*a.ny); return 2; }
         if (!f) { fprintf(stderr,"cannot open mask %s\n", a.mask.c_str()); return 1; }
         f.read((char*)solid.data(), N);
     }

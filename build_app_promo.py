@@ -2,10 +2,11 @@
 title card -> walkthrough (with burned-in headlines) -> all-29-scenes tile wall
 -> end card.  2560x1440. -> funoos_app_promo.mp4
 """
+from pathlib import Path
 import glob, os, subprocess
 from PIL import Image, ImageDraw, ImageFont
 
-ROOT = "/home/impres/Saleh/FlowZoo"
+ROOT = str(Path(__file__).resolve().parent)
 FF = "/usr/bin/ffmpeg"
 FB = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"

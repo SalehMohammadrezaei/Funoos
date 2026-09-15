@@ -10,7 +10,7 @@ from pathlib import Path
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from playwright.sync_api import sync_playwright
 
-ROOT = Path("/home/impres/Saleh/FlowZoo")
+ROOT = Path(__file__).resolve().parent
 demo = ROOT / "results" / "_demo"
 PORT = 8137
 W, H = 2560, 1440

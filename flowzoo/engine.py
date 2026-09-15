@@ -156,18 +156,19 @@ def _ensure(b):
         subprocess.run(["make", "-C", str(b.parent)], check=True, env=_ENV)
 
 
+from . import io as fio   # noqa: E402  (solver output readers live in one place)
+
+
 def _read_vel(d, i, nx, ny):
-    b = np.fromfile(Path(d) / f"frame_{i:05d}.bin", dtype=np.float32)
-    return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
+    return fio.read_frame(d, i, nx, ny)
 
 
 def _read_scalar(d, i, nx, ny):
-    return np.fromfile(Path(d) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(ny, nx).copy()
+    return fio.read_scalar(d, i, nx, ny)
 
 
 def _nframes(d):
-    return int([l.split()[1] for l in (Path(d) / "meta.txt").read_text().splitlines()
-                if l.startswith("nframes")][0])
+    return int(fio.read_meta(d)["nframes"])
 
 
 RES = {"Low (fast)": 0.6, "Medium": 1.0, "High": 1.35, "Ultra (slow)": 1.8}
@@ -642,12 +643,7 @@ def _solve_porous(p, pr, tmp):
     n = _nframes(tmp); use = range(n // 3, n, max(1, (n - n // 3) // 70))
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
     times = [float(i * max(1, steps // 120)) for i in use]
-    meta = {}
-    for line in (Path(tmp) / "meta.txt").read_text().splitlines():
-        kk = line.split()
-        if len(kk) == 2:
-            try: meta[kk[0]] = float(kk[1])
-            except ValueError: pass
+    meta = fio.read_meta(tmp)
     poro = meta.get("porosity", phi); perm = meta.get("permeability", 0.0)
     hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force, "tau": tau,
              "direction": "y" if fdir else "x", "seed": int(p.get("seed", 1)),
@@ -697,10 +693,7 @@ def _solve_ns(mode, p, pr, tmp):
     save_every = max(1, steps // 110)
     times = [float(i * save_every) for i in idx]             # solver steps (dt = 1 in ins2d)
 
-    def _rv(i):                                              # read the vel_*.bin field
-        b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
-        return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
-    hints["vel"] = [_rv(i) for i in idx]                     # for Speed/Vorticity/Streamlines
+    hints["vel"] = [fio.read_frame(tmp, i, nx, ny, prefix="vel") for i in idx]   # for Speed/Vorticity/Streamlines
     hints["ns_mode"] = mode                                  # so diagnostics can pick the right plot
     hints.update({"time_unit": "solver steps (dt = 1)", "steps": steps, "dx": 1.0, "nu": float(p["viscosity"])})
     mask = None
@@ -749,11 +742,8 @@ def _solve_euler(mode, p, pr, tmp):
     hints.update({"time_unit": "code units (ρ=1, p=1 ambient; c = √γ)" if len(all_t) >= n else "frame",
                   "tend": tend, "dx": 1.0 / nx})
 
-    def _rv(i):
-        b = np.fromfile(Path(tmp) / f"vel_{i:05d}.bin", dtype=np.float32)
-        return b[: nx * ny].reshape(ny, nx).copy(), b[nx * ny:].reshape(ny, nx).copy()
     if (Path(tmp) / f"vel_{idx[0]:05d}.bin").exists():
-        hints["vel"] = [_rv(i) for i in idx]
+        hints["vel"] = [fio.read_frame(tmp, i, nx, ny, prefix="vel") for i in idx]
     sp = Path(tmp) / "solid.bin"
     if sp.exists():
         hints["solid"] = np.fromfile(sp, dtype=np.float32).reshape(ny, nx) > 0.5

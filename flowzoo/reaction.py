@@ -33,16 +33,21 @@ def _lap(a):
 
 
 def gray_scott(n=256, F=0.035, k=0.065, Du=0.16, Dv=0.08, steps=10000,
-               nframes=120, seed=0, progress=None):
+               nframes=120, seed=0, progress=None, nseeds=None, noise=0.02):
+    """Gray–Scott on an n×n periodic grid. `nseeds` blobs of V (default: 8–15, from the
+    seed) plus Gaussian `noise` start the pattern; nseeds=0 and noise=0 give the uniform
+    state (U=1, V=0), which is a fixed point. U and V are clipped to [0, 1] every step —
+    a numerical intervention, reported in the scene notes."""
     rng = np.random.default_rng(seed)
     U = np.ones((n, n)); V = np.zeros((n, n))
-    # seed a few noisy blobs of V
-    for _ in range(rng.integers(8, 16)):
+    nb = int(rng.integers(8, 16)) if nseeds is None else int(nseeds)
+    for _ in range(nb):
         cx, cy = rng.integers(0, n, 2); r = rng.integers(6, 14)
         y, x = np.ogrid[:n, :n]
         m = (x - cx) ** 2 + (y - cy) ** 2 <= r * r
         U[m] = 0.50; V[m] = 0.25
-    U += 0.02 * rng.standard_normal((n, n)); V += 0.02 * rng.standard_normal((n, n))
+    if noise:
+        U += noise * rng.standard_normal((n, n)); V += noise * rng.standard_normal((n, n))
     U = np.clip(U, 0, 1); V = np.clip(V, 0, 1)
     every = max(1, steps // nframes); pevery = max(1, steps // 50)
     frames = []

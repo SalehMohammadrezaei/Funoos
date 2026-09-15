@@ -43,6 +43,17 @@ static Args parse(int c,char**v){ Args a;
         else if(k=="--pourv")a.pourv=atof(x.c_str()); else if(k=="--waveA")a.waveA=atof(x.c_str());
         else if(k=="--waveT")a.waveT=atof(x.c_str()); else if(k=="--shipsz")a.shipsz=atof(x.c_str());
         else if(k=="--save_every")a.save_every=atoi(x.c_str()); else if(k=="--out")a.out=x; }
+    auto fail=[](const std::string& m){ fprintf(stderr,"error: %s\n",m.c_str()); exit(2); };
+    static const char* scenes[]={"dam","drop","slosh","pour","waves","ship","rest"};
+    bool ok=false; for(const char* s: scenes) if(a.scene==s) ok=true;
+    if(!ok) fail("unknown --scene (dam|drop|slosh|pour|waves|ship|rest)");
+    for(double v: {a.a,a.H,a.Lx,a.Ly,a.dp,a.g,a.tend,a.dh,a.sloshA,a.sloshT,a.sw,a.pourv,a.waveA,a.waveT,a.shipsz})
+        if(!std::isfinite(v)) fail("non-finite numeric argument");
+    if(a.Lx<=0||a.Ly<=0||a.dp<=0||a.g<=0||a.tend<=0) fail("--Lx, --Ly, --dp, --g and --tend must be > 0");
+    if(a.Lx/a.dp*a.Ly/a.dp>4.0e7) fail("--dp too small for the tank (more than 4e7 particle sites)");
+    if(a.a<=0||a.H<=0||a.a>a.Lx||a.H>a.Ly) fail("--a/--H must be > 0 and fit inside the tank");
+    if(a.sloshT<=0||a.waveT<=0||a.shipsz<=0) fail("--sloshT, --waveT and --shipsz must be > 0");
+    if(a.save_every<1) fail("--save_every must be >= 1");
     return a; }
 
 int main(int argc,char**argv){

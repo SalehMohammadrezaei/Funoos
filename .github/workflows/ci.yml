@@ -36,6 +36,7 @@ jobs:
           python tests/test_media.py
           python tests/test_schema.py
           python tests/test_cases.py
+          python tests/test_matrix.py
 
   package-linux:
     runs-on: ubuntu-latest

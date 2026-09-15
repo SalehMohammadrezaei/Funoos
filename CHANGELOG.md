@@ -29,7 +29,9 @@ Cases and explanations (stage 5)
 
 Packaging and tests (stage 6)
 * Pinned requirements and `pyproject.toml`; build scripts run from their own directory, package only the needed assets, and run a self-test of the packaged app; release checksums; Linux backend and WebView2 hints; legacy `studio.py` marked unsupported.
-* Test suites for cases, schema, jobs and media added to CI; a Linux packaging job runs the self-test.
+* Test suites for cases, matrix (solver properties), schema, jobs and media added to CI; a Linux packaging job runs the self-test.
+* Native solvers validate their arguments (sizes, non-finite numbers, intervals, unknown modes, truncated masks) and fail with a message before allocating.
+* Solver-output readers consolidated in `flowzoo/io.py`; promotional/demo scripts use portable paths.
 
 ## 1.0.1
 * macOS disk image built on GitHub runners; stage-1 numerical fixes.
