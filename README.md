@@ -2,13 +2,13 @@
 
 ### Explore fluid motion through simulation.
 
-Funoos (فانوس — "lantern") is a desktop application for exploring two-dimensional
+Funoos (فانوس, "lantern") is a desktop application for exploring two-dimensional
 fluid motion and pattern formation. Choose an experiment, adjust its setup, and
 inspect the resulting fields and measurements. Each scene explains its model, its
 numerical method and the checks that have been made. It started as a spare-time
 project to make computational fluid dynamics easier to *see*; it is now an
 interactive laboratory where you can change a setup, compare experiments and
-inspect results you can trust — with the limits of every model stated.
+inspect results you can trust, with the limits of every model stated.
 
 Five solvers written from scratch (four in C++/OpenMP, one in Python/FFT) plus a
 reaction–diffusion model drive 27 experiments with 48 named presets, organised by
@@ -16,8 +16,8 @@ phenomenon: wakes and aerodynamics, porous media, buoyancy and convection, shock
 free surfaces and waves, vortices and mixing, pattern formation
 ([docs/gallery_map.md](docs/gallery_map.md)).
 
-<p align="center"><img src="results/gallery/lbm_cylinder.gif" width="46%"> <img src="results/gallery/euler_blast.gif" width="46%"></p>
-<p align="center"><img src="results/gallery/sph_dam.gif" width="46%"> <img src="results/gallery/spec_kh.gif" width="46%"></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4"><img src="docs/funoos_promo_poster.jpg" width="92%" alt="Funoos video: the 27 experiments"></a></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4">▶ Watch the 30-second video</a></p>
 
 ## What you can do
 
@@ -35,7 +35,7 @@ free surfaces and waves, vortices and mixing, pattern formation
   runs side by side synchronised by simulation time with one shared colour scale.
 * **Reproduce**: save the complete resolved setup (parameters, derived quantities,
   solver provenance, output times) to a file and load it later; named presets; undo/redo.
-* **Understand**: each scene page is layered — what you are seeing, what to try, what
+* **Understand**: each scene page is layered: what you are seeing, what to try, what
   to observe, the physics, the mathematical model, the actual initial and boundary
   conditions, the numerical method, the checks and limitations, further reading.
 
@@ -61,7 +61,7 @@ mechanism; drag from the wake deficit is an approximation.
 
 ## Install and run
 
-**Windows — installer.** Download `Funoos-Setup.exe` from the
+**Windows installer.** Download `Funoos-Setup.exe` from the
 [Releases](https://github.com/SalehMohammadrezaei/Funoos/releases) page and check its
 SHA-256 against the value listed there. The app is free, open source and not
 code-signed, so SmartScreen shows an "unknown publisher" warning the first time:
@@ -69,7 +69,7 @@ choose *More info → Run anyway*. Needs the WebView2 runtime (preinstalled on W
 10/11; the app prints a hint if it is missing). Building the installer yourself:
 [docs/windows_build.md](docs/windows_build.md).
 
-**macOS (Apple Silicon) — disk image.** Download `Funoos-macOS-arm64.dmg` and its
+**macOS (Apple Silicon) disk image.** Download `Funoos-macOS-arm64.dmg` and its
 checksum from the Releases page, open it and drag Funoos into Applications. It is
 built on GitHub's macOS runners by `build_mac.sh` and is not notarized: on first
 launch use *right-click → Open → Open*, or `xattr -cr /Applications/Funoos.app`.
@@ -124,7 +124,7 @@ solvers/             lbm2d, ins2d, euler2d, sph2d (C++/OpenMP)
 tests/               smoke, numerics, cases, schema, jobs, media suites (all run in CI)
 docs/                theory, performance, result schema, testing, Windows build
 tools/               pipeline profiler, layout check at eleven window sizes, card thumbnails, walkthrough recorder
-studio.py            legacy CustomTkinter UI — unsupported
+studio.py            legacy CustomTkinter UI, unsupported
 ```
 
 ## Citation and licence
@@ -133,7 +133,7 @@ MIT (see `LICENSE`; third-party components in `THIRD_PARTY_NOTICES.md`). Created
 Saleh Mohammadrezaei (salehmrezaee@gmail.com). If Funoos is useful in teaching or
 research, please cite it (`CITATION.cff`):
 
-> Mohammadrezaei, S. (2026). Funoos — fluid simulation laboratory (version 1.2.0)
+> Mohammadrezaei, S. (2026). Funoos: fluid simulation laboratory (version 1.2.0)
 > [Computer software]. https://github.com/SalehMohammadrezaei/Funoos
 
 Readability and keyboard access are documented in [docs/accessibility.md](docs/accessibility.md).
