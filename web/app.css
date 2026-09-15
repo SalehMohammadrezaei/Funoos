@@ -162,6 +162,7 @@ h2{font-size:17px;font-weight:700}
 .cancelbtn{margin-top:8px;padding:11px;font-size:13px;border-color:rgba(220,90,90,.55)}
 .cancelbtn:disabled{opacity:.5;cursor:default}
 .status{margin-top:10px;font-size:12px;color:var(--muted);min-height:16px}
+.estimate{font-size:11px;margin-top:4px;min-height:14px;color:var(--dim)}
 
 .t-stage .viewbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .seg{display:flex;background:var(--glass-2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:2px}
@@ -172,6 +173,7 @@ h2{font-size:17px;font-weight:700}
 .spacer{flex:1}
 .screen{flex:1;border-radius:var(--r);overflow:hidden;background:#06101f;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;position:relative;min-height:0;box-shadow:var(--shadow)}
 .screen video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none}
+.screen .still{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:2}
 .screen .hint{color:var(--muted);text-align:center;font-size:14px;line-height:1.7;padding:20px}
 .plots{position:absolute;inset:0;background:rgba(8,16,30,.96);overflow-y:auto;padding:18px;display:none}
 .plots .kicker{margin:10px 0 8px}.plots img{width:100%;border-radius:12px;margin-bottom:14px;border:1px solid var(--line-2)}

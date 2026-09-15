@@ -86,6 +86,7 @@
           <button class="btn btn-primary runbtn" id="s-run" onclick="runSim()">▶  Run simulation</button>
           <button class="btn btn-ghost runbtn cancelbtn" id="s-cancel" onclick="cancelSim()" style="display:none">■  Cancel</button>
           <div class="status" id="s-status">Ready.</div>
+          <div class="estimate muted" id="s-estimate" aria-live="polite"></div>
         </div>
 
         <div class="tile t-stage">
@@ -99,6 +100,7 @@
           </div>
           <div class="screen glass">
             <video id="s-video" loop playsinline></video>
+            <img id="s-still" class="still" alt="" style="display:none">
             <div class="hint" id="s-hint">Pick a scene from the Gallery, set parameters,<br>then Run ▶ — switch views live.</div>
             <div class="skel" id="s-skel">
               <div class="msg" id="s-skelmsg">simulating…</div>

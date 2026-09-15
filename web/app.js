@@ -5,7 +5,7 @@ let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS =
 // counters — a response is applied only if its token is still the latest of its
 // kind, so an older render/detail/diagnostics reply can never overwrite a newer one.
 let JOB = null;
-const REQ = { run: 0, view: 0, detail: 0, diag: 0 };
+const REQ = { run: 0, view: 0, detail: 0, diag: 0, est: 0 };
 const nextReq = k => ++REQ[k];
 const isCurrent = (k, t) => REQ[k] === t;
 
@@ -24,6 +24,23 @@ async function call(name, ...args) {
 }
 const errText = e => (e && e.message) ? e.message : (typeof e === "string" ? e : (e && e.error) || String(e));
 const newId = () => "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// A still image shown in the stage while the clip is still encoding (first useful output).
+window.onPreview = (jobId, png, label) => {
+  if (!(JOB && JOB.id === jobId)) return;
+  showStill(png, label, true);
+};
+function showStill(png, label, keepSkel) {
+  const im = $("#s-still"); if (!im) return;
+  im.src = png; im.style.display = "block"; im.alt = label || "preview";
+  const v = $("#s-video"); if (v) v.style.opacity = 0.0;
+  const sm = $("#s-skelmsg"); if (sm && label) sm.textContent = label;
+  if (!keepSkel) $("#s-skel").classList.remove("on");
+}
+function hideStill() {
+  const im = $("#s-still"); if (im) { im.style.display = "none"; im.removeAttribute("src"); }
+  const v = $("#s-video"); if (v) v.style.opacity = 1;
+}
 window.onProgress = (m, jobId) => {
   if (jobId && !(JOB && JOB.id === jobId)) return;            // progress from a superseded/cancelled job
   if (JOB && JOB.cancelling) return;                           // keep "cancelling…" on screen
@@ -33,18 +50,26 @@ window.onProgress = (m, jobId) => {
   if (f && pm) { f.style.width = pm[1] + "%"; f.parentElement.style.opacity = 1; }
 };
 
+let GAL_SCROLL = 0;
 function show(v) {
+  if (CUR === "gallery") { const r = $("#gallery-scroll"); if (r) GAL_SCROLL = r.scrollTop; }   // remember position
   document.querySelectorAll(".view").forEach(x => x.classList.remove("active"));
   $("#" + v).classList.add("active");
   document.querySelectorAll(".railbtn").forEach(b => b.classList.toggle("on", b.dataset.view === v));
   CUR = v;
   $("#heroCanvas").style.opacity = v === "intro" ? 0.5 : 0.1;
   if (v !== "studio") { const sv = $("#s-video"); if (sv) sv.pause(); }
+  if (v !== "gallery") document.querySelectorAll("#gallery-grid video").forEach(x => x.pause());   // hidden clips stay paused
+  else document.querySelectorAll("#gallery-grid video").forEach(x => { if (_visible.has(x)) x.play().catch(() => {}); });
+  if (v !== "detail") { const dv = $("#d-video"); if (dv) dv.pause(); } else { const dv = $("#d-video"); if (dv) dv.play().catch(() => {}); }
   if (v === "intro") { revealAll($("#intro")); runCounters(); }
-  if (v === "gallery") { const r = $("#gallery-scroll"); if (r) r.scrollTop = 0; }   // open at the top
+  if (v === "gallery") { const r = $("#gallery-scroll"); if (r) r.scrollTop = GAL_SCROLL; }
+  heroActive(v === "intro" && !JOB && !REDUCED);
 }
 function revealAll(root) {
-  root.querySelectorAll(".reveal").forEach((e, i) => { e.classList.remove("in"); setTimeout(() => e.classList.add("in"), 80 + i * 90); });
+  root.querySelectorAll(".reveal").forEach((e, i) => {
+    if (REDUCED) { e.classList.add("in"); return; }               // no staged reveal for reduced motion
+    e.classList.remove("in"); setTimeout(() => e.classList.add("in"), 80 + i * 90); });
 }
 
 /* cursor spotlight — glows through the glass */
@@ -64,6 +89,7 @@ function runCounters() {
   if (countersDone) return; countersDone = true;
   document.querySelectorAll(".stat .n").forEach(n => {
     const target = +n.dataset.count, t0 = performance.now(), dur = 1100;
+    if (REDUCED) { n.textContent = target; return; }
     const tick = now => { const p = Math.min(1, (now - t0) / dur); n.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
   });
@@ -86,8 +112,11 @@ const SCHEME = {
   "Pseudo-spectral": "FFT", "Reaction–Diffusion": "Gray–Scott"
 };
 // play only the cards currently on screen (keeps 29 clips light)
+const _visible = new Set();
 const _vio = new IntersectionObserver(es => es.forEach(e => {
-  const v = e.target; if (e.isIntersecting) v.play().catch(() => {}); else v.pause();
+  const v = e.target;
+  if (e.isIntersecting) { _visible.add(v); if (CUR === "gallery") v.play().catch(() => {}); }
+  else { _visible.delete(v); v.pause(); }
 }), { root: null, threshold: 0.15 });
 
 async function buildGallery() {
@@ -186,13 +215,28 @@ function openStudio(d) {
   for (const q of SPEC) PSTATE[q.name] = q.default;
   if (d.preset) for (const k in d.preset) PSTATE[k] = d.preset[k];
   $("#s-name").textContent = (d.name || "parameters").toUpperCase();
-  renderParams();
-  RUN = null; $("#s-video").style.display = "none"; $("#s-hint").style.display = "block";
+  renderParams(); refreshEstimate();
+  RUN = null; $("#s-video").style.display = "none"; $("#s-hint").style.display = "block"; hideStill();
   $("#s-views").innerHTML = ""; $("#s-cmap").innerHTML = ""; $("#s-plotpanel").style.display = "none";
   $("#s-kpis").innerHTML = '<div class="muted" style="font-size:12px">Run a simulation to see live readouts.</div>';
   $("#s-status").textContent = "Ready."; setRunning(false); show("studio");
 }
 function visible(q) { return !q.when || q.when[1].includes(PSTATE[q.when[0]]); }
+let _estT = null;
+function refreshEstimate() {
+  clearTimeout(_estT);
+  _estT = setTimeout(async () => {
+    if (!CUR_EXH) return;
+    const t = nextReq("est");
+    try {
+      const e = await call("estimate", CUR_EXH, { ...PSTATE });
+      if (!isCurrent("est", t)) return;
+      const el_ = $("#s-estimate"); if (!el_) return;
+      const secs = e.seconds < 90 ? Math.round(e.seconds) + " s" : Math.round(e.seconds / 60) + " min";
+      el_.textContent = `≈ ${e.grid[0]}×${e.grid[1]} grid · ${e.frames} frames · ${e.mb} MB · ~${secs} (estimate, ${e.threads} threads)`;
+    } catch (err) { /* estimate is advisory */ }
+  }, 250);
+}
 function renderParams() {
   const root = $("#s-params"); root.innerHTML = ""; const groups = {};
   for (const q of SPEC) { if (!visible(q)) continue; (groups[q.group] || (groups[q.group] = [])).push(q); }
@@ -209,10 +253,10 @@ function field(q) {
   if (q.type === "choice") {
     inp = el("select");
     for (const c of q.choices) { const o = el("option", null, c); o.value = c; if (c === PSTATE[q.name]) o.selected = true; inp.append(o); }
-    inp.onchange = () => { PSTATE[q.name] = inp.value; renderParams(); };
+    inp.onchange = () => { PSTATE[q.name] = inp.value; renderParams(); refreshEstimate(); };
   } else {
     inp = el("input"); inp.type = "text"; inp.value = PSTATE[q.name];
-    inp.oninput = () => { PSTATE[q.name] = q.type === "float" ? parseFloat(inp.value) : inp.value; };
+    inp.oninput = () => { PSTATE[q.name] = q.type === "float" ? parseFloat(inp.value) : inp.value; refreshEstimate(); };
   }
   f.append(inp); return f;
 }
@@ -223,13 +267,13 @@ async function runSim() {
   setRunning(true);
   $("#s-skel").classList.add("on"); $("#s-hint").style.display = "none"; $("#s-plotpanel").style.display = "none";
   const pf = $("#s-pfill"); if (pf) { pf.style.width = "0%"; } $("#s-skelmsg").textContent = "preparing…";
-  $("#s-status").textContent = "⏳ preparing…";
+  $("#s-status").textContent = "⏳ preparing…"; heroActive(false);
   const view = (RUN && RUN.view) || null, cmap = $("#s-cmap").value || CUR_CMAP;   // keep the user's colour choice
   let r = null, err = null;
   try { r = await api().run(JOB.exhibit, JOB.params, view, cmap, 26, JOB.id); }
   catch (e) { err = errText(e); }
   if (!isCurrent("run", t)) return;                            // scene changed / newer run: this reply is stale
-  JOB = null; setRunning(false); $("#s-skel").classList.remove("on");
+  JOB = null; setRunning(false); $("#s-skel").classList.remove("on"); hideStill(); heroActive(CUR === "intro" && !REDUCED);
   if (r && r.ok) {                                             // the previous RUN is replaced only now
     RUN = r; FPS = 26;
     buildViewbar(r); setVideo(r.video, false); renderKPIs(r.stats || []);
@@ -299,20 +343,31 @@ async function switchView(v) {
   try {
     const r = await call("render_view", rid, v, $("#s-cmap").value, 26, t);
     if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;   // stale: a newer view/run won
-    RUN.view = r.view; setVideo(r.video, true);
+    hideStill(); RUN.view = r.view; setVideo(r.video, true);
     document.querySelectorAll("#s-views button").forEach(b => b.classList.toggle("on", b.textContent === r.view));
     $("#s-status").textContent = "✓ " + RUN.info;
-  } catch (e) { if (isCurrent("view", t)) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
+  } catch (e) { if (isCurrent("view", t) && !/superseded/.test(errText(e))) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
   if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 async function recolor() {
   if (!RUN) return;
-  const t = nextReq("view"), rid = RUN.run_id; setBusy("recolouring…");
+  const t = nextReq("view"), rid = RUN.run_id, cmap = $("#s-cmap").value;
+  const v = $("#s-video"), frac = (v.duration ? v.currentTime / v.duration : 1.0);
+  // 1) instant: re-map the frame on screen with the new palette (one PNG, no encoding)
   try {
-    const r = await call("render_view", rid, RUN.view, $("#s-cmap").value, 26, t);
+    const p = await call("preview_frame", rid, RUN.view, cmap, frac, t);
     if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;
-    setVideo(r.video, true); $("#s-status").textContent = "✓ " + RUN.info;
-  } catch (e) { if (isCurrent("view", t)) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
+    showStill(p.img, "palette preview · encoding clip…", false);
+  } catch (e) { /* fall through to the clip */ }
+  // 2) then the full clip (cached per palette after the first time)
+  try {
+    const r = await call("render_view", rid, RUN.view, cmap, 26, t);
+    if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;
+    hideStill(); setVideo(r.video, true); $("#s-status").textContent = "✓ " + RUN.info + (r.cached ? "  (cached)" : "");
+  } catch (e) {
+    if (!isCurrent("view", t)) return;
+    if (!/superseded/.test(errText(e))) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); }
+  }
   if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 function setBusy(msg) { $("#s-skel").classList.add("on"); $("#s-skelmsg").textContent = msg; $("#s-status").textContent = "⏳ " + msg; }
@@ -394,8 +449,17 @@ function toast(msg, kind) {
     return [Math.cos(y * s + t) + 0.6 * Math.sin((x + y) * s * 0.7 - t * 0.7),
             Math.sin(x * s - t * 0.8) + 0.6 * Math.cos((x - y) * s * 0.6 + t)];
   }
-  let t = 0;
-  (function frame() {
+  let t = 0, active = !REDUCED, raf = null;
+  window.heroActive = on => {
+    const want = !!on && !REDUCED;
+    if (want === active) return;
+    active = want; if (active && raf === null) raf = requestAnimationFrame(frame);
+  };
+  if (REDUCED) { ctx.fillStyle = "rgba(7,13,24,1)"; ctx.fillRect(0, 0, W, H); }
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { active = false; } else if (CUR === "intro" && !JOB && !REDUCED) window.heroActive(true); });
+  function frame() {
+    raf = null;
+    if (!active) return;
     t += 0.0016;
     ctx.fillStyle = "rgba(7,13,24,0.10)"; ctx.fillRect(0, 0, W, H);
     for (const p of P) {
@@ -406,6 +470,7 @@ function toast(msg, kind) {
       ctx.strokeStyle = `hsla(${hue},80%,68%,0.5)`; ctx.lineWidth = 1.1;
       ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(p.x, p.y); ctx.stroke();
     }
-    requestAnimationFrame(frame);
-  })();
+    raf = requestAnimationFrame(frame);
+  }
+  if (active) raf = requestAnimationFrame(frame);
 })();
