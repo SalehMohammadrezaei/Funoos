@@ -34,14 +34,15 @@ RES = sys.argv[1] if len(sys.argv) > 1 else "High"
 DUR = float(sys.argv[2]) if len(sys.argv) > 2 else 1.6
 ONLY = set(sys.argv[3].split(",")) if len(sys.argv) > 3 else None   # optional key list
 
-t_all = time.time()
+t_all = time.time(); failed = []
 for s in catalog.SCENES:
     if ONLY and s["key"] not in ONLY:
         continue
     name, key = s["exhibit"], s["key"]
     params = {qd["name"]: qd["default"] for qd in engine.EXHIBITS[name]["params"]}
     params.update(s["preset"])
-    params["resolution"] = RES
+    if "resolution" in params:
+        params["resolution"] = RES
     if "duration" in params:
         params["duration"] = DUR
     print(f"[{key}] {s['name']}  ({name}, res={RES}, dur={DUR})…", flush=True)
@@ -58,5 +59,8 @@ for s in catalog.SCENES:
             print(f"   (mp4 skipped: {e})", flush=True)
         print(f"   ✓ {len(frames)} frames in {time.time()-t0:.0f}s -> gallery/{key}.gif", flush=True)
     except Exception as e:
-        print(f"   ✗ FAILED: {e}", flush=True)
+        failed.append(key); print(f"   ✗ FAILED: {e}", flush=True)
+if failed:
+    print(f"GALLERY INCOMPLETE: {len(failed)} scene(s) failed: {', '.join(failed)}", flush=True)
+    sys.exit(1)
 print(f"ALL GALLERY CLIPS DONE in {time.time()-t_all:.0f}s", flush=True)

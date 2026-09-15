@@ -284,3 +284,32 @@ input[type=range]{accent-color:var(--blue-br)}
 #s-probe.on{background:linear-gradient(180deg,var(--blue-br),var(--blue));color:#fff}
 .screen{overflow:hidden;touch-action:none}
 .plots .linkbtn{margin-bottom:12px}
+
+/* ── gallery by phenomenon, filters, favourites ── */
+.galtools{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+.galtools input,.galtools select{background:var(--glass-2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:8px 12px;font-family:var(--font);font-size:12.5px;min-width:200px}
+.galtools .linkbtn[aria-pressed="true"]{color:#fff;background:var(--glass-hi);border-color:var(--blue-br)}
+.sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.ghead{grid-column:1/-1;display:flex;align-items:baseline;gap:12px;margin:18px 4px 0}
+.ghead h2{font-family:var(--display);font-size:20px;color:#fff}
+.gcard .noclip{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim);font-size:12px}
+.gcard:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.favbtn{position:absolute;right:12px;bottom:10px;background:rgba(8,13,24,.62);border:1px solid var(--glass-hi);color:var(--muted);border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:14px}
+.favbtn.on{color:var(--lime);border-color:rgba(225,252,102,.5)}
+.statusbadge,.pill.status-analytical,.pill.status-numerical,.pill.status-qualitative{font-size:10.5px;font-weight:700;letter-spacing:.04em;border-radius:20px;padding:4px 10px;border:1px solid var(--line)}
+.status-analytical{color:#a9e6a0;border-color:rgba(120,220,140,.5)!important}
+.status-numerical{color:#93b2f1;border-color:rgba(110,150,255,.5)!important}
+.status-qualitative{color:#e0a23a;border-color:rgba(224,162,58,.5)!important}
+.dq{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:14px}
+/* ── layered explanation ── */
+.layer{margin-bottom:10px;border:1px solid var(--line-2);border-radius:12px;padding:8px 12px;background:rgba(255,255,255,.03)}
+.layer summary{cursor:pointer;display:flex;align-items:center;gap:10px;list-style:none}
+.layer summary::-webkit-details-marker{display:none}
+.layer summary::before{content:"▸";color:var(--muted);font-size:12px}
+.layer[open] summary::before{content:"▾"}
+.layer .body{margin-top:8px;font-size:13.5px;white-space:pre-line}
+.layer .tries{margin:8px 0 2px 18px;color:var(--read);font-size:13.5px;line-height:1.6}
+.layer .small{font-size:11px;margin-top:6px}
+.helppanel .layer .body{font-size:12.5px}
+.helppanel .kicker{margin-bottom:6px}
+#s-scene{max-width:200px}

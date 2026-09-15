@@ -15,9 +15,9 @@
   <!-- persistent rail -->
   <nav id="rail">
     <div class="logo">F</div>
-    <button class="railbtn" data-view="intro" onclick="show('intro')">⌂<span class="lbl">Home</span></button>
-    <button class="railbtn" data-view="gallery" onclick="show('gallery')">▦<span class="lbl">Gallery</span></button>
-    <button class="railbtn" data-view="studio" onclick="show('studio')">⚙<span class="lbl">Studio</span></button>
+    <button class="railbtn" data-view="intro" onclick="show('intro')" aria-label="Home">⌂<span class="lbl">Home</span></button>
+    <button class="railbtn" data-view="gallery" onclick="show('gallery')" aria-label="Gallery">▦<span class="lbl">Gallery</span></button>
+    <button class="railbtn" data-view="studio" onclick="show('studio')" aria-label="Studio">⚙<span class="lbl">Studio</span></button>
     <div class="railspace"></div>
   </nav>
 
@@ -27,19 +27,19 @@
     <section class="view active" id="intro">
       <div class="wrap">
         <div class="wordmark reveal"><span class="fun">FUN</span><span class="oos">OOS</span></div>
-        <div class="tagline reveal">Where imagination becomes vision.</div>
-        <div class="subtitle reveal">A visual exhibition of worlds in motion<br>flows illuminated through simulation.</div>
+        <div class="tagline reveal">Explore fluid motion through simulation.</div>
+        <div class="subtitle reveal">A desktop laboratory for two-dimensional fluid motion and pattern formation.<br>Choose an experiment, adjust its setup, and inspect the resulting fields and measurements.</div>
         <div class="statrow reveal">
-          <div class="stat"><div class="n" data-count="6">0</div><div class="l">methods</div></div>
-          <div class="stat"><div class="n" data-count="29">0</div><div class="l">scenes</div></div>
-          <div class="stat"><div class="n" data-count="5">0</div><div class="l">solvers</div></div>
+          <div class="stat"><div class="n" id="n-methods" data-count="6">0</div><div class="l">methods</div></div>
+          <div class="stat"><div class="n" id="n-scenes" data-count="44">0</div><div class="l">experiments</div></div>
+          <div class="stat"><div class="n" id="n-solvers" data-count="5">0</div><div class="l">solvers</div></div>
         </div>
         <div class="introchips reveal">
           <span class="chip">Lattice-Boltzmann</span><span class="chip">Navier–Stokes</span>
           <span class="chip">Compressible Euler</span><span class="chip">SPH</span>
           <span class="chip">Spectral</span><span class="chip">Reaction–Diffusion</span>
         </div>
-        <button class="btn btn-primary cta reveal" onclick="show('gallery')">Enter the gallery →</button>
+        <button class="btn btn-primary cta reveal" onclick="show('gallery')">Explore the simulations →</button>
         <div class="credit reveal">
           <div class="kicker">created by</div>
           <div class="name">Saleh Mohammadrezaei</div>
@@ -53,8 +53,16 @@
       <div class="body scroll" id="gallery-scroll">
         <div class="gal-head">
           <div class="kicker">gallery</div>
-          <h1>Worlds in Motion</h1>
-          <div class="gal-sub">Twenty-nine simulations across six numerical methods.</div>
+          <h1>Explore the simulations</h1>
+          <div class="gal-sub" id="gal-sub">Experiments organised by phenomenon.</div>
+          <div class="galtools" role="search">
+            <label class="sr" for="g-search">Search scenes</label>
+            <input id="g-search" type="search" placeholder="search scenes, questions, methods…" oninput="setFilter('q', this.value)">
+            <label class="sr" for="g-method">Filter by numerical method</label>
+            <select id="g-method" onchange="setFilter('method', this.value)"></select>
+            <button class="linkbtn" type="button" aria-pressed="false" onclick="this.setAttribute('aria-pressed', !FILTER.fav); setFilter('fav', !FILTER.fav)">★ favourites</button>
+            <button class="linkbtn" type="button" aria-pressed="false" onclick="this.setAttribute('aria-pressed', !FILTER.quick); setFilter('quick', !FILTER.quick)">⚡ under a minute</button>
+          </div>
         </div>
         <div class="cargrid" id="gallery-grid"></div>
       </div>
@@ -69,8 +77,9 @@
       <div class="body">
         <div class="media">
           <div class="kicker" id="d-method"></div>
-          <h1 id="d-title" style="margin:6px 0 14px"></h1>
-          <video id="d-video" autoplay loop muted playsinline></video>
+          <h1 id="d-title" style="margin:6px 0 6px"></h1>
+          <div class="dq"><span id="d-question" class="read"></span> <span id="d-status" class="statusbadge"></span></div>
+          <video id="d-video" autoplay loop muted playsinline aria-label="preview clip"></video>
           <button class="btn btn-blue" style="margin-top:16px;padding:15px 26px;width:100%" id="d-open">Open in Studio →</button>
         </div>
         <div class="scroll" id="d-text" style="padding-right:8px"></div>
@@ -82,6 +91,11 @@
       <div class="dash">
         <div class="glass tile t-params">
           <div class="kicker" id="s-name">parameters</div>
+          <div class="ptools">
+            <label class="sr" for="s-scene">Scene</label>
+            <select class="linkbtn" id="s-scene" onchange="studioPick(this)"></select>
+            <button class="linkbtn" type="button" onclick="toggleHelp()" aria-label="Show the scene explanation and control help">? explain</button>
+          </div>
           <div class="ptools">
             <button class="linkbtn" id="s-adv" type="button" onclick="toggleAdvanced()" aria-pressed="false">Advanced mode: off</button>
             <button class="linkbtn" id="s-undo" type="button" onclick="undoParams()" disabled aria-label="Undo setup change">↶ undo</button>
@@ -128,6 +142,7 @@
               <div class="pbar"><div class="pfill" id="s-pfill"></div></div>
             </div>
             <div class="plots scroll" id="s-plotpanel"></div>
+            <div class="plots scroll helppanel" id="s-help" style="display:none"></div>
           </div>
         </div>
 
@@ -139,14 +154,15 @@
 
         <div class="glass tile t-transport">
           <div class="transport">
-            <button onclick="vSeek(0)">⏮</button>
-            <button onclick="vStep(-1)">◀</button>
-            <button id="s-play" onclick="vToggle()">▶</button>
-            <button onclick="vStep(1)">▶▶</button>
-            <input type="range" class="scrub" id="s-scrub" min="0" max="1000" value="0" oninput="vScrub()">
+            <button onclick="vSeek(0)" aria-label="Go to start">⏮</button>
+            <button onclick="vStep(-1)" aria-label="Previous frame">◀</button>
+            <button id="s-play" onclick="vToggle()" aria-label="Play or pause">▶</button>
+            <button onclick="vStep(1)" aria-label="Next frame">▶▶</button>
+            <input type="range" class="scrub" id="s-scrub" min="0" max="1000" value="0" oninput="vScrub()" aria-label="Playback position">
             <span class="tlabel" id="s-time">0:00 / 0:00</span>
+            <span class="tlabel" id="s-simtime" title="simulation time of the frame on screen"></span>
             <span class="muted" style="font-size:12px">speed</span>
-            <button onclick="vSpeed(-1)">–</button><span class="tlabel" id="s-rate" style="min-width:34px">1×</span><button onclick="vSpeed(1)">+</button>
+            <button onclick="vSpeed(-1)" aria-label="Slower">–</button><span class="tlabel" id="s-rate" style="min-width:34px">1×</span><button onclick="vSpeed(1)" aria-label="Faster">+</button>
           </div>
         </div>
       </div>

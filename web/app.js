@@ -79,7 +79,7 @@ window.addEventListener("pointermove", e => {
 });
 
 /* boot */
-function boot() { buildGallery(); initStage(); show("intro"); }
+function boot() { buildGallery().then(fillStudioPicker); initStage(); show("intro"); }
 if (window.pywebview && window.pywebview.api) boot();
 else window.addEventListener("pywebviewready", boot);
 
@@ -119,30 +119,67 @@ const _vio = new IntersectionObserver(es => es.forEach(e => {
   else { _visible.delete(v); v.pause(); }
 }), { root: null, threshold: 0.15 });
 
+let GAL_METHODS = [], FILTER = { method: "", q: "", fav: false, quick: false };
 async function buildGallery() {
-  GAL = await api().catalog();
-  const root = $("#gallery-grid"); root.innerHTML = "";
-  for (const g of GAL) {
-    const acc = ACC[g.method] || "#5b86f0", method = SHORT[g.method] || g.method, scheme = SCHEME[g.method] || "";
-    for (const s of g.scenes) root.append(sceneCard(s, acc, method, scheme));
-  }
+  const r = await call("catalog"); GAL = r.groups; GAL_METHODS = r.methods || [];
+  fillCounts(r.counts || {});
+  const ms = $("#g-method"); if (ms) { ms.innerHTML = ""; const o = elt("option", null, "all methods"); o.value = ""; ms.append(o);
+    for (const m of GAL_METHODS) { const x = elt("option", null, SHORT[m] || m); x.value = m; ms.append(x); } }
+  renderGallery();
 }
-function sceneCard(s, acc, method, scheme) {
-  const c = el("div", "gcard");
+function fillCounts(c) {
+  for (const [k, id] of [["methods", "#n-methods"], ["scenes", "#n-scenes"], ["solvers", "#n-solvers"]]) {
+    const e = $(id); if (e && c[k] != null) { e.dataset.count = c[k]; e.textContent = countersDone ? c[k] : 0; }
+  }
+  const sub = $("#gal-sub"); if (sub && c.scenes) sub.textContent = `${c.scenes} experiments across ${c.methods} numerical methods.`;
+}
+function favs() { return new Set(_lsGet("funoos.favs", [])); }
+function toggleFav(key, ev) { if (ev) ev.stopPropagation(); const f = favs(); f.has(key) ? f.delete(key) : f.add(key); _lsSet("funoos.favs", [...f]); renderGallery(); }
+function recents() { return _lsGet("funoos.recents", []); }
+function noteRecent(key) { const r = recents().filter(k => k !== key); r.unshift(key); _lsSet("funoos.recents", r.slice(0, 8)); }
+function setFilter(k, v) { FILTER[k] = v; renderGallery(); }
+function renderGallery() {
+  const root = $("#gallery-grid"); root.innerHTML = "";
+  const f = favs(), q = FILTER.q.trim().toLowerCase(), rec = recents();
+  const match = s => (!FILTER.method || s.method === FILTER.method) && (!FILTER.fav || f.has(s.key))
+    && (!FILTER.quick || (s.estimate_s != null && s.estimate_s <= 60))
+    && (!q || (s.name + " " + s.question + " " + s.blurb + " " + s.method + " " + s.status_label).toLowerCase().includes(q));
+  let shown = 0;
+  if (rec.length && !q && !FILTER.method && !FILTER.fav && !FILTER.quick) {
+    const all = GAL.flatMap(g => g.scenes); const rs = rec.map(k => all.find(s => s.key === k)).filter(Boolean);
+    if (rs.length) { root.append(groupHead("Recent experiments", "")); for (const s of rs) root.append(sceneCard(s, f)); }
+  }
+  for (const g of GAL) {
+    const items = g.scenes.filter(match); if (!items.length) continue;
+    root.append(groupHead(g.phenomenon, items.length + (items.length === 1 ? " scene" : " scenes")));
+    for (const s of items) { root.append(sceneCard(s, f)); shown++; }
+  }
+  if (!shown) root.append(elt("div", "muted", "No scenes match this filter."));
+}
+function groupHead(title, sub) {
+  const h = el("div", "ghead"); h.append(elt("h2", null, title)); if (sub) h.append(elt("span", "muted", sub)); return h;
+}
+function sceneCard(s, favset) {
+  const acc = ACC[s.method] || "#5b86f0", method = SHORT[s.method] || s.method, scheme = SCHEME[s.method] || "";
+  const c = el("div", "gcard"); c.tabIndex = 0; c.setAttribute("role", "button"); c.setAttribute("aria-label", s.name + " — " + s.question);
   const media = el("div", "media");
-  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; v.preload = "metadata"; media.append(v); _vio.observe(v); }
+  if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.playsInline = true; v.preload = "metadata"; v.setAttribute("aria-hidden", "true"); media.append(v); _vio.observe(v); }
+  else { media.append(elt("div", "noclip", "no preview clip yet")); }
   const pl = el("div", "pill left"); const dot = el("span", "dot"); dot.style.background = acc;
   pl.append(dot, document.createTextNode(method));
-  media.append(pl, el("div", "pill right", scheme));
+  const st = elt("div", "pill right status-" + s.status, s.status_label);
+  media.append(pl, st);
+  const fav = elt("button", "favbtn" + (favset.has(s.key) ? " on" : ""), favset.has(s.key) ? "★" : "☆");
+  fav.setAttribute("aria-label", (favset.has(s.key) ? "Remove from" : "Add to") + " favourites: " + s.name); fav.onclick = e => toggleFav(s.key, e);
+  media.append(fav);
   const body = el("div", "gbody");
   body.append(elt("div", "ttl", s.name));
   const foot = el("div", "foot");
-  const teaser = (s.blurb || "").split(/[.;—]/)[0].trim();
-  foot.append(el("div", "sub", teaser.length > 46 ? teaser.slice(0, 44).trim() + "…" : teaser),
-    el("div", "go", "↗"));
+  foot.append(elt("div", "sub", s.question), elt("div", "go", "↗"));
   body.append(foot);
   c.append(media, body);
   c.onclick = () => openDetail(s.key);
+  c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(s.key); } };
   return c;
 }
 
@@ -153,7 +190,7 @@ async function morphToDetail(card, key) {
   const r0 = card.getBoundingClientRect(), v0 = card.querySelector("video");
   await openDetail(key);                       // build + show detail (navigation is guaranteed)
   const target = $("#d-video"), r1 = target.getBoundingClientRect();
-  if (!v0 || !r1.width) return;                // nothing to animate; detail is already up
+  if (!v0 || !r1.width || REDUCED) return;     // nothing to animate; detail is already up
   const clone = el("div");
   clone.style.cssText = `position:fixed;left:0;top:0;width:${r1.width}px;height:${r1.height}px;transform-origin:top left;`
     + `border-radius:14px;overflow:hidden;background:#06101f;z-index:200;pointer-events:none;box-shadow:0 40px 95px rgba(0,0,0,.55)`;
@@ -172,47 +209,86 @@ async function openDetail(key) {
   const t = nextReq("detail"); let d;
   try { d = await call("scene_detail", key, t); } catch (e) { toast("Could not open scene: " + errText(e), "err"); return; }
   if (!isCurrent("detail", t)) return;                         // a newer scene was opened meanwhile
-  $("#d-method").textContent = d.method; $("#d-title").textContent = d.name; $("#d-video").src = d.clip;
-  const t = $("#d-text"); t.innerHTML = "";
-  t.append(section("this scene", d.blurb), section("the physics", d.physics));
-  if (d.eq) { const k = el("div", "section"); k.append(el("div", "kicker", "GOVERNING EQUATION")); const b = el("div", "eqbox"); const im = el("img"); im.src = d.eq; b.append(im); k.append(b); t.append(k); }
-  if (d.terms) t.append(el("div", "terms", d.terms));
-  if (d.ic || d.bc) {                                   // initial & boundary conditions
-    const sec = el("div", "section"); sec.append(el("div", "kicker", "SETUP — INITIAL & BOUNDARY CONDITIONS"));
-    const box = el("div", "setup");
-    if (d.ic) box.append(el("div", "sline", `<b>Initial</b>${d.ic}`));
-    if (d.bc) box.append(el("div", "sline", `<b>Boundary</b>${d.bc}`));
-    sec.append(box); t.append(sec);
-  }
-  t.append(section("how it's solved", d.numerics));
-  const v = section("validation", "✓  " + d.validation); v.querySelector(".kicker").style.color = "#a9e6a0"; v.querySelector(".body").classList.add("ok"); t.append(v);
-  buildRelated(t, key);
-  [...t.children].forEach((c, i) => { c.classList.add("reveal"); setTimeout(() => c.classList.add("in"), 60 + i * 70); });
+  noteRecent(key);
+  $("#d-method").textContent = d.phenomenon + " · " + d.method; $("#d-title").textContent = d.name;
+  const dv = $("#d-video"); if (d.clip) { dv.src = d.clip; dv.style.display = "block"; } else { dv.removeAttribute("src"); dv.style.display = "none"; }
+  const q = $("#d-question"); if (q) q.textContent = d.question;
+  const sb = $("#d-status"); if (sb) { sb.textContent = d.status_label; sb.className = "statusbadge status-" + d.status; }
+  const box = $("#d-text"); box.innerHTML = "";
+  renderLayers(box, d.layers || [], d);
+  buildRelated(box, key);
+  [...box.children].forEach((c, i) => { c.classList.add("reveal"); setTimeout(() => c.classList.add("in"), REDUCED ? 0 : 60 + i * 50); });
   $("#d-open").onclick = () => openStudio(d);
   show("detail");
 }
+// Layered explanation: the first layers are open, the mathematical detail is collapsed.
+function renderLayers(box, layers, d) {
+  for (const L of layers) {
+    const sec = el("details", "layer"); sec.id = "layer-" + L.id;
+    if (["see", "try", "observe", "checks"].includes(L.id)) sec.open = true;
+    const sum = el("summary"); sum.append(elt("span", "kicker", L.title));
+    if (L.id === "checks" && L.status) sum.append(elt("span", "statusbadge status-" + d.status, L.status));
+    sec.append(sum);
+    if (L.text) sec.append(elt("div", "read body", L.text));
+    if (L.items && L.items.length) { const ul = el("ul", "tries"); for (const it of L.items) ul.append(elt("li", null, it)); sec.append(ul); }
+    if (L.id === "model") {
+      if (L.eq && d.eq) { const b = el("div", "eqbox"); const im = el("img"); im.src = d.eq; im.alt = "governing equation"; b.append(im); sec.append(b); }
+      if (L.text) { sec.lastChild.classList.add("terms"); }
+      sec.append(elt("div", "muted small", "Symbols are read out term by term above; see the glossary (?) for the shared notation."));
+    }
+    if (L.id === "setup") {
+      const s = el("div", "setup");
+      if (L.ic) s.append(sline("Initial", L.ic)); if (L.bc) s.append(sline("Boundary", L.bc));
+      const pre = Object.keys(L.preset || {}).length ? Object.entries(L.preset).map(([k, v]) => k + " = " + v).join(", ") : "exhibit defaults";
+      s.append(sline("This scene", pre)); sec.append(s);
+    }
+    box.append(sec);
+  }
+}
+function sline(k, v) { const r = el("div", "sline"); r.append(elt("b", null, k), elt("span", null, v)); return r; }
 function buildRelated(t, key) {
   let group = null;
   for (const g of GAL) if (g.scenes.some(s => s.key === key)) group = g;
   if (!group || group.scenes.length < 2) return;
-  const sec = el("div", "section"); sec.append(el("div", "kicker", "MORE IN THIS METHOD"));
+  const sec = el("div", "section"); sec.append(elt("div", "kicker", "MORE ON " + group.phenomenon.toUpperCase()));
   const rail = el("div", "related");
   for (const s of group.scenes) {
     if (s.key === key) continue;
-    const m = el("div", "rel"); if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = v.autoplay = true; v.playsInline = true; m.append(v); }
-    m.append(elt("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); rail.append(m);
+    const m = el("div", "rel"); m.tabIndex = 0; m.setAttribute("role", "button"); m.setAttribute("aria-label", s.name);
+    if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = v.autoplay = true; v.playsInline = true; m.append(v); }
+    m.append(elt("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); m.onkeydown = e => { if (e.key === "Enter") openDetail(s.key); }; rail.append(m);
   }
   sec.append(rail); t.append(sec);
 }
 function section(head, body) { const s = el("div", "section"); s.append(el("div", "kicker", head.toUpperCase()), el("div", "read body", body)); return s; }
 
 /* ───────── studio ───────── */
-let CUR_PRESET = null, CUR_SCENE = null;
+let CUR_PRESET = null, CUR_SCENE = null, CUR_DETAIL = null;
+async function studioPick(sel) {
+  const key = sel.value; if (!key) return;
+  let d; try { d = await call("scene_detail", key, nextReq("detail")); } catch (e) { toast(errText(e), "err"); return; }
+  openStudio(d);
+}
+function fillStudioPicker() {
+  const sel = $("#s-scene"); if (!sel || !GAL.length) return; sel.innerHTML = "";
+  const o = elt("option", null, "choose a scene…"); o.value = ""; sel.append(o);
+  for (const g of GAL) { const og = el("optgroup"); og.label = g.phenomenon; for (const s of g.scenes) { const x = elt("option", null, s.name); x.value = s.key; og.append(x); } sel.append(og); }
+  if (CUR_SCENE) sel.value = CUR_SCENE;
+}
+function toggleHelp() {
+  const h = $("#s-help"); if (!h) return;
+  if (h.style.display === "block") { h.style.display = "none"; return; }
+  h.innerHTML = "";
+  if (!CUR_DETAIL) { h.append(elt("div", "muted", "Pick a scene first.")); }
+  else { h.append(elt("div", "kicker", CUR_DETAIL.name)); h.append(elt("div", "read small", CUR_DETAIL.question)); renderLayers(h, CUR_DETAIL.layers || [], CUR_DETAIL); }
+  h.style.display = "block";
+}
 function openStudio(d) {
   if (JOB) { cancelSim(); JOB = null; }                        // leaving the scene abandons its run
   nextReq("run"); nextReq("view"); nextReq("diag");            // responses for the old scene are stale now
   $("#s-skel").classList.remove("on");
-  CUR_EXH = d.exhibit; CUR_CMAP = d.cmap || null; SPEC = d.params; PSTATE = {}; CUR_PRESET = d.preset || null; CUR_SCENE = d.key || null;
+  CUR_EXH = d.exhibit; CUR_CMAP = d.cmap || null; SPEC = d.params; PSTATE = {}; CUR_PRESET = d.preset || null; CUR_SCENE = d.key || null; CUR_DETAIL = d;
+  if (d.key) noteRecent(d.key); fillStudioPicker(); const hp = $("#s-help"); if (hp) hp.style.display = "none";
   UNDO = []; REDO = []; updateUndoButtons();
   for (const q of SPEC) PSTATE[q.name] = q.default;
   if (d.preset) for (const k in d.preset) PSTATE[k] = d.preset[k];
@@ -383,7 +459,7 @@ function setRunning(on) {
 }
 function renderKPIs(stats) {
   const k = $("#s-kpis"); k.innerHTML = "";
-  if (!stats.length) { k.innerHTML = '<div class="muted" style="font-size:12px">No readouts.</div>'; return; }
+  if (!stats.length) { k.append(elt("div", "muted small", "No readouts.")); return; }
   for (const s of stats) {
     if (s.frac != null) {
       const t = el("div", "kpi gauge" + (s.accent ? " accent" : ""));
@@ -738,6 +814,11 @@ document.addEventListener("timeupdate", e => {
   $("#s-scrub").value = v.currentTime / v.duration * 1000;
   const f = n => { const m = Math.floor(n / 60), s = Math.floor(n % 60); return m + ":" + String(s).padStart(2, "0"); };
   $("#s-time").textContent = f(v.currentTime) + " / " + f(v.duration);
+  const st = $("#s-simtime"), meta = RUN && RUN.meta;
+  if (st && meta && meta.times && meta.times.length) {
+    const i = Math.min(meta.times.length - 1, Math.round(v.currentTime / v.duration * (meta.times.length - 1)));
+    const tv = meta.times[i]; st.textContent = "t = " + (Math.abs(tv) >= 1000 ? Math.round(tv) : +tv.toPrecision(4)) + " " + (meta.time_unit || "");
+  } else if (st) st.textContent = "";
 }, true);
 
 /* toasts */

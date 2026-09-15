@@ -387,17 +387,21 @@ class Api:
 
     # ---------- static content ----------
     def catalog(self):
+        """Scenes grouped by phenomenon (the gallery's organisation), with method/status/question."""
         groups = []
-        for method, scenes in catalog.by_method().items():
+        for phen, scenes in catalog.by_phenomenon().items():
             items = []
             for s in scenes:
                 key = s["key"]
                 mp4 = ROOT / "results" / "gallery" / (key + ".mp4")
-                items.append({"key": key, "name": s["name"], "blurb": s["blurb"],
-                              "exhibit": s["exhibit"], "preset": s["preset"],
+                items.append({"key": key, "name": s["name"], "blurb": s["blurb"], "method": s["method"],
+                              "exhibit": s["exhibit"], "preset": s["preset"], "question": s["question"],
+                              "status": s["status"], "status_label": catalog.STATUS_LABEL[s["status"]],
+                              "estimate_s": engine.estimate(s["exhibit"], s["preset"]).get("seconds"),
                               "clip": ("results/gallery/" + key + ".mp4") if mp4.exists() else None})
-            groups.append({"method": method, "scenes": items})
-        return groups
+            groups.append({"phenomenon": phen, "scenes": items})
+        return {"ok": True, "groups": groups, "methods": sorted({s["method"] for s in catalog.SCENES}),
+                "counts": catalog.counts()}
 
     def scene_detail(self, key, req=None):
         s = catalog.scene(key)
@@ -406,12 +410,14 @@ class Api:
         ex = s["exhibit"]; m = engine.META.get(ex, {}); d = content.DETAIL.get(ex, {})
         setup = content.SETUP.get(ex, {})
         return {"ok": True, "req": req, "key": key,
-                "name": s["name"], "method": s["method"], "exhibit": ex,
+                "name": s["name"], "method": s["method"], "exhibit": ex, "phenomenon": s["phenomenon"],
+                "question": s["question"], "status": s["status"], "status_label": catalog.STATUS_LABEL[s["status"]],
                 "blurb": s["blurb"], "physics": d.get("physics", m.get("blurb", "")),
                 "terms": d.get("terms", ""), "numerics": m.get("numerics", ""),
                 "ic": setup.get("ic", ""), "bc": setup.get("bc", ""),
-                "validation": m.get("validation", ""), "eq": _eq_b64(ex),
-                "clip": "results/gallery/" + key + ".mp4", "preset": s["preset"],
+                "validation": s.get("checks", m.get("validation", "")), "eq": _eq_b64(ex),
+                "clip": ("results/gallery/" + key + ".mp4") if (ROOT / "results" / "gallery" / (key + ".mp4")).exists() else None,
+                "preset": s["preset"], "layers": catalog.scene_layers(key)["layers"],
                 "cmap": s.get("cmap"), "params": _param_spec(ex), "method_label": m.get("method", "")}
 
     def validate(self, exhibit, params, advanced=False):
@@ -772,7 +778,7 @@ class Api:
                     xs = [x for x, m in nums if isinstance(m.get(key), (int, float))]
                     ys = [m[key] for x, m in nums if isinstance(m.get(key), (int, float))]
                     if len(xs) >= 2:
-                        fig, ax, plt = postproc._new_ax(f"{spec[name]['label']}", key, f"{key} vs {spec[name]['label']}")
+                        fig, ax, plt = postproc._new_ax(spec[name].get("label", name), key, f"{key} vs {spec[name].get('label', name)}")
                         ax.plot(xs, ys, "o-", color=postproc._CYAN, lw=2)
                         plot = _b64_png(postproc._rgb(fig, plt))
             return {"ok": True, "job_id": job.id, "state": "completed", "name": name, "items": items,
@@ -913,13 +919,76 @@ class Api:
         return {"ok": True, "killed": killed}
 
 
+def selftest():
+    """Run a small representative pipeline with the bundled solvers, font and encoder
+    (no window). Used by the build scripts and CI on the packaged app. Exit code 0 = ok."""
+    import numpy as np
+    t0 = time.time(); problems = []
+    try:
+        from flowzoo import geometry
+        m = geometry.text(120, 40, "Fu", font_frac=0.5)
+        assert m.sum() > 20, "text mask empty"
+    except Exception as e:                      # noqa: BLE001
+        problems.append(f"font/text geometry: {_errtext(e)}")
+    for name, params in (("Turing Patterns", {"resolution": "Low (fast)", "duration": 0.05}),
+                         ("Wind Tunnel", {"resolution": "Low (fast)", "duration": 0.05}),
+                         ("The Big Splash", {"duration": 0.05, "particles": 600}),
+                         ("Shock Tube", {"resolution": "Low (fast)", "duration": 0.2})):
+        try:
+            res = engine.solve_exhibit(name, params)
+            frames = res.render(res.views[0])
+            with tempfile.TemporaryDirectory(prefix=engine.TMP_PREFIX) as d:
+                render.save_mp4(frames[:5], Path(d) / "t.mp4", fps=10)
+                n, w, h, _ = render.video_info(Path(d) / "t.mp4")
+                assert n == 5 and w > 0, "encoder round trip"
+            postproc.metrics(res)
+        except Exception as e:                  # noqa: BLE001
+            problems.append(f"{name}: {_errtext(e)}")
+    ok = not problems
+    print(f"Funoos {APP_VERSION} self-test: {'OK' if ok else 'FAILED'} ({time.time() - t0:.1f}s)")
+    for p in problems:
+        print("  -", p)
+    return 0 if ok else 1
+
+
+def _platform_hint(err):
+    if sys.platform.startswith("linux"):
+        return ("pywebview needs a GUI backend on Linux: install either GTK (python3-gi, gir1.2-webkit2-4.1) "
+                "or Qt (pip install pywebview[qt]). See https://pywebview.flowrl.com/guide/installation.html")
+    if sys.platform.startswith("win"):
+        return ("On Windows the WebView2 Evergreen runtime must be installed "
+                "(https://developer.microsoft.com/microsoft-edge/webview2/); it is preinstalled on Windows 10/11.")
+    return str(err)
+
+
+def _webview2_present():
+    """Windows only: is the WebView2 runtime registered? (None = not Windows / unknown)"""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import winreg
+        for root, key in ((winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"),
+                          (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}")):
+            try:
+                with winreg.OpenKey(root, key):
+                    return True
+            except OSError:
+                continue
+        return False
+    except Exception:                           # noqa: BLE001
+        return None
+
+
 def main():
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     try:
         import webview
-    except Exception:
-        print("pywebview not installed.  pip install pywebview\n"
-              "(then: python funoos_app.py)")
+    except Exception as e:                      # noqa: BLE001
+        print("pywebview could not be imported.  pip install -r requirements.txt\n" + _platform_hint(e))
         return
+    if _webview2_present() is False:
+        print("WebView2 runtime not found: install the Evergreen runtime from Microsoft, then start Funoos again.")
     import atexit
     api = Api()
     win = webview.create_window("Funoos — where imagination becomes vision",
