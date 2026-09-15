@@ -52,7 +52,7 @@ echo "=== [3/4] Bundling the app with PyInstaller ==="
 rm -rf build dist
 python3 -m PyInstaller --noconfirm --onedir --windowed --name Funoos \
   --add-data "index.html:." --add-data "web:web" \
-  --add-data "solvers:solvers" --add-data "docs:docs" --add-data "results:results" \
+  --add-data "solvers/lbm/lbm2d:solvers/lbm" --add-data "solvers/incompressible/ins2d:solvers/incompressible" --add-data "solvers/compressible/euler2d:solvers/compressible" --add-data "solvers/sph/sph2d:solvers/sph" --add-data "docs/eq:docs/eq" --add-data "results/gallery/*.mp4:results/gallery" \
   --collect-all webview --collect-all imageio_ffmpeg \
   funoos_app.py
 APP=dist/Funoos.app

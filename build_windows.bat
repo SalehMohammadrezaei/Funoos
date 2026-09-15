@@ -11,6 +11,7 @@ REM      A separate ffmpeg install / bin\ffmpeg.exe is optional.
 REM    * WebView2 runtime (preinstalled on Windows 10/11; else get the Evergreen runtime).
 REM ============================================================================
 setlocal
+cd /d "%~dp0"
 
 echo === [0/4] Cleaning old build\ and dist\ ===
 if exist build rmdir /s /q build
@@ -22,25 +23,33 @@ g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\incompressibl
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\compressible\euler2d.exe solvers\compressible\euler2d.cpp || goto :err
 g++ -O3 -fopenmp -static -std=c++17 -D_USE_MATH_DEFINES -o solvers\sph\sph2d.exe solvers\sph\sph2d.cpp || goto :err
 
-echo === [2/4] Installing Python dependencies ===
+echo === [2/4] Installing Python dependencies (into the interpreter that will be packaged) ===
 python -m pip install --upgrade pip || goto :err
-pip install numpy scipy matplotlib pillow pywebview imageio-ffmpeg pyinstaller || goto :err
+python -m pip install -r requirements.txt pyinstaller || goto :err
 
 echo === [3/4] Rendering gallery clips if missing (first build only; ~20-40 min) ===
-if not exist results\gallery\spec_kh.mp4 python render_gallery.py High 1.8
+if not exist results\gallery\spec_kh.mp4 python render_gallery.py High 1.8 || goto :err
 
 echo === [4/4] Bundling the app with PyInstaller ===
 set FF=
 if exist bin\ffmpeg.exe set FF=--add-binary "bin\ffmpeg.exe;."
+REM Only the assets the app needs are bundled: the UI, the solver binaries, the
+REM equation images and the gallery MP4s (not the promo videos or demo GIFs).
 pyinstaller --noconfirm --onedir --windowed --name Funoos ^
   --add-data "index.html;." --add-data "web;web" ^
-  --add-data "solvers;solvers" --add-data "docs;docs" --add-data "results;results" ^
+  --add-data "solvers\lbm\lbm2d.exe;solvers\lbm" --add-data "solvers\incompressible\ins2d.exe;solvers\incompressible" ^
+  --add-data "solvers\compressible\euler2d.exe;solvers\compressible" --add-data "solvers\sph\sph2d.exe;solvers\sph" ^
+  --add-data "docs\eq;docs\eq" --add-data "results\gallery\*.mp4;results\gallery" ^
   --collect-all webview --collect-all imageio_ffmpeg ^
   %FF% funoos_app.py || goto :err
 
+echo === [5/5] Self-test of the packaged app (bundled solvers, fonts, encoder) ===
+dist\Funoos\Funoos.exe --selftest || goto :err
+certutil -hashfile dist\Funoos\Funoos.exe SHA256 > dist\Funoos.exe.sha256.txt
+
 echo.
 echo === SUCCESS ===
-echo App:  dist\Funoos\Funoos.exe
+echo App:  dist\Funoos\Funoos.exe   (self-test passed)
 echo Next: open installer.iss in Inno Setup and click Compile to get Funoos-Setup.exe (a one-click installer to hand out).
 echo (If the window is blank, install the WebView2 Evergreen runtime from Microsoft.)
 echo (No ffmpeg.exe in bin\ ^=^> the player can't encode video; add it and rebuild.)

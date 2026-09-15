@@ -39,14 +39,25 @@ jobs:
           export CXXFLAGS="-O3 -fopenmp -std=c++17"
           python tests/smoke_test.py
           python tests/test_numerics.py
+          python tests/test_jobs.py
+          python tests/test_media.py
+          python tests/test_schema.py
+          dist/Funoos.app/Contents/MacOS/Funoos --selftest
+
+      - name: Checksums
+        run: shasum -a 256 Funoos-macOS-*.dmg | tee SHA256SUMS-macOS-${{ matrix.arch }}.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: Funoos-macOS-${{ matrix.arch }}
-          path: Funoos-macOS-*.dmg
+          path: |
+            Funoos-macOS-*.dmg
+            SHA256SUMS-*.txt
 
       - name: Attach the .dmg to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Funoos-macOS-*.dmg
+          files: |
+            Funoos-macOS-*.dmg
+            SHA256SUMS-*.txt

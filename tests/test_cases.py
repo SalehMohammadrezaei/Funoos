@@ -1,0 +1,142 @@
+"""Case-level checks backing the scene registry's stated status (run: python tests/test_cases.py).
+
+Each test pins a claim made in a scene's "Checks and limitations" layer:
+  * Sod shock tube: density AND velocity errors against the exact Riemann solution.
+  * Taylor–Green: energy decay against E0·exp(−4νt) (analytical).
+  * Dye, diffusion only: stripe variance decays as exp(−2κm²t) (analytical).
+  * Heated layer, buoyancy off: linear profile kept, Nu = 1 (analytical baseline).
+  * Porous: directional permeability k_x ≫ k_y on a slab sample; k independent of the
+    driving strength (Darcy linearity); disconnected geometry gives k ≈ 0.
+  * SPH still water: residual speed and surface level.
+  * Airfoil: lift changes sign with the angle of attack (mirror test).
+  * Registry: every scene has the layered fields and a valid status.
+"""
+import math
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from flowzoo import engine, postproc, catalog, validate, geometry   # noqa: E402
+
+_ENV = {**os.environ, "OMP_NUM_THREADS": "4"}
+engine._ENV["OMP_NUM_THREADS"] = "4"
+
+
+def test_registry_complete():
+    keys = set()
+    for s in catalog.SCENES:
+        assert s["key"] not in keys, "duplicate key"; keys.add(s["key"])
+        for f in ("name", "method", "phenomenon", "exhibit", "preset", "question", "status", "blurb", "try", "observe", "checks", "refs"):
+            assert s.get(f) not in (None, "", []), (s["key"], f)
+        assert s["status"] in catalog.STATUS_LABEL and s["phenomenon"] in catalog.PHENOMENA
+        assert s["exhibit"] in engine.EXHIBITS, s["key"]
+        L = catalog.scene_layers(s["key"])["layers"]
+        assert [x["id"] for x in L] == ["see", "try", "observe", "physics", "model", "setup", "numerics", "checks", "refs"]
+    c = catalog.counts()
+    assert c["scenes"] == len(catalog.SCENES) and c["methods"] == 6
+
+
+def test_sod_density_and_velocity_errors():
+    res = engine.solve_exhibit("Shock Tube", {"resolution": "Medium"})
+    m = postproc.metrics(res)
+    assert m["sod_err_rho"] < 0.006 and m["sod_err_u"] < 0.01, m
+    lo = engine.solve_exhibit("Shock Tube", {"resolution": "Low (fast)"})
+    assert postproc.metrics(lo)["sod_err_rho"] > m["sod_err_rho"], "error falls with resolution"
+    print(f"    sod: err_rho={m['sod_err_rho']:.4f} err_u={m['sod_err_u']:.4f} (600 cells)")
+
+
+def test_taylor_green_analytical_decay():
+    nu = 4e-4
+    r = engine.solve_exhibit("Cloud Billows", {"init": "Taylor–Green vortex", "resolution": "Low (fast)", "duration": 0.3, "viscosity": nu})
+    ke, _ = postproc._ke_enstrophy(r); t = np.asarray(r.times)
+    pred = ke[0] * np.exp(-4 * nu * (t - t[0]))
+    err = float(np.max(np.abs(ke - pred) / pred))
+    assert err < 1e-6, err
+    print(f"    taylor-green: max rel error {err:.1e}")
+
+
+def test_dye_diffusion_only_analytical():
+    kap, m = 4e-4, 6
+    r = engine.solve_exhibit("Ink in Motion", {"resolution": "Low (fast)", "duration": 0.3, "stir": 0.0, "diffusion": kap, "bands": m})
+    var = np.array([np.var(s) for s in r.raw]); t = np.asarray(r.times)
+    # bands 0.5(1+sign(sin(m y))): the fundamental (wavenumber m) dominates; higher harmonics decay faster,
+    # so after the first frames the variance ratio follows exp(-2 κ m² t) of the fundamental.
+    k0 = len(t) // 2
+    pred = var[k0] * np.exp(-2 * kap * m * m * (t[k0:] - t[k0]))
+    err = float(np.max(np.abs(var[k0:] - pred) / pred))
+    assert err < 0.03, err
+    print(f"    dye diffusion-only: max rel error {err:.3f} vs exp(-2κm²t)")
+
+
+def test_heated_layer_conduction_baseline():
+    r = engine.solve_exhibit("Rayleigh-Benard", {"resolution": "Low (fast)", "duration": 0.3, "buoyancy": 0.0})
+    f = postproc._rb_fluxes(r)
+    lin = np.linspace(1, 0, len(f["T"]))
+    assert float(np.sqrt(np.mean((f["T"] - lin) ** 2))) < 0.01, "profile stays linear"
+    assert abs(f["Nu"] - 1.0) < 0.05, f["Nu"]
+    print(f"    conduction baseline: Nu = {f['Nu']:.3f}")
+
+
+def _perm(mask, fdir, force=1e-5, steps=3000):
+    ny, nx = mask.shape
+    with tempfile.TemporaryDirectory() as d:
+        geometry.save_mask(mask, Path(d) / "m.bin")
+        subprocess.run([str(ROOT / "solvers/lbm/lbm2d"), "--nx", str(nx), "--ny", str(ny), "--mask", str(Path(d) / "m.bin"),
+                        "--periodic", "1", "--force", str(force), "--fdir", str(fdir), "--tau", "0.8",
+                        "--steps", str(steps), "--save_every", str(steps), "--out", d], check=True, capture_output=True, env=_ENV)
+        for line in (Path(d) / "meta.txt").read_text().splitlines():
+            if line.startswith("permeability"):
+                return float(line.split()[1])
+
+
+def test_porous_direction_linearity_and_disconnected():
+    subprocess.run(["make", "-s", "-C", str(ROOT / "solvers/lbm")], check=True, capture_output=True)
+    nx = ny = 48
+    slabs = np.zeros((ny, nx), np.uint8); slabs[::12, :] = 1
+    kx, ky = _perm(slabs, 0), _perm(slabs, 1)
+    assert kx > 1.0 and ky < 1e-6 * kx, (kx, ky)
+    k1, k2 = _perm(slabs, 0, 1e-5), _perm(slabs, 0, 2e-5)
+    assert abs(k2 - k1) / k1 < 0.02, "Darcy linearity: k independent of the driving force"
+    blocked = np.zeros((ny, nx), np.uint8); blocked[:, 20] = 1                      # a wall across the flow
+    assert _perm(blocked, 0) < 1e-6 * kx, "disconnected geometry has zero permeability"
+    print(f"    porous: k_x={kx:.3f} k_y={ky:.2e}  linearity {abs(k2 - k1) / k1:.1e}")
+
+
+def test_sph_still_water():
+    subprocess.run(["make", "-s", "-C", str(ROOT / "solvers/sph")], check=True, capture_output=True)
+    r = engine.solve_exhibit("The Big Splash", {"scene": "Still water (hydrostatic)", "duration": 0.5, "particles": 1500})
+    last = r.raw[-1]; Ly = r.hints["Ly"]
+    vmax = float(last[:, 2].max()); surf = float(np.percentile(last[:, 1], 99))
+    assert vmax < 0.05 * math.sqrt(9.81 * 0.42 * Ly), f"residual speed {vmax:.3f} m/s"
+    assert abs(surf - 0.42 * Ly) < 0.05 * Ly, f"surface {surf:.3f} vs fill {0.42 * Ly:.3f}"
+    print(f"    still water: max|v|={vmax:.3f} m/s, surface={surf:.2f} m (fill {0.42 * Ly:.2f})")
+
+
+def test_airfoil_lift_changes_sign_with_angle():
+    cl = {}
+    for ang in (+12, -12):
+        r = engine.solve_exhibit("Wind Tunnel", {"obstacle": "Airfoil", "angle": ang, "reynolds": 300, "resolution": "Low (fast)", "duration": 0.5})
+        cl[ang] = postproc.metrics(r)["cl_circulation"]
+    assert cl[12] > 0 > cl[-12], cl
+    assert abs(abs(cl[12]) - abs(cl[-12])) < 0.5 * max(abs(cl[12]), abs(cl[-12])), cl
+    print(f"    airfoil: C_l(+12°)={cl[12]:+.3f}  C_l(−12°)={cl[-12]:+.3f}")
+
+
+if __name__ == "__main__":
+    tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
+    failed = 0
+    for name, fn in tests:
+        t0 = time.time()
+        try:
+            fn(); print(f"  ok   {name}  ({time.time() - t0:.1f}s)")
+        except Exception as e:                       # noqa: BLE001
+            failed += 1; print(f"  FAIL {name}: {type(e).__name__}: {e}")
+    print(f"{len(tests) - failed}/{len(tests)} passed")
+    sys.exit(1 if failed else 0)

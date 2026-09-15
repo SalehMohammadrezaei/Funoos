@@ -34,3 +34,27 @@ jobs:
           python tests/test_jobs.py
           python tests/test_media.py
           python tests/test_schema.py
+          python tests/test_cases.py
+
+  package-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build solvers and install dependencies
+        run: |
+          make -C solvers/lbm && make -C solvers/incompressible && make -C solvers/compressible && make -C solvers/sph
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Package with PyInstaller (same asset selection as the release scripts)
+        run: |
+          pyinstaller --noconfirm --onedir --name Funoos \
+            --add-data "index.html:." --add-data "web:web" \
+            --add-data "solvers/lbm/lbm2d:solvers/lbm" --add-data "solvers/incompressible/ins2d:solvers/incompressible" \
+            --add-data "solvers/compressible/euler2d:solvers/compressible" --add-data "solvers/sph/sph2d:solvers/sph" \
+            --add-data "docs/eq:docs/eq" \
+            --collect-all webview --collect-all imageio_ffmpeg funoos_app.py
+      - name: Self-test of the packaged app (bundled solvers, font, encoder; no window)
+        run: dist/Funoos/Funoos --selftest

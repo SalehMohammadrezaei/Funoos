@@ -1,4 +1,10 @@
-"""Funoos Studio — a polished, multi-page CFD gallery (CustomTkinter UI).
+"""LEGACY — unsupported. The supported desktop app is funoos_app.py (pywebview UI).
+
+This CustomTkinter interface predates the web UI, is not covered by the tests or
+the packaging scripts, and does not receive new features. It is kept only so old
+links keep working; expect rough edges.
+
+Funoos Studio — a polished, multi-page CFD gallery (CustomTkinter UI).
 
   • Intro   — what Funoos is, and who made it.
   • Gallery — browse exhibits: in-depth physics, governing equation, live demo.

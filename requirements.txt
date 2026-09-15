@@ -1,6 +1,7 @@
-numpy
-scipy
-matplotlib
-pillow
-pywebview
-imageio-ffmpeg
+# Tested with Python 3.10–3.12 (CI: 3.11). Upper bounds are the next major versions.
+numpy>=1.24,<3
+scipy>=1.10,<2
+matplotlib>=3.7,<4
+pillow>=10,<12
+pywebview>=4.4,<6
+imageio-ffmpeg>=0.4.9,<0.7

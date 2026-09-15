@@ -1,0 +1,22 @@
+[project]
+name = "funoos"
+version = "1.1.0"
+description = "A desktop laboratory for exploring two-dimensional fluid motion and pattern formation."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Saleh Mohammadrezaei", email = "salehmrezaee@gmail.com" }]
+dependencies = [
+  "numpy>=1.24,<3",
+  "scipy>=1.10,<2",
+  "matplotlib>=3.7,<4",
+  "pillow>=10,<12",
+  "pywebview>=4.4,<6",
+  "imageio-ffmpeg>=0.4.9,<0.7",
+]
+
+[project.urls]
+Repository = "https://github.com/SalehMohammadrezaei/Funoos"
+
+[tool.setuptools]
+packages = ["flowzoo"]
