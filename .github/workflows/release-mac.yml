@@ -45,6 +45,7 @@ jobs:
           python tests/test_cases.py
           python tests/test_matrix.py
           node tests/test_frontend.js
+          npm install --no-save --no-package-lock jsdom@24 && node tests/test_frontend_ui.js
           dist/Funoos.app/Contents/MacOS/Funoos --selftest
           python -m pip freeze > requirements-resolved-macos-${{ matrix.arch }}.txt
 

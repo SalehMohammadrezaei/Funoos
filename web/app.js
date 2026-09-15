@@ -5,7 +5,7 @@ let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS =
 // counters — a response is applied only if its token is still the latest of its
 // kind, so an older render/detail/diagnostics reply can never overwrite a newer one.
 let JOB = null, ADV = false;                                 // ADV: advanced mode (extra controls, soft limits allowed)
-let CMP = null, JOB_SCENE = null;                                              // comparison display state {a, b, view, times, unit, vmin, vmax, note}
+let CMP = null, JOB_SCENE = null, JOB_NAME = null;                                              // comparison display state {a, b, view, times, unit, vmin, vmax, note}
 const REQ = { run: 0, view: 0, detail: 0, diag: 0, est: 0, der: 0, probe: 0, cmp: 0 };
 const nextReq = k => ++REQ[k];
 const isCurrent = (k, t) => REQ[k] === t;
@@ -81,10 +81,6 @@ window.addEventListener("pointermove", e => {
   r.setProperty("--mx", e.clientX + "px"); r.setProperty("--my", e.clientY + "px");
 });
 
-/* boot */
-function boot() { buildGallery().then(fillStudioPicker); initStage(); show("intro"); }
-if (window.pywebview && window.pywebview.api) boot();
-else window.addEventListener("pywebviewready", boot);
 
 /* animated counters */
 let countersDone = false;
@@ -235,10 +231,13 @@ async function openDetail(key) {
   const t = nextReq("detail"); let d;
   try { d = await call("scene_detail", key, t); } catch (e) { toast("Could not open scene: " + errText(e), "err"); return; }
   if (!isCurrent("detail", t)) return;                         // a newer scene was opened meanwhile
+  try { renderDetail(d, key); } catch (e) { toast("Could not display the scene: " + errText(e), "err"); $("#s-status") && ($("#s-status").textContent = "⚠ " + errText(e)); console.error(e); }
+}
+function renderDetail(d, key) {
   noteRecent(key);
   const ex = d.experiment;
   $("#d-method").textContent = d.phenomenon + " · " + d.method; $("#d-title").textContent = ex ? ex.name : d.name;
-  fillPresetSelector($("#d-preset"), ex, key, k => openDetail(k));
+  fillPresetSelector($("#d-preset"), ex, key, k => openDetail(k));   // openDetail is token-guarded
   const pl = $("#d-presetname"); if (pl) pl.textContent = ex && ex.presets.length > 1 ? "Preset: " + (ex.preset_label || d.name) : "";
   const cmpBox = $("#d-compare"); if (cmpBox) { cmpBox.innerHTML = ""; if (ex && ex.compare && ex.compare.length) { cmpBox.append(elt("div", "kicker", "GUIDED COMPARISONS")); for (const c of ex.compare) { const row = el("div", "gcmp"); row.append(elt("div", "read small", c.text)); if (c.b) { const b = elt("button", "linkbtn", "run both & compare"); b.onclick = () => guidedCompare(c.a, c.b); row.append(b); } else { const b = elt("button", "linkbtn", "open in Studio"); b.onclick = async () => { const dd = await call("scene_detail", c.a, nextReq("detail")); openStudio(dd); }; row.append(b); } cmpBox.append(row); } } }
   const dv = $("#d-video"); if (d.clip) { dv.src = d.clip; dv.style.display = "block"; dv.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); if (!dv.autoplay) { dv.pause(); dv.controls = true; } } else { dv.removeAttribute("src"); dv.style.display = "none"; }
@@ -246,7 +245,7 @@ async function openDetail(key) {
   const sb = $("#d-status"); if (sb) { sb.textContent = d.status_label; sb.className = "statusbadge status-" + d.status; }
   const box = $("#d-text"); box.innerHTML = "";
   renderLayers(box, d.layers || [], d);
-  buildRelated(box, key);
+  try { buildRelated(box, key); } catch (e) { console.error("related experiments unavailable", e); }   // optional rail: the page still opens
   [...box.children].forEach((c, i) => { c.classList.add("reveal"); setTimeout(() => c.classList.add("in"), REDUCED ? 0 : 60 + i * 50); });
   $("#d-open").onclick = () => openStudio(d);
   show("detail");
@@ -290,13 +289,14 @@ function fillPresetSelector(sel, ex, key, onpick) {
   sel.onchange = () => onpick(sel.value);
 }
 function buildRelated(t, key) {
-  let group = null;
-  for (const g of GAL) if (g.scenes.some(s => s.key === key)) group = g;
-  if (!group || group.scenes.length < 2) return;
+  const group = GAL.find(g => g.experiments.some(e => e.presets.some(p => p.key === key)));
+  if (!group) return;
+  const related = group.experiments.filter(e => !e.presets.some(p => p.key === key));   // other experiments of the phenomenon
+  if (!related.length) return;
   const sec = el("div", "section"); sec.append(elt("div", "kicker", "MORE ON " + group.phenomenon.toUpperCase()));
   const rail = el("div", "related");
-  for (const s of group.scenes) {
-    if (s.key === key) continue;
+  for (const e of related) {
+    const s = { ...e, key: e.representative };                    // open an experiment through its representative preset
     const m = el("div", "rel"); m.tabIndex = 0; m.setAttribute("role", "button"); m.setAttribute("aria-label", s.name);
     if (s.clip) { const v = el("video"); v.src = s.clip; v.loop = v.muted = true; v.autoplay = !REDUCED && _lsGet("funoos.autoplay", true); v.playsInline = true; if (s.poster) v.poster = s.poster; v.preload = "metadata"; m.append(v); }
     m.append(elt("div", "rnm", s.name)); m.onclick = () => openDetail(s.key); m.onkeydown = e => { if (e.key === "Enter") openDetail(s.key); }; rail.append(m);
@@ -321,7 +321,7 @@ function fillStudioPicker() {
   for (const g of GAL) { const og = el("optgroup"); og.label = g.phenomenon; for (const e of g.experiments) { const x = elt("option", null, e.name); x.value = e.id; og.append(x); } sel.append(og); }
   if (CUR_SCENE && S2E[CUR_SCENE]) sel.value = S2E[CUR_SCENE];
   const ex = CUR_DETAIL && CUR_DETAIL.experiment;
-  fillPresetSelector($("#s-preset"), ex, CUR_SCENE, async k => { const dd = await call("scene_detail", k, nextReq("detail")); if (dd.key === k) openStudio(dd); });
+  fillPresetSelector($("#s-preset"), ex, CUR_SCENE, async k => { const tk = nextReq("detail"); const dd = await call("scene_detail", k, tk); if (isCurrent("detail", tk) && dd.key === k) openStudio(dd); });
   markCustom();
 }
 async function studioPickExperiment(sel) {
@@ -366,7 +366,9 @@ function openStudio(d) {
   RUN = null; $("#s-video").style.display = "none"; $("#s-hint").style.display = "block"; hideStill();
   $("#s-views").innerHTML = ""; $("#s-cmap").innerHTML = ""; $("#s-plotpanel").style.display = "none";
   $("#s-kpis").innerHTML = '<div class="muted" style="font-size:12px">Run a simulation to see live readouts.</div>';
-  $("#s-status").textContent = "Ready."; setRunning(false); show("studio");
+  if (JOB) $("#s-status").textContent = "⏳ " + (JOB_NAME || "another experiment") + " is still simulating — its result will appear in the run history";
+  else $("#s-status").textContent = "Ready.";
+  refreshJobUI(); show("studio");
 }
 function visible(q) { return !q.when || q.when[1].includes(PSTATE[q.when[0]]); }
 let _estT = null;
@@ -482,8 +484,8 @@ function resetAll() { pushUndo(); PSTATE = sceneDefaults(); renderParams(); refr
 async function runSim() {
   if (JOB || !CUR_EXH) return;                                 // one job at a time (button is disabled anyway)
   if (!validateAll()) { toast("Fix the highlighted values first", "err"); return; }
-  const t = nextReq("run"); JOB_SCENE = CUR_SCENE;
-  JOB = { id: newId(), exhibit: CUR_EXH, params: Object.freeze({ ...PSTATE }), cancelling: false, token: t };
+  const t = nextReq("run"); JOB_SCENE = CUR_SCENE; JOB_NAME = CUR_DETAIL ? CUR_DETAIL.name : CUR_EXH;
+  JOB = { id: newId(), exhibit: CUR_EXH, params: Object.freeze({ ...PSTATE }), cancelling: false, token: t, scene: CUR_SCENE };
   setRunning(true);
   $("#s-skel").classList.add("on"); $("#s-hint").style.display = "none"; $("#s-plotpanel").style.display = "none";
   const pf = $("#s-pfill"); if (pf) { pf.style.width = "0%"; } $("#s-skelmsg").textContent = "preparing…";
@@ -527,11 +529,17 @@ async function cancelSim() {
   const cb = $("#s-cancel"); if (cb) cb.disabled = true;
   try { await api().cancel(JOB.id); } catch (e) { /* the run reply will carry the final state */ }
 }
-function setRunning(on) {
-  const btn = $("#s-run"), cb = $("#s-cancel");
-  btn.disabled = on; btn.textContent = on ? "●  Simulating…" : "▶  Run simulation";
+function setRunning(on) { refreshJobUI(); }
+// Button states come from the active job, not from the scene on screen: while a job runs
+// (possibly for another experiment) Run stays disabled, Cancel stays visible and says what runs.
+function refreshJobUI() {
+  const btn = $("#s-run"), cb = $("#s-cancel"); if (!btn) return;
+  const on = !!JOB;
+  btn.disabled = on; btn.textContent = on ? (JOB_SCENE && JOB_SCENE !== CUR_SCENE ? "●  Simulating " + (JOB_NAME || JOB_SCENE) + "…" : "●  Simulating…") : "▶  Run simulation";
+  btn.title = on ? "A simulation is running" + (JOB_SCENE && JOB_SCENE !== CUR_SCENE ? " for " + (JOB_NAME || JOB_SCENE) : "") + " — cancel it or wait; the result lands in the run history" : "";
   const sw = $("#s-sweep-run"); if (sw) sw.disabled = on;
-  if (cb) { cb.style.display = on ? "block" : "none"; cb.disabled = false; }
+  if (cb) { cb.style.display = on ? "block" : "none"; cb.disabled = !!(JOB && JOB.cancelling); cb.textContent = on && JOB_SCENE && JOB_SCENE !== CUR_SCENE ? "■  Cancel " + (JOB_NAME || JOB_SCENE) : "■  Cancel"; }
+  if (!on) validateAll();
 }
 function renderKPIs(stats) {
   const k = $("#s-kpis"); k.innerHTML = "";
@@ -581,7 +589,8 @@ async function switchView(v, force) {
   if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 async function recolor() {
-  if (!RUN) return; if (CMP) { leaveCompare(); return switchView(RUN.view); }
+  if (!RUN) return;
+  if (CMP) { return compareWith(CMP.a, true); }                // recolour the comparison itself (both runs, shared scale)
   const t = nextReq("view"), rid = RUN.run_id, cmap = $("#s-cmap").value;
   const idx = curFrame(), frac = idx == null ? 1.0 : { index: idx, frac: 1.0 };
   // 1) instant: re-map the frame on screen with the new palette (one PNG, no encoding)
@@ -730,7 +739,10 @@ async function applyProject(cfg) {
   const pres = cfg.presentation || {};
   PENDING_PRES = { view: pres.view || null, cmap: pres.cmap || null, vmin: pres.vmin, vmax: pres.vmax };
   if (pres.cmap) { const cm = $("#s-cmap"); if (cm && [...cm.options].some(o => o.value === pres.cmap)) cm.value = pres.cmap; else CUR_CMAP = pres.cmap; }
-  if (pres.vmin != null) $("#x-vmin").value = pres.vmin; if (pres.vmax != null) $("#x-vmax").value = pres.vmax;
+  $("#x-vmin").value = pres.vmin == null ? "" : pres.vmin;        // null = automatic limits: clear any manual ones
+  $("#x-vmax").value = pres.vmax == null ? "" : pres.vmax;
+  if (pres.fps) $("#x-fps").value = pres.fps;
+  if (pres.zoom && pres.zoom > 0) { ZOOM.k = Math.min(8, Math.max(1, pres.zoom)); ZOOM.x = ZOOM.y = 0; applyZoom(); } else zoomReset();
   renderParams(); refreshEstimate();
   const w = (cfg.validation && cfg.validation.warnings) || [];
   toast("Setup loaded" + (w.length ? " (" + w[0] + ")" : ""), "ok");
@@ -751,11 +763,36 @@ async function refreshHistory() {
     const dup = elt("button", "linkbtn", "⧉"); dup.title = "Duplicate: load this run's setup into the controls";
     dup.setAttribute("aria-label", "Load setup of run " + run.info);
     dup.onclick = () => duplicateRun(run.run_id);
+    const op = elt("button", "linkbtn", "▶"); op.title = "Open this result (loads its complete descriptor)";
+    op.setAttribute("aria-label", "Open run " + run.info); op.onclick = () => openRun(run.run_id);
+    row.append(op);
     const cmp = elt("button", "linkbtn", "⇄"); cmp.title = "Compare this run with the current one, side by side";
     cmp.setAttribute("aria-label", "Compare run " + run.info + " with the current run");
     cmp.onclick = () => compareWith(run.run_id);
     row.append(pin, dup, cmp); box.append(row);
   }
+}
+// Load a stored run as the displayed result: complete descriptor (views, palettes, stats, meta,
+// params, provenance) from the backend, switching to the run's scene if needed.
+async function openRun(rid, viewWanted) {
+  let t = nextReq("view"); setBusy("loading result…");
+  try {
+    const info = await call("run_info", rid);
+    if (!isCurrent("view", t)) return;
+    if (info.scene && info.scene !== CUR_SCENE) {                // switch to the run's experiment first
+      const dd = await call("scene_detail", info.scene, nextReq("detail"));
+      if (!isCurrent("view", t)) return;
+      openStudio(dd); t = nextReq("view");                         // openStudio invalidates view requests; this one continues
+    }
+    else if (info.exhibit !== CUR_EXH) { toast("Result belongs to " + info.exhibit + "; showing it without its controls", ""); }
+    const r = await call("render_view", rid, viewWanted || info.view || null, $("#s-cmap").value, 26, t, $("#x-vmin").value, $("#x-vmax").value);
+    if (!isCurrent("view", t)) return;
+    leaveCompare();
+    RUN = { ...info, run_id: rid, view: r.view, defcmap: r.cmap, field_rect: r.field_rect || null, video: null };
+    buildViewbar(RUN); hideStill(); setVideo(r.video, false); renderKPIs(info.stats || []); $("#s-plotpanel").style.display = "none";
+    $("#s-status").textContent = "✓ " + info.info; markMatch(); refreshHistory(); zoomReset();
+  } catch (e) { if (isCurrent("view", t)) toast(errText(e), "err"); }
+  if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 async function duplicateRun(rid) {
   try {
@@ -765,9 +802,9 @@ async function duplicateRun(rid) {
     toast("Setup loaded from the run — change one thing and Run", "ok");
   } catch (e) { toast(errText(e), "err"); }
 }
-async function compareWith(rid) {
+async function compareWith(rid, again) {
   if (!RUN) { toast("Run a simulation first", "err"); return; }
-  if (rid === RUN.run_id) { toast("Pick a different run to compare with", "err"); return; }
+  if (rid === RUN.run_id && !again) { toast("Pick a different run to compare with", "err"); return; }
   const t = nextReq("cmp"), cur = RUN.run_id, view = RUN.view; setBusy("rendering side-by-side…");
   try {
     const r = await call("compare", rid, cur, view, $("#s-cmap").value, 26, t);
@@ -823,7 +860,7 @@ function showSweep(r) {
     const im = el("img"); im.src = it.frame; im.alt = r.name + " = " + it.value; card.append(im);
     card.append(elt("div", "sv", r.name + " = " + it.value));
     const ks = Object.keys(it.metrics || {});
-    if (ks.length) card.append(elt("div", "sm", ks.slice(0, 3).map(k => k + " " + (+it.metrics[k]).toPrecision(3)).join(" · ")));
+    if (ks.length) card.append(elt("div", "sm", ks.slice(0, 3).map(k => k + " " + (it.metrics[k] == null ? "unavailable" : (+it.metrics[k]).toPrecision(3))).join(" · ")));
     card.tabIndex = 0; card.setAttribute("role", "button"); card.title = "Open this run";
     card.onclick = () => openSweepRun(it); card.onkeydown = e => { if (e.key === "Enter") openSweepRun(it); };
     grid.append(card);
@@ -832,18 +869,7 @@ function showSweep(r) {
   for (const e of (r.errors || [])) p.append(elt("div", "verr", r.name + " = " + e.value + ": " + e.error));
   p.style.display = "block";
 }
-async function openSweepRun(it) {
-  const t = nextReq("view"); setBusy("rendering " + it.info + "…");
-  try {
-    const r = await call("render_view", it.run_id, (RUN && RUN.view) || null, $("#s-cmap").value, 26, t);
-    if (!isCurrent("view", t)) return;
-    RUN = { run_id: it.run_id, view: r.view, info: it.info, views: RUN ? RUN.views : [r.view], cmaps: RUN ? RUN.cmaps : [], stats: it.stats };
-    buildViewbar({ views: RUN.views, view: r.view, cmaps: RUN.cmaps.length ? RUN.cmaps : [$("#s-cmap").value], defcmap: $("#s-cmap").value });
-    hideStill(); setVideo(r.video, false); renderKPIs(it.stats || []); $("#s-plotpanel").style.display = "none";
-    $("#s-status").textContent = "✓ " + it.info; refreshHistory();
-  } catch (e) { if (isCurrent("view", t)) toast(errText(e), "err"); }
-  if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
-}
+async function openSweepRun(it) { await openRun(it.run_id, RUN && RUN.view); }
 /* probes and frame inspection: click on the field */
 let PROBE = false;
 function toggleProbe() { PROBE = !PROBE; const b = $("#s-probe"); if (b) { b.classList.toggle("on", PROBE); b.setAttribute("aria-pressed", PROBE ? "true" : "false"); } $("#s-status").textContent = PROBE ? "📍 click on the field to read a value, probe a point in time, or draw a profile" : "Ready."; }
@@ -959,10 +985,11 @@ document.addEventListener("timeupdate", e => {
   $("#s-scrub").value = v.currentTime / v.duration * 1000;
   const f = n => { const m = Math.floor(n / 60), s = Math.floor(n % 60); return m + ":" + String(s).padStart(2, "0"); };
   $("#s-time").textContent = f(v.currentTime) + " / " + f(v.duration);
-  const st = $("#s-simtime"), meta = RUN && RUN.meta;
-  if (st && meta && meta.times && meta.times.length) {
-    const i = Math.min(meta.times.length - 1, Math.round(v.currentTime / v.duration * (meta.times.length - 1)));
-    const tv = meta.times[i]; st.textContent = "t = " + (Math.abs(tv) >= 1000 ? Math.round(tv) : +tv.toPrecision(4)) + " " + (meta.time_unit || "");
+  const st = $("#s-simtime");
+  const times = CMP ? CMP.times : (RUN && RUN.meta && RUN.meta.times), unit = CMP ? CMP.unit : (RUN && RUN.meta && RUN.meta.time_unit);
+  if (st && times && times.length) {
+    const i = FunoosLogic.frameAt(v.currentTime, FPS, times.length);
+    const tv = times[i]; st.textContent = "t = " + (Math.abs(tv) >= 1000 ? Math.round(tv) : +tv.toPrecision(4)) + " " + (unit || "") + (CMP ? " (comparison)" : "");
   } else if (st) st.textContent = "";
 }, true);
 
@@ -1042,3 +1069,9 @@ async function fillAbout() {
     box.append(elt("div", "kicker", "acknowledgements")); box.append(elt("div", "read small", a.acknowledgements));
   } catch (e) { /* about is static; ignore */ }
 }
+
+/* boot — last, so every top-level declaration above is initialised even when the bridge is
+   already present while this script is evaluated (no pywebviewready event in that case) */
+function boot() { buildGallery().then(fillStudioPicker); initStage(); show("intro"); }
+if (window.pywebview && window.pywebview.api) boot();
+else window.addEventListener("pywebviewready", boot);

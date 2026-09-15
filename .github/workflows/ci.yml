@@ -41,6 +41,11 @@ jobs:
       - name: Frontend logic checks (node)
         run: node tests/test_frontend.js
 
+      - name: Frontend interaction test (jsdom, real catalogue responses)
+        run: |
+          npm install --no-save --no-package-lock jsdom@24
+          node tests/test_frontend_ui.js
+
   package-linux:
     runs-on: ubuntu-latest
     steps:

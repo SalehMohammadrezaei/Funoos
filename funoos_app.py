@@ -441,6 +441,17 @@ def _api_method(fn):
     return wrapper
 
 
+
+def scene_for_run(exhibit, params):
+    """The catalogue scene a run belongs to: the most specific preset of its exhibit whose values
+    are all contained in the run's parameters (None when no preset of that exhibit matches)."""
+    scene, best = None, -1
+    for sc in catalog.SCENES:
+        pre = sc["preset"]
+        if sc["exhibit"] == exhibit and len(pre) > best and all(params.get(k) == v for k, v in pre.items()):
+            scene, best = sc["key"], len(pre)
+    return scene
+
 class Api:
     def __init__(self, store=None, sweep=True):
         self.store = store if store is not None else RunStore()   # (an empty store is falsy)
@@ -1176,6 +1187,23 @@ class Api:
             return {"ok": True, "path": path}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e)}
+
+    def run_info(self, run_id):
+        """Complete descriptor of a stored run: views, palettes, readouts, metadata, parameters,
+        provenance, scene — everything the UI needs to display it as the current result."""
+        res = self.store.result(run_id)
+        if res is None:
+            return {"ok": False, "error": "run expired", "run_id": run_id}
+        with self._lock:
+            job = self._jobs.get(run_id)
+        exhibit = job.exhibit if job else None
+        scene = scene_for_run(exhibit, dict(job.params)) if exhibit else None
+        return {"ok": True, "run_id": run_id, "info": res.info, "views": list(res.views), "view": res.views[0],
+                "cmaps": list(render.COLORMAPS), "defcmap": engine.DEFCMAP[res.kind], "stats": _stats(res, exhibit) if exhibit else [],
+                "meta": res.meta(), "params": dict(job.params) if job else {}, "exhibit": exhibit, "scene": scene,
+                "state": job.state if job else "completed", "provenance": job.provenance if job else None,
+                "parent": getattr(job, "parent", None) if job else None,
+                "derived": schema.derived(exhibit, dict(job.params)) if exhibit in engine.EXHIBITS else []}
 
     # ---------- result store ----------
     def runs(self):

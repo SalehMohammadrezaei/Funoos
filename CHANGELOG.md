@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.2
+
+Gallery navigation (regression in 1.1.1, fixed)
+* Every experiment card failed to open in 1.1.1: the related-experiments rail still read the old catalogue shape (`group.scenes`) after the catalogue moved to experiments, so opening a card threw before the page was shown. The rail now reads experiments, a failure in the optional rail can no longer stop the page from opening, and any other rendering failure is reported instead of leaving the gallery unresponsive.
+* Start-up no longer depends on the bridge becoming ready after the script is evaluated: when it is already present, every declaration is initialised before the gallery is built.
+
+Interaction fixes
+* Switching experiments while a simulation runs keeps Run disabled and Cancel visible, and both name the experiment that is still simulating.
+* Changing the palette during a side-by-side comparison recolours the comparison; the comparison state and the clip on screen stay together.
+* A slow reply for an earlier preset can no longer replace the preset chosen later in Studio (request tokens, as in Detail).
+* Opening a sweep result or a run from the history loads its complete descriptor from the backend (views, palettes, readouts, metadata, parameters, provenance) and switches to the run's experiment first; new `run_info` API.
+* Missing sweep metrics show as "unavailable" instead of 0.00.
+* Loading a saved setup clears manual colour limits when the saved limits are automatic and restores the clip frame rate and zoom.
+* The simulation-time readout uses the encoded-frame index and, during a comparison, the comparison's own output times.
+
+Tests
+* `tests/test_frontend_ui.js` (node + jsdom, in CI and the macOS release build): loads the real page against catalogue and scene replies generated from the Python registry and exercises every card by click, Enter and Space, Back, related-item navigation, preset switching with out-of-order replies, background runs, reopening results, comparison recolouring and clock, sweep metrics and setup loading. It fails on the 1.1.1 page.
+* `test_jobs.py`: `run_info` descriptor, expired runs, and scene detection by the most specific preset.
+
 ## 1.1.1
 
 Execution and export failures (reproduced, then fixed)

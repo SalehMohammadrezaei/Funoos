@@ -6,6 +6,7 @@ in-process loops), error envelopes instead of exceptions, request tokens echoed
 for stale-response filtering, the bounded/pinnable result store and crash
 cleanup of scratch directories. No GUI is needed: `Api` is driven directly.
 """
+import json
 import os
 import subprocess
 import sys
@@ -533,6 +534,27 @@ def test_sweep_stale_temp():
     engine.EXHIBITS["__tmp__"] = {"params": [], "solve": solve}
     engine.solve_exhibit("__tmp__", {})
     assert Path(seen[0]).name.startswith(f"funoos-{os.getpid()}-") and not Path(seen[0]).exists()
+
+
+def test_run_info_descriptor_and_scene():
+    """A stored run reopens with a complete descriptor; an evicted run says so; the scene is the most
+    specific preset contained in the run's parameters (airfoil −14° is not mistaken for +14°)."""
+    from funoos_app import scene_for_run
+    from flowzoo import catalog, schema
+    api = _api()
+    api.run("__quick__", {}, None, None, 26, "ri1")
+    info = api.run_info("ri1")
+    assert info["ok"] and info["run_id"] == "ri1" and info["views"] and info["view"] == info["views"][0]
+    assert info["meta"]["frames"] >= 1 and info["cmaps"] and info["defcmap"] and info["state"] == "completed"
+    json.dumps(info, allow_nan=False)
+    assert api.run_info("gone") == {"ok": False, "error": "run expired", "run_id": "gone"}
+    by_key = {s["key"]: s for s in catalog.SCENES}
+    for key in ("lbm_airfoil", "lbm_airfoil_neg", "lbm_airfoil_zero", "sph_dam"):
+        sc = by_key[key]
+        params = {q["name"]: q["default"] for q in schema._specs(sc["exhibit"])}
+        params.update(sc["preset"])
+        assert scene_for_run(sc["exhibit"], params) == key, (key, scene_for_run(sc["exhibit"], params))
+    assert scene_for_run("no such exhibit", {}) is None
 
 
 if __name__ == "__main__":

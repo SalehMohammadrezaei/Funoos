@@ -133,7 +133,7 @@ MIT (see `LICENSE`; third-party components in `THIRD_PARTY_NOTICES.md`). Created
 Saleh Mohammadrezaei (salehmrezaee@gmail.com). If Funoos is useful in teaching or
 research, please cite it (`CITATION.cff`):
 
-> Mohammadrezaei, S. (2026). Funoos — fluid simulation laboratory (version 1.1.1)
+> Mohammadrezaei, S. (2026). Funoos — fluid simulation laboratory (version 1.1.2)
 > [Computer software]. https://github.com/SalehMohammadrezaei/Funoos
 
 Readability and keyboard access are documented in [docs/accessibility.md](docs/accessibility.md).

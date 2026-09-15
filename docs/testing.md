@@ -15,12 +15,16 @@ binaries and then runs the packaged app's self-test. Each suite is a plain scrip
 | `test_jobs.py` | frontend/backend contract, resource use | cancellation kills the solver; job states and immutable snapshots; error envelopes; request tokens and superseded encodes; view cache; previews; store bounds, pinning, disk spill and cleanup; sweeps; comparison; probes/profiles; project save/load; temp sweep after a crash |
 | `test_media.py` | media/export, colour mapping | streamed MP4/GIF encode → decode with the right frame count and size; generator input; field/legend agreement incl. gamma and floor; palette independence; empty vs zero; derived-field cache; actual frame times; estimate |
 | `test_frontend.js` (node) | frontend logic | complete numeric parsing, Run re-enabled after a corrected value, hard vs recommended limits, stale-response tokens, encoded-frame index, favourite/recent migration, result-vs-controls identity |
+| `test_frontend_ui.js` (node + jsdom) | gallery and Studio interaction | loads the real `index.html`, `web/logic.js` and `web/app.js` against the catalogue and scene responses generated from the Python registry: every experiment card opens by click, Enter and Space, with its layers, preset selector and related experiments; Back; related-item navigation; out-of-order preset replies in Detail and Studio; Run/Cancel state when switching experiments during a run; reopening a background result from the history (switches to its experiment); comparison clock and recolouring; "unavailable" sweep metrics; setup load restoring automatic limits, fps and zoom |
 | `Funoos --selftest` | packaging | bundled solvers, font and encoder work inside the packaged app (CI on Linux; build scripts on Windows/macOS) |
 
 The pure frontend logic lives in `web/logic.js` and is checked with node
-(`tests/test_frontend.js`, run in CI). Behaviour that needs a real window
-(keyboard operation, native dropdown rendering, playback) is covered by manual
-walkthrough only.
+(`tests/test_frontend.js`, run in CI). The interaction test (`tests/test_frontend_ui.js`,
+run in CI after `npm install --no-save jsdom@24`) drives the real page with a stubbed
+bridge whose catalogue and scene replies come from the Python registry, so a change of
+the catalogue shape that the page does not follow fails in CI. What jsdom cannot show
+(native dropdown rendering, actual video decoding and playback, layout) is covered by
+manual walkthrough only.
 
 ## Tolerances
 
