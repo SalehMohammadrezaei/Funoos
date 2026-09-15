@@ -256,6 +256,54 @@ def test_run_emits_preview_before_clip():
     assert r["ok"] and seen and seen[0][0] == "pv" and seen[0][1] == "data:image/png;" and "encoding" in seen[0][2]
 
 
+def test_project_record_roundtrip():
+    api = _api()
+    rec = api.project("lbm_cylinder", "Wind Tunnel", {"reynolds": 120}, "Vorticity", "Turbo", False)
+    assert rec["app"] == "Funoos" and rec["version"] and rec["params"]["reynolds"] == 120 and rec["derived"]
+    assert "lbm2d" in rec["solver_versions"]
+    with tempfile.TemporaryDirectory() as d:
+        import json
+        pth = Path(d) / "x.funoos.json"; pth.write_text(json.dumps(rec))
+        got = api.load_project_file(pth)
+        assert got["ok"] and got["config"]["params"]["reynolds"] == 120 and got["config"]["validation"]["ok"]
+        (Path(d) / "bad.json").write_text("{}")
+        assert api.load_project_file(Path(d) / "bad.json")["ok"] is False
+
+
+def test_sweep_runs_each_value_and_is_cancellable():
+    api = Api(store=RunStore(max_runs=10, max_bytes=10 ** 9), sweep=False)
+    r = api.sweep("__quick__", {}, "a", [1, 2, 3], None, None, "sw1")
+    assert r["ok"] and len(r["items"]) == 3 and [it["value"] for it in r["items"]] == [1, 2, 3]
+    assert all(it["frame"].startswith("data:image/png") for it in r["items"])
+    assert all(it["run_id"] in api.store for it in r["items"]) and api.job("sw1")["state"] == "completed"
+    assert api.sweep("__quick__", {}, "a", list(range(20)), None, None, "sw2")["items"].__len__() == api.MAX_SWEEP
+    assert api.sweep("__quick__", {}, "a", ["x"], None, None, "sw3")["ok"] is False
+    out = {}
+    th = threading.Thread(target=lambda: out.update(api.sweep("__slow__", {}, "a", [1, 2, 3], None, None, "sw4")))
+    th.start(); time.sleep(0.4); api.cancel("sw4"); th.join(timeout=10)
+    assert not th.is_alive() and out["state"] == "cancelled" and api.job("sw4")["state"] == "cancelled"
+
+
+def test_compare_probe_inspect_profile():
+    api = _api()
+    a = api.run("__quick__", {"a": 1}, None, None, 26, "ca"); b = api.run("__quick__", {"a": 2}, None, None, 26, "cb")
+    assert a["ok"] and b["ok"]
+    n0 = len(_ENCODES)
+    c = api.compare("ca", "cb", "Speed", "Turbo", 26, req=4)
+    assert c["ok"] and c["req"] == 4 and c["synchronised"] and len(_ENCODES) == n0 + 1 and _ENCODES[-1] == 3
+    assert api.compare("ca", "zz", "Speed")["ok"] is False
+    i = api.inspect("ca", "Speed", 0.03, 0.5, 1.0, req=1)        # the 8-cell field is ~7 % of the frame width
+    assert i["ok"] and not i["outside"] and i["value"] is not None and i["label"] == "speed |u|"
+    assert api.inspect("ca", "Speed", 0.99, 0.5)["outside"] is True, "the colourbar panel is not part of the field"
+    pr = api.probe("ca", "Vorticity", 0.3, 0.5, req=2)
+    assert pr["ok"] and len(pr["values"]) == 3 and pr["plot"].startswith("data:image/png") and pr["times"] == [0.0, 1.0, 2.0]
+    lp = api.line_profile("ca", "Speed", "x", 0.5, 1.0, req=3)
+    assert lp["ok"] and len(lp["values"]) == 8 and lp["plot"]
+    lp2 = api.line_profile("ca", "Speed", "y", 0.5, 0.0)
+    assert lp2["ok"] and lp2["index"] == 0 and len(lp2["values"]) == 8
+    assert api.probe("zz", "Speed", 0.5, 0.5)["ok"] is False
+
+
 # ----------------------------------------------------------------- result store
 def test_store_bounded_by_count_lru():
     st = RunStore(max_runs=3, max_bytes=10 ** 9)

@@ -49,7 +49,11 @@ from pathlib import Path
 
 ROOT = Path(getattr(sys, "_MEIPASS", str(Path(__file__).resolve().parent)))
 sys.path.insert(0, str(ROOT))
-from flowzoo import engine, render, content, postproc, catalog   # noqa: E402
+from flowzoo import engine, render, content, postproc, catalog, schema, analysis   # noqa: E402
+try:
+    from flowzoo import __version__ as APP_VERSION
+except Exception:                                          # noqa: BLE001
+    APP_VERSION = "dev"
 
 # ---------------------------------------------------------------- result storage
 MAX_RUNS = int(os.environ.get("FUNOOS_MAX_RUNS", "3"))
@@ -410,6 +414,26 @@ class Api:
                 "clip": "results/gallery/" + key + ".mp4", "preset": s["preset"],
                 "cmap": s.get("cmap"), "params": _param_spec(ex), "method_label": m.get("method", "")}
 
+    def validate(self, exhibit, params, advanced=False):
+        """Validate a setup without running it (errors / warnings / applied adjustments)."""
+        try:
+            return {"ok": True, "exhibit": exhibit, **schema.validate(exhibit, params or {}, allow_outside=bool(advanced)).as_dict()}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e)}
+
+    def derived(self, exhibit, params):
+        """Derived quantities the runner will use for this setup."""
+        try:
+            return {"ok": True, "exhibit": exhibit, "items": schema.derived(exhibit, params or {})}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e)}
+
+    def exhibits(self):
+        """Every exhibit with its parameter spec (for a scene picker inside the Studio)."""
+        return {"ok": True, "exhibits": [{"name": n, "params": _param_spec(n),
+                                          "method": engine.META.get(n, {}).get("method", "")}
+                                         for n in engine.EXHIBITS]}
+
     # ---------- job registry ----------
     def _new_job(self, exhibit, params, view, cmap, job_id=None):
         with self._lock:
@@ -473,14 +497,23 @@ class Api:
             return {"ok": True, "jobs": [j.snapshot() for j in self._jobs.values()]}
 
     # ---------- run / render ----------
-    def run(self, exhibit, params, view=None, cmap=None, fps=26, job_id=None):
+    def run(self, exhibit, params, view=None, cmap=None, fps=26, job_id=None, advanced=False):
         """Solve + render. Blocks until the job reaches a terminal state and returns
-        its envelope; call `cancel(job_id)` from another thread to stop it."""
-        job = self._new_job(exhibit, params, view, cmap, job_id)
+        its envelope; call `cancel(job_id)` from another thread to stop it.
+        Parameters are validated first: an invalid setup fails before any solver starts.
+        `advanced=True` allows values outside the recommended (soft) ranges."""
+        if exhibit not in engine.EXHIBITS:
+            job = self._new_job(exhibit, params, view, cmap, job_id)
+            job.error = f"unknown exhibit: {exhibit}"; job.set_state("failed")
+            return {"ok": False, "job_id": job.id, "state": "failed", "error": job.error}
+        val = schema.validate(exhibit, params, allow_outside=bool(advanced))
+        job = self._new_job(exhibit, val.params, view, cmap, job_id)
+        if not val.ok:
+            job.error = "invalid setup: " + "; ".join(val.errors); job.set_state("failed")
+            return {"ok": False, "job_id": job.id, "state": "failed", "error": job.error,
+                    "validation": val.as_dict()}
         progress = lambda msg: self._emit_progress(job.id, msg)   # noqa: E731
         try:
-            if exhibit not in engine.EXHIBITS:
-                raise KeyError(f"unknown exhibit: {exhibit}")
             job.set_state("running")
             res = engine.solve_exhibit(job.exhibit, dict(job.params), progress=progress,
                                        cancel=job.cancel)
@@ -508,6 +541,7 @@ class Api:
                     "video": vid, "views": list(res.views), "view": view, "info": res.info,
                     "cmaps": list(render.COLORMAPS), "defcmap": cm, "stats": _stats(res, exhibit),
                     "params": dict(job.params), "evicted": evicted, "meta": res.meta(),
+                    "validation": val.as_dict(), "derived": schema.derived(exhibit, dict(job.params)),
                     "store": {"runs": len(self.store), "bytes": self.store.total_bytes()}}
         except engine.Cancelled:
             job.set_state("cancelled"); job.error = "cancelled"
@@ -621,6 +655,237 @@ class Api:
             return {"ok": True, "run_id": run_id, "req": req, "plots": plots}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e), "run_id": run_id, "req": req}
+
+    # ---------- experiments: projects, sweeps, comparison, probes ----------
+    def project(self, scene, exhibit, params, view=None, cmap=None, advanced=False, run_id=None):
+        """The complete resolved setup as a JSON-able project record."""
+        val = schema.validate(exhibit, params or {}, allow_outside=True)
+        rec = {"app": "Funoos", "version": APP_VERSION, "saved": time.strftime("%Y-%m-%dT%H:%M:%S"),
+               "scene": scene, "exhibit": exhibit, "params": val.params, "advanced": bool(advanced),
+               "derived": schema.derived(exhibit, val.params), "view": view, "cmap": cmap,
+               "solver_versions": engine.solver_versions()}
+        res = self.store.result(run_id) if run_id else None
+        if res is not None:
+            rec["result"] = res.meta()
+            with self._lock:
+                job = self._jobs.get(run_id)
+            rec["status"] = job.state if job else "completed"
+        return rec
+
+    def save_project(self, scene, exhibit, params, view=None, cmap=None, advanced=False, run_id=None):
+        """Write the resolved setup to a user-chosen .funoos.json file."""
+        if not self._win:
+            return {"ok": False, "error": "no window"}
+        try:
+            import webview
+            rec = self.project(scene, exhibit, params, view, cmap, advanced, run_id)
+            name = "".join(c if c.isalnum() else "_" for c in (scene or exhibit)).strip("_")[:40] or "experiment"
+            sel = self._win.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"{name}.funoos.json",
+                                               file_types=("Funoos setup (*.json)", "All files (*.*)"))
+            if not sel:
+                return {"ok": True, "path": None}
+            path = sel[0] if isinstance(sel, (list, tuple)) else sel
+            if not path.lower().endswith(".json"):
+                path += ".json"
+            Path(path).write_text(json.dumps(rec, indent=2))
+            return {"ok": True, "path": path}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e)}
+
+    def load_project(self):
+        """Open a saved setup; returns the record (validated against the current schema)."""
+        if not self._win:
+            return {"ok": False, "error": "no window"}
+        try:
+            import webview
+            sel = self._win.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False,
+                                               file_types=("Funoos setup (*.json)", "All files (*.*)"))
+            if not sel:
+                return {"ok": True, "config": None}
+            path = sel[0] if isinstance(sel, (list, tuple)) else sel
+            return self.load_project_file(path)
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e)}
+
+    def load_project_file(self, path):
+        try:
+            rec = json.loads(Path(path).read_text())
+            if not isinstance(rec, dict) or rec.get("app") != "Funoos" or "exhibit" not in rec:
+                return {"ok": False, "error": "not a Funoos setup file"}
+            if rec["exhibit"] not in engine.EXHIBITS:
+                return {"ok": False, "error": f"unknown exhibit in file: {rec['exhibit']}"}
+            val = schema.validate(rec["exhibit"], rec.get("params") or {}, allow_outside=True)
+            rec["params"] = val.params
+            rec["validation"] = val.as_dict()
+            return {"ok": True, "config": rec, "path": str(path)}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e)}
+
+    MAX_SWEEP = 8
+
+    def sweep(self, exhibit, params, name, values, view=None, cmap=None, job_id=None, advanced=False):
+        """Run the same setup for each value of one parameter (bounded queue, cancellable
+        as one job). Each result is stored like a normal run; the reply carries the
+        readouts and a thumbnail per value plus a readout-vs-value plot."""
+        try:
+            values = [float(v) for v in (values or [])][: self.MAX_SWEEP]
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "sweep values must be numbers"}
+        if not values or exhibit not in engine.EXHIBITS:
+            return {"ok": False, "error": "nothing to sweep"}
+        spec = {q["name"]: q for q in engine.EXHIBITS[exhibit]["params"]}
+        if name not in spec or spec[name].get("type", "float") not in ("float", "int"):
+            return {"ok": False, "error": f"{name} is not a numeric parameter"}
+        job = self._new_job(exhibit, dict(params or {}, **{name: values[0]}), view, cmap, job_id)
+        items = []; errors = []
+        try:
+            job.set_state("running")
+            for k, val_ in enumerate(values):
+                if job.cancel.is_set():
+                    raise engine.Cancelled()
+                p = dict(params or {}); p[name] = val_
+                v = schema.validate(exhibit, p, allow_outside=bool(advanced))
+                if not v.ok:
+                    errors.append({"value": val_, "error": "; ".join(v.errors)}); continue
+                self._emit_progress(job.id, f"sweep {k + 1}/{len(values)}: {name} = {val_:g}")
+                res = engine.solve_exhibit(exhibit, v.params, progress=lambda m: self._emit_progress(job.id, f"[{k + 1}/{len(values)}] {m}"),
+                                           cancel=job.cancel)
+                rid = f"{job.id}-{k}"
+                self.store.add(rid, res, res.info)
+                vw = res.view_name(view); cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
+                metrics = postproc.metrics(res) if hasattr(postproc, "metrics") else {}
+                if not metrics:                                    # fall back to the numeric readouts
+                    for st in _stats(res, exhibit):
+                        try:
+                            metrics[st["l"]] = float(st["v"])
+                        except (TypeError, ValueError):
+                            pass
+                items.append({"value": val_, "run_id": rid, "info": res.info, "stats": _stats(res, exhibit),
+                              "metrics": metrics, "frame": _b64_png(res.frame(-1, vw, cm))})
+            job.set_state("completed"); job.run_id = items[-1]["run_id"] if items else None
+            plot = None
+            nums = [(it["value"], it["metrics"]) for it in items if it.get("metrics")]
+            if nums:
+                keys = [k for k in nums[0][1] if isinstance(nums[0][1][k], (int, float))]
+                if keys:
+                    key = keys[0]
+                    xs = [x for x, m in nums if isinstance(m.get(key), (int, float))]
+                    ys = [m[key] for x, m in nums if isinstance(m.get(key), (int, float))]
+                    if len(xs) >= 2:
+                        fig, ax, plt = postproc._new_ax(f"{spec[name]['label']}", key, f"{key} vs {spec[name]['label']}")
+                        ax.plot(xs, ys, "o-", color=postproc._CYAN, lw=2)
+                        plot = _b64_png(postproc._rgb(fig, plt))
+            return {"ok": True, "job_id": job.id, "state": "completed", "name": name, "items": items,
+                    "errors": errors, "plot": plot, "views": list(engine.VIEWS.values())[0] if not items else None}
+        except engine.Cancelled:
+            job.set_state("cancelled")
+            return {"ok": False, "job_id": job.id, "state": "cancelled", "error": "cancelled", "items": items}
+        except Exception as e:                      # noqa: BLE001
+            job.error = _errtext(e); job.set_state("failed")
+            return {"ok": False, "job_id": job.id, "state": "failed", "error": job.error, "items": items}
+
+    def compare(self, run_a, run_b, view, cmap=None, fps=26, req=None):
+        """Side-by-side clip of two stored runs, synchronised by simulation time (or clip
+        fraction when the time units differ), drawn with one shared colour scale."""
+        a = self.store.result(run_a); b = self.store.result(run_b)
+        if a is None or b is None:
+            return {"ok": False, "error": "run expired", "req": req}
+        try:
+            cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[a.kind]
+            frames = analysis.compare_frames(a, b, view, cm)
+            times = []
+
+            def gen():
+                for fr, t in frames:
+                    times.append(t); yield fr
+            with self._encode:
+                vid = _b64_mp4(gen(), fps)
+            return {"ok": True, "req": req, "video": vid, "times": times, "run_a": run_a, "run_b": run_b,
+                    "synchronised": a.hints.get("time_unit") == b.hints.get("time_unit"),
+                    "info": f"{a.info}   |   {b.info}"}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "req": req}
+
+    def inspect(self, run_id, view, xfrac, yfrac, when=1.0, req=None):
+        """Field value at a point of the rendered frame (fractions of the FRAME incl. the
+        colourbar panel, +y up); returns None for solid/empty cells."""
+        res = self.store.result(run_id)
+        if res is None:
+            return {"ok": False, "error": "run expired", "req": req}
+        try:
+            pf = analysis.panel_fraction(res, view)
+            xf = float(xfrac) / max(1e-9, 1.0 - pf)
+            if xf > 1.0:
+                return {"ok": True, "req": req, "outside": True}
+            out = analysis.value_at(res, view, xf, float(yfrac), when)
+            return {"ok": True, "req": req, "outside": False, **out}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "req": req}
+
+    def probe(self, run_id, view, xfrac, yfrac, req=None):
+        res = self.store.result(run_id)
+        if res is None:
+            return {"ok": False, "error": "run expired", "req": req}
+        try:
+            pf = analysis.panel_fraction(res, view)
+            xf = min(1.0, float(xfrac) / max(1e-9, 1.0 - pf))
+            ser = analysis.probe_series(res, view, xf, float(yfrac))
+            fig, ax, plt = postproc._new_ax(f"time ({ser['time_unit']})", ser["label"], f"Probe at ({ser['ix']}, {ser['iy']})")
+            ax.plot(ser["times"], [np.nan if v is None else v for v in ser["values"]], color=postproc._CYAN, lw=2)
+            return {"ok": True, "req": req, **ser, "plot": _b64_png(postproc._rgb(fig, plt))}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "req": req}
+
+    def line_profile(self, run_id, view, axis="x", frac=0.5, when=1.0, req=None):
+        res = self.store.result(run_id)
+        if res is None:
+            return {"ok": False, "error": "run expired", "req": req}
+        try:
+            pr = analysis.line_profile(res, view, axis, float(frac), when)
+            fig, ax, plt = postproc._new_ax("position (fraction)" if axis == "x" else pr["label"],
+                                            pr["label"] if axis == "x" else "height (fraction)",
+                                            f"Profile along {axis} at t = {pr['time']:g}")
+            vals = [np.nan if v is None else v for v in pr["values"]]
+            if axis == "x":
+                ax.plot(pr["pos"], vals, color=postproc._AMBER, lw=2)
+            else:
+                ax.plot(vals, pr["pos"], color=postproc._AMBER, lw=2)
+            return {"ok": True, "req": req, **pr, "plot": _b64_png(postproc._rgb(fig, plt))}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e), "req": req}
+
+    def export_csv(self, run_id, kind="probe", opts=None):
+        """Save a probe series / line profile / diagnostic time series as CSV."""
+        kw = dict(opts or {})
+        if not self._win:
+            return {"ok": False, "error": "no window"}
+        try:
+            import webview, csv
+            res = self.store.result(run_id)
+            if res is None:
+                return {"ok": False, "error": "run expired"}
+            if kind == "probe":
+                d = analysis.probe_series(res, kw.get("view"), float(kw.get("xfrac", 0.5)), float(kw.get("yfrac", 0.5)))
+                rows = [("time", d["label"])] + list(zip(d["times"], d["values"]))
+            elif kind == "profile":
+                d = analysis.line_profile(res, kw.get("view"), kw.get("axis", "x"), float(kw.get("frac", 0.5)))
+                rows = [("position", d["label"])] + list(zip(d["pos"], d["values"]))
+            else:
+                series = postproc.series(res) if hasattr(postproc, "series") else {}
+                if not series:
+                    return {"ok": False, "error": "no time series for this run"}
+                keys = list(series); n = len(series[keys[0]])
+                rows = [tuple(keys)] + [tuple(series[k][i] for k in keys) for i in range(n)]
+            sel = self._win.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"funoos_{kind}.csv",
+                                               file_types=("CSV (*.csv)", "All files (*.*)"))
+            if not sel:
+                return {"ok": True, "path": None}
+            path = sel[0] if isinstance(sel, (list, tuple)) else sel
+            with open(path, "w", newline="") as f:
+                csv.writer(f).writerows(rows)
+            return {"ok": True, "path": path}
+        except Exception as e:                      # noqa: BLE001
+            return {"ok": False, "error": _errtext(e)}
 
     # ---------- result store ----------
     def runs(self):
