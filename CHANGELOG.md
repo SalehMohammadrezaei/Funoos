@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.1.1
+
+Execution and export failures (reproduced, then fixed)
+* A completed still-water run could turn "failed": the derived readouts lacked the `rest` case and divided by a zero diffusivity. Readouts are now total over every preset and limiting value and are advisory: a readout problem can no longer change a run's terminal state (tests over all presets).
+* Cloud Billows at Ultra with ν = 0.01 produced non-finite fields from frame 10 (ν·k_max²·dt = 2.89 exceeds the explicit-RK4 limit). The spectral solver now integrates the viscous term exactly (integrating-factor RK4); the case reproduced at Low resolution stays finite, and non-finite fields raise a clear error instead of silent NaN frames.
+* Sweeps could return NaN metrics, which is not JSON and left the frontend promise hanging: every API reply is now strictly JSON (NaN/inf → null).
+* Probe/profile CSV exports sampled a different column from the displayed plot: exports now use the resolved cell and frame captured when the plot was made, and the profile export records the frame and time.
+* A 4×4 incompressible grid overflowed the heap (reproduced under AddressSanitizer): the source geometry is bounded and grids below 16 cells are rejected.
+
+Consistency
+* One effective configuration per solver family is shared by the runners, the derived readouts, result metadata and reports; the porous force strength and the SPH sound-speed reference now match the solver exactly.
+* Porous flow starts at rest (`--U 0`); k is reported as settled or transient from the solver's convergence record; the pore Reynolds number is recorded.
+* Frame 0 is the initial state and the final state is always saved for every solver; frame thinning keeps the last frame; warm-up intervals that are dropped are recorded; the frame on screen is identified from the encoded clip position.
+* Random initial conditions are drawn on a fixed reference grid so the same seed gives the same continuous field at every resolution (spectral: exact zero-padding/low-pass; Gray–Scott: blob positions as fractions).
+* Derived readouts state which quantities change with the resolution setting (grid-unit coefficients, convective time, Rayleigh number); the free-slip plate onset (657.5) replaces the no-slip 1708 where the solver's plates are free-slip.
+
+State and integrity
+* Strict numeric parsing ("0,01" → 0.01; "1e", "2abc" rejected); Run is re-enabled when an invalid value is corrected.
+* Every asynchronous reply is guarded by its request token and run identity (scene picks, comparisons included).
+* Comparison is its own display state; runs must share solver family, view and time unit and are aligned over the shared interval only (nothing repeated beyond a run's duration); probes and exports refer to a single run again after leaving it.
+* Sweep children are jobs with immutable parameters and provenance; the run history retains them (duplicate, report, export work); availability is shown.
+* Saved setups (schema v2) separate the editable draft from the run's frozen configuration and record whether they match; presentation (view, palette, colour limits) is restored; provenance is frozen when a job starts.
+
+Gallery, readability, rendering, explanations, controls, attribution
+* 27 experiment cards with named presets (docs/gallery_map.md); Detail and Studio preset selectors; "Custom setup" label; favourites/recents migrated; counts from the registry.
+* Semantic colour tokens with measured contrast (docs/accessibility.md), dark `color-scheme`, every select/option/optgroup styled.
+* Streamlines share the full normalisation with the legend; probes use the actual rendered field rectangle; derived caches are counted in the memory budget; encoded clips have a byte budget; single-frame previews derive one frame; disk spill streams frame by frame; gallery videos are released on rebuild, at most six play at once, posters, autoplay/instant-preview settings, reduced motion honoured.
+* Explanations resolved per preset in reading order (question first) with initial/boundary conditions for every preset; corrected wording (mixture variable not conserved, wavemaker stroke, held obstacles, shock-radius caveat); missing diagnostics explain themselves; guided comparisons per experiment; window title "Funoos — fluid simulation laboratory".
+* Browse and prepare another setup while a run continues (drafts kept per scene; results land in the history); result-vs-controls indicator; Settings (memory, threads, previews, autoplay); inert inactive views, Back button, keyboard-safe favourites and shortcuts.
+* Home credit with GitHub link, About page, CITATION.cff, licence credit reconciled, third-party notices packaged, build revision recorded.
+
+Tests and packaging
+* Tests now require evidence: mass metadata must exist and be conserved; raw pressure and density minima positive; SPH density deviation < 5 %; frontend logic checked with node; per-preset derived readouts; strict JSON of every reply.
+* Native solvers validate arguments; macOS build uses the shared requirements and records resolved versions; gallery generation fails when an MP4 fails; Linux backend detection.
+
 ## 1.1.0
 
 Numerics and claims (stage 1, continued)
