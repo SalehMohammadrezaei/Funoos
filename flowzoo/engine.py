@@ -12,10 +12,12 @@ text and ranges); `view` and `colormap` are chosen *after* the run.
 from __future__ import annotations
 
 import os
+import queue
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -32,27 +34,95 @@ _STEP_RE = re.compile(r"step\s+(\d+)\s*/\s*(\d+)")
 _T_RE = re.compile(r"\bt=([\d.]+)")
 
 
-def _run_solver(args, pr=None, tend=None):
-    """Run a C++ solver, streaming its 'step X/Y' (or 't=…') output back as a live percent."""
-    if pr is None:
+class Cancelled(Exception):
+    """Raised inside a solve when its job was cancelled (see `solve_exhibit(cancel=...)`)."""
+
+
+# Solver subprocesses that are currently alive, so the app can kill them on exit.
+_LIVE_PROCS = set()
+_LIVE_LOCK = threading.Lock()
+
+
+def _kill(proc):
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+
+
+def kill_all_solvers():
+    """Kill every running solver subprocess (app shutdown / crash cleanup)."""
+    with _LIVE_LOCK:
+        procs = list(_LIVE_PROCS); _LIVE_PROCS.clear()
+    for proc in procs:
+        _kill(proc)
+    return len(procs)
+
+
+def _run_solver(args, pr=None, tend=None, cancel=None):
+    """Run a C++ solver, streaming its 'step X/Y' (or 't=…') output back as a live percent.
+
+    `cancel` is a threading.Event (or None); when it is set the process is killed
+    and `Cancelled` is raised. If not given, the event attached to the progress
+    callback as `pr.cancel` is used (that is how `solve_exhibit` passes it down).
+    The process is also killed if anything raises while it is being watched, so a
+    cancelled or failed job never leaves a solver running in the background.
+    """
+    if cancel is None:
+        cancel = getattr(pr, "cancel", None)
+    if pr is None and cancel is None:
         subprocess.run(args, check=True, env=_ENV); return
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1, env=_ENV)
+    with _LIVE_LOCK:
+        _LIVE_PROCS.add(proc)
+    lines = queue.Queue()
+
+    def reader():                       # pump stdout so polling for cancellation never blocks on I/O
+        try:
+            for line in proc.stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+    threading.Thread(target=reader, daemon=True).start()
+
     last = -1
-    for line in proc.stdout:
-        pct = None
-        m = _STEP_RE.search(line)
-        if m and int(m.group(2)):
-            pct = int(m.group(1)) / int(m.group(2))
-        elif tend:
-            mt = _T_RE.search(line)
-            if mt:
-                pct = float(mt.group(1)) / tend
-        if pct is not None:
-            p = max(0, min(99, int(pct * 100)))
-            if p != last:
-                last = p; pr(f"simulating… {p}%")
-    proc.wait()
+    try:
+        while True:
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            try:
+                line = lines.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            pct = None
+            m = _STEP_RE.search(line)
+            if m and int(m.group(2)):
+                pct = int(m.group(1)) / int(m.group(2))
+            elif tend:
+                mt = _T_RE.search(line)
+                if mt:
+                    pct = float(mt.group(1)) / tend
+            if pct is not None and pr is not None:
+                p = max(0, min(99, int(pct * 100)))
+                if p != last:
+                    last = p; pr(f"simulating… {p}%")
+        proc.wait()
+    except BaseException:
+        _kill(proc)
+        raise
+    finally:
+        with _LIVE_LOCK:
+            _LIVE_PROCS.discard(proc)
+    if cancel is not None and cancel.is_set():
+        raise Cancelled()
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, args)
 
@@ -1133,13 +1203,28 @@ META = {
 }
 
 
-def solve_exhibit(name, params, progress=lambda s: None):
-    """Run the solver once; return a Result you can .render(view, colormap) from."""
+TMP_PREFIX = f"funoos-{os.getpid()}-"     # solver scratch dirs; stale ones are swept at the next launch
+
+
+def solve_exhibit(name, params, progress=lambda s: None, cancel=None):
+    """Run the solver once; return a Result you can .render(view, colormap) from.
+
+    `cancel` (threading.Event) makes the solve cooperative: every progress report
+    checks it and raises `Cancelled`; C++ solvers are killed by `_run_solver`.
+    The scratch directory is removed whether the solve completes, fails or is
+    cancelled.
+    """
     spec = EXHIBITS[name]
     full = {q["name"]: q["default"] for q in spec["params"]}
     full.update(params or {})
-    with tempfile.TemporaryDirectory() as tmp:
-        return spec["solve"](full, progress, tmp)
+
+    def pr(msg):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        progress(msg)
+    pr.cancel = cancel
+    with tempfile.TemporaryDirectory(prefix=TMP_PREFIX) as tmp:
+        return spec["solve"](full, pr, tmp)
 
 
 def run_exhibit(name, params, progress=lambda s: None, view=None, colormap=None):
