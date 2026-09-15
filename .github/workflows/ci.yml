@@ -33,3 +33,4 @@ jobs:
           python tests/test_numerics.py
           python tests/test_jobs.py
           python tests/test_media.py
+          python tests/test_schema.py
