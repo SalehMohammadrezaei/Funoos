@@ -1,15 +1,12 @@
-"""Post-processing diagnostics for the player.
+"""Diagnostics: measurements first, plots second.
 
-Every scene gets a few *meaningful*, quantitative plots computed directly from
-the solved frames (no extra solver runs), each chosen for what actually matters
-in that flow: lift & drag for the airfoil, the Strouhal number for a shedding
-bluff body, the drafting shelter for a pair of cyclists, the blast-front radius,
-the convective heat flux for Rayleigh–Bénard, the bent-over plume trajectory for
-a chimney, Turing-pattern growth, and so on.
+`metrics(result)`  -> {name: number}          scalar measurements (tested without images)
+`series(result)`   -> {name: [values...]}      time series (first key is the time axis)
+`plots(result)`    -> [(title, rgb, explain)]  figures built from the two above
 
-`plots(result)` returns a list of (title, rgb-ndarray, explanation) triples — the
-explanation is shown beside the plot so the viewer knows what it means and how to
-read whether it is physically correct.
+Every plot's explanation states the definition, units, data source and sampling
+interval, the assumptions, and what has (and has not) been checked. Absolute
+values are plotted with their units; nothing is normalised by its own maximum.
 """
 from __future__ import annotations
 
@@ -17,7 +14,7 @@ import numpy as np
 
 # ---- theme (Funoos: deep-navy viewport, blue + lime accents) ----
 _BG = "#0C1A2E"; _FG = "#C7D4E8"; _GRID = "#1c2c44"; _MUTED = "#7e8eaa"
-_CYAN = "#6F90E8"; _AMBER = "#E1FC66"; _GOOD = "#9BE25A"
+_CYAN = "#6F90E8"; _AMBER = "#E1FC66"; _GOOD = "#9BE25A"; _WARN = "#f0a35a"
 
 
 def _new_ax(xl, yl, title):
@@ -38,10 +35,12 @@ def _new_ax(xl, yl, title):
 
 
 def _rgb(fig, plt):
-    fig.canvas.draw()
-    w, h = fig.canvas.get_width_height()
-    a = np.frombuffer(fig.canvas.buffer_rgba(), np.uint8).reshape(h, w, 4)[..., :3].copy()
-    plt.close(fig)
+    from . import render
+    with render._MPL_LOCK:
+        fig.canvas.draw()
+        w, h = fig.canvas.get_width_height()
+        a = np.frombuffer(fig.canvas.buffer_rgba(), np.uint8).reshape(h, w, 4)[..., :3].copy()
+        plt.close(fig)
     return a
 
 
@@ -49,48 +48,85 @@ def _legend(ax):
     ax.legend(facecolor=_BG, edgecolor=_GRID, labelcolor=_FG, fontsize=8, loc="best")
 
 
+def _note(ax, text, color=_GOOD, loc="tr"):
+    x, y, ha, va = {"tr": (0.97, 0.92, "right", "top"), "br": (0.97, 0.08, "right", "bottom"),
+                    "tl": (0.03, 0.92, "left", "top")}[loc]
+    ax.text(x, y, text, transform=ax.transAxes, color=color, fontsize=9, ha=ha, va=va, fontweight="bold")
+
+
 def _vel(result):
-    """List of (ux, uy) frames, or None."""
-    if result.kind in ("lbm", "spectral"):
+    if result.kind in ("lbm", "spectral", "porous"):
         return result.raw
     return result.hints.get("vel")
 
 
-def _curl(ux, uy):
-    dvdx = np.gradient(uy, axis=1); dudy = np.gradient(ux, axis=0)
-    return dvdx - dudy
+def _curl(ux, uy, dx=1.0):
+    return np.gradient(uy, dx, axis=1) - np.gradient(ux, dx, axis=0)
 
 
-# ─────────────────────────  generic energy diagnostic  ─────────────────────────
-def _ke_enstrophy(result, title, explain):
-    vel = _vel(result)
-    if not vel:
-        return []
-    ke = [0.5 * float(np.mean(ux * ux + uy * uy)) for ux, uy in vel]
-    ens = [0.5 * float(np.mean(_curl(ux, uy) ** 2)) for ux, uy in vel]
-    t = np.linspace(0, 1, len(ke))
-    fig, ax, plt = _new_ax("time (normalised)", "energy / enstrophy (normalised)", title)
-    ke = np.array(ke) / (max(ke) + 1e-30); ens = np.array(ens) / (max(ens) + 1e-30)
-    ax.plot(t, ke, color=_CYAN, lw=2.2, label="kinetic energy")
-    ax.plot(t, ens, color=_AMBER, lw=2.2, label="enstrophy")
-    _legend(ax); ax.set_ylim(0, 1.05)
-    return [(title, _rgb(fig, plt), explain)]
+def _tunit(result):
+    return result.hints.get("time_unit", "frame")
 
 
-# ─────────────────────────  wind-tunnel forces  ─────────────────────────
-def _drag_cd(result):
-    """Drag coefficient time-series from the wake momentum deficit at the probe plane."""
+def _times(result):
+    return np.asarray(result.times, float)
+
+
+# ═════════════════════════════ measurements ═════════════════════════════
+def _peak_frequency(sig, dt, min_cycles=6):
+    """Dominant frequency of a signal sampled every `dt` (Hann window, parabolic peak
+    refinement). Returns (f, ok, reason): ok=False when the record holds fewer than
+    `min_cycles` oscillations of the detected peak, i.e. the estimate is not meaningful."""
+    sig = np.asarray(sig, float); n = len(sig)
+    if n < 32:
+        return 0.0, False, "fewer than 32 samples"
+    sig = sig - sig.mean()
+    t = np.arange(n) * dt
+    sig = sig - np.polyval(np.polyfit(t, sig, 1), t)                # remove a linear drift
+    win = np.hanning(n); sp = np.abs(np.fft.rfft(sig * win)); fr = np.fft.rfftfreq(n, d=dt)
+    if len(sp) < 4 or not np.isfinite(sp).all():
+        return 0.0, False, "no spectrum"
+    k = int(np.argmax(sp[1:]) + 1)
+    if 1 <= k < len(sp) - 1:                                           # parabolic interpolation
+        a, b, c = np.log(sp[k - 1] + 1e-30), np.log(sp[k] + 1e-30), np.log(sp[k + 1] + 1e-30)
+        d = 0.5 * (a - c) / (a - 2 * b + c) if (a - 2 * b + c) != 0 else 0.0
+        f = fr[k] + d * (fr[1] - fr[0])
+    else:
+        f = fr[k]
+    cycles = f * n * dt
+    if cycles < min_cycles:
+        return float(f), False, f"only {cycles:.1f} oscillation cycles in the record (need ≥ {min_cycles})"
+    if sp[k] < 3.0 * np.median(sp[1:]):
+        return float(f), False, "no clear spectral peak"
+    return float(f), True, ""
+
+
+def _wind_series(result):
+    """Probe signal (every solver step) or, failing that, the frame-sampled transverse velocity."""
+    h = result.hints
+    if "probe_uy" in h and len(h["probe_uy"]) > 32:
+        t = np.asarray(h["probe_t"], float); v = np.asarray(h["probe_uy"], float)
+        keep = t >= 0.2 * t[-1]                                        # drop the start-up transient
+        return t[keep], v[keep], "wake probe, sampled every lattice step"
+    vel = result.raw; ny, nx = vel[0][0].shape
+    ix = int(min(nx - 2, h.get("probe_x", int(0.62 * nx)))); jy = int(h.get("probe_y", ny // 2))
+    return _times(result), np.array([uy[jy, ix] for _ux, uy in vel]), "animation frames (sparse)"
+
+
+def _wake_drag(result):
+    """Wake-survey drag coefficient (approximate): C_d ≈ (2/D) ∫ (u/U)(1 − u/U) dy at the probe
+    plane, with u clipped to [0, U]. Clipping removes the faster bypass flow beside the wake, so
+    this is an estimate of the momentum deficit, not a boundary-force integration."""
     vel = result.raw; h = result.hints
     ny, nx = vel[0][0].shape
     U = float(h.get("U", 0.1)) or 0.1
-    A = max(1.0, float(h.get("D", ny * 0.2)))               # frontal length scale
+    D = max(1.0, float(h.get("D", ny * 0.2)))
     xp = int(min(nx - 2, h.get("probe_x", int(0.62 * nx))))
     cds = []
     for ux, _uy in vel:
-        u = np.clip(ux[:, xp], 0.0, U)                      # only count sub-freestream wake,
-        deficit = float(np.sum(u * (U - u)))                # not the faster bypass flow beside it
-        cds.append(2.0 * deficit / (U * U * A))             # wake-survey drag: Cd = (2/A)∫(u/U)(1−u/U)dy
-    return np.array(cds), U, A, xp
+        u = np.clip(ux[:, xp], 0.0, U)
+        cds.append(2.0 * float(np.sum(u * (U - u))) / (U * U * D))
+    return np.array(cds), U, D, xp
 
 
 def _circulation(ux, uy, mask):
@@ -100,125 +136,324 @@ def _circulation(ux, uy, mask):
     m = 8
     j0 = max(1, rows.min() - m); j1 = min(mask.shape[0] - 2, rows.max() + m)
     i0 = max(1, cols.min() - m); i1 = min(mask.shape[1] - 2, cols.max() + m)
-    # Γ = ∮ u·dl, counter-clockwise (y = +j up): bottom +x, right +y, top −x, left −y
-    gamma = (float(np.sum(ux[j0, i0:i1])) + float(np.sum(uy[j0:j1, i1]))
-             - float(np.sum(ux[j1, i0:i1])) - float(np.sum(uy[j0:j1, i0])))
+    # Γ = ∮ u·dl taken counter-clockwise (y up): bottom +x, right +y, top −x, left −y.
+    # Aerodynamics counts CLOCKWISE circulation as positive (L = ρ U Γ_cw gives upward lift
+    # for a nose-up airfoil in left-to-right flow), so the sign is flipped here: the returned
+    # Γ is positive when the lift is upward.
+    gamma_ccw = (float(np.sum(ux[j0, i0:i1])) + float(np.sum(uy[j0:j1, i1]))
+                 - float(np.sum(ux[j1, i0:i1])) - float(np.sum(uy[j0:j1, i0])))
     chord = float(cols.max() - cols.min() + 1)
-    return gamma, chord
+    return -gamma_ccw, chord
 
 
-def _shedding(result):
-    """Periodic side-force signal + Strouhal-number spectrum (bluff bodies)."""
-    vel = result.raw; h = result.hints
-    ny, nx = vel[0][0].shape
-    ix = int(min(nx - 2, h.get("probe_x", int(0.62 * nx)))); jy = int(h.get("probe_y", ny // 2))
-    sig = np.array([uy[jy, ix] for _ux, uy in vel]); sig = sig - sig.mean()
-    t = np.arange(len(sig)); out = []
-    fig, ax, plt = _new_ax("frame", "transverse velocity  v  (side-force proxy)",
-                           "Vortex shedding — periodic side force")
-    ax.plot(t, sig, color=_CYAN, lw=1.8); ax.axhline(0, color=_MUTED, lw=0.8, alpha=0.5)
-    out.append(("Lift signal", _rgb(fig, plt),
-                "Transverse velocity just behind the body. A clean, regular oscillation means the "
-                "wake is shedding vortices alternately from each side (a von Kármán street). The "
-                "swing is the unsteady side-force that shakes chimneys and bridge decks."))
-    n = len(sig); obs = h.get("obstacle", "Cylinder")
-    if n >= 16:
-        win = np.hanning(n); sp = np.abs(np.fft.rfft(sig * win)); fr = np.fft.rfftfreq(n, d=1.0)
-        k = int(np.argmax(sp[1:]) + 1) if len(sp) > 2 else 0
-        fpk = fr[k] if k else 0.0
-        fig, ax, plt = _new_ax("frequency  (cycles / frame)", "amplitude", "Shedding spectrum → Strouhal")
-        ax.plot(fr, sp, color=_AMBER, lw=1.8)
-        D, U, fdt = h.get("D"), h.get("U"), h.get("frame_dt_steps")
-        st = (fpk / fdt) * D / U if (k and D and U and fdt) else None
-        is_cyl = obs == "Cylinder"
-        if st is not None and obs != "Your text":      # D is ill-defined for multi-glyph text
-            ax.axvline(fpk, color=_CYAN, lw=1.4, ls="--")
-            note = f"St = f·D/U ≈ {st:.2f}" + ("   (cylinder: expected ≈ 0.2)" if is_cyl else "")
-            ax.text(0.97, 0.92, note, transform=ax.transAxes, color=_GOOD, fontsize=9,
-                    ha="right", va="top", fontweight="bold")
-        ex = ("The peak shedding frequency, made dimensionless as the Strouhal number St = f·D/U. "
-              + ("For a circular cylinder this sits near 0.2 across a wide Reynolds range"
-                 + (f" — here ≈ {st:.2f}, matching it." if st is not None else ".")
-                 if is_cyl else
-                 "It is a fixed number for each shape (≈0.2 for a cylinder, lower for a square); "
-                 "sharper, bluffer bodies shed at their own characteristic rate."))
-        out.append(("Strouhal spectrum", _rgb(fig, plt), ex))
+def _ke_enstrophy(result):
+    """Mean kinetic energy per unit mass ½⟨|u|²⟩ and enstrophy ½⟨ω²⟩ per frame
+    (incompressible kinds). Units: velocity² and 1/time² of the solver."""
+    vel = _vel(result); dx = float(result.hints.get("dx", 1.0))
+    if not vel:
+        return None, None
+    ke = np.array([0.5 * float(np.mean(ux * ux + uy * uy)) for ux, uy in vel])
+    ens = np.array([0.5 * float(np.mean(_curl(ux, uy, dx) ** 2)) for ux, uy in vel])
+    return ke, ens
+
+
+def metrics(result):
+    """Scalar measurements for this result (numbers only; see explanations in `plots`)."""
+    m = {}
+    try:
+        k = result.kind; h = result.hints
+        if k == "porous":
+            m["permeability_cells2"] = float(h.get("permeability", 0.0))
+            m["porosity"] = float(h.get("porosity", 0.0))
+        elif k == "lbm":
+            obs = h.get("obstacle", "Cylinder")
+            t, sig, _src = _wind_series(result)
+            dt = float(np.median(np.diff(t))) if len(t) > 2 else 1.0
+            f, ok, _why = _peak_frequency(sig, dt)
+            D, U = h.get("D"), h.get("U")
+            if ok and D and U and obs != "Your text":
+                m["strouhal"] = float(f * D / U)
+            m["shedding_frequency_per_step"] = float(f) if ok else float("nan")
+            cds, U_, D_, _xp = _wake_drag(result)
+            m["cd_wake_approx"] = float(np.mean(cds[len(cds) // 2:]))
+            if obs == "Airfoil" and result.mask is not None:
+                gam = [_circulation(ux, uy, result.mask)[0] for ux, uy in result.raw]
+                _g, chord = _circulation(result.raw[-1][0], result.raw[-1][1], result.mask)
+                cl = 2.0 * np.array(gam) / (U_ * max(chord, 1.0))
+                m["cl_circulation"] = float(np.mean(cl[len(cl) // 2:]))
+        elif k == "spectral":
+            ke, ens = _ke_enstrophy(result)
+            m["ke_final"] = float(ke[-1]); m["ke_initial"] = float(ke[0]); m["enstrophy_final"] = float(ens[-1])
+            m["ke_drift_rel"] = float((ke[-1] - ke[0]) / (ke[0] + 1e-30))
+        elif k == "ns":
+            mode = h.get("ns_mode", "smoke")
+            if mode == "rb":
+                nu_ = _rb_fluxes(result)
+                m["nusselt"] = float(nu_["Nu"])
+            elif mode == "rt":
+                w = _rt_width(result)
+                m["mixing_width_final_frac"] = float(w[-1])
+            else:
+                ke, ens = _ke_enstrophy(result)
+                if ke is not None:
+                    m["ke_final"] = float(ke[-1])
+        elif k == "density":
+            if h.get("mode") == "blast":
+                R = _shock_radius(result)
+                m["shock_radius_final_cells"] = float(R[-1])
+            elif h.get("mode") == "sod":
+                from . import validate
+                raw = result.raw; nx = raw[0].shape[1]; x = (np.arange(nx) + 0.5) / nx
+                ex_r, ex_u, _p = validate.exact_sod_full(x, float(result.times[-1]) / nx)
+                m["sod_err_rho"] = float(np.mean(np.abs(raw[-1].mean(axis=0) - ex_r)))
+                if h.get("vel"):
+                    m["sod_err_u"] = float(np.mean(np.abs(h["vel"][-1][0].mean(axis=0) - ex_u)))
+            else:
+                ke = _compressible_ke(result)
+                m["ke_final"] = float(ke[-1])
+        elif k == "particles":
+            ke, npart = _sph_energy(result)
+            m["ke_peak"] = float(ke.max()); m["ke_final"] = float(ke[-1]); m["particles_final"] = int(npart[-1])
+        elif k == "field":
+            if str(h.get("label", "")).startswith("V"):
+                m["pattern_coverage_pct"] = float(np.mean(result.raw[-1] > 0.25) * 100)
+            else:
+                m["dye_variance_final"] = float(np.var(result.raw[-1])); m["dye_variance_initial"] = float(np.var(result.raw[0]))
+        elif k == "quantum":
+            norm = h.get("norm")
+            if norm:
+                m["norm_drift"] = float(max(abs(x - 1) for x in norm))
+    except Exception:                       # noqa: BLE001 — metrics must never break the UI
+        pass
+    return {k: v for k, v in m.items() if v is not None}
+
+
+def series(result):
+    """Time series (first key = time axis) for CSV export and plots."""
+    out = {}
+    try:
+        t = _times(result).tolist(); k = result.kind; h = result.hints
+        out["time"] = t
+        if k in ("lbm", "spectral", "porous") or (k == "ns" and h.get("vel")):
+            ke, ens = _ke_enstrophy(result)
+            if ke is not None:
+                out["kinetic_energy_per_mass"] = ke.tolist(); out["enstrophy"] = ens.tolist()
+        if k == "lbm":
+            cds, *_ = _wake_drag(result); out["cd_wake_approx"] = cds.tolist()
+            if "probe_uy" in h:
+                out = {"probe_step": np.asarray(h["probe_t"]).tolist(), "probe_uy": np.asarray(h["probe_uy"]).tolist(), **out}
+        if k == "ns" and h.get("ns_mode") == "rt":
+            out["mixing_width_frac"] = _rt_width(result).tolist()
+        if k == "density" and h.get("mode") == "blast":
+            out["shock_radius_cells"] = _shock_radius(result).tolist()
+        if k == "particles":
+            ke, npart = _sph_energy(result); out["kinetic_energy_J_per_m"] = ke.tolist(); out["particles"] = npart.tolist()
+            for name, vals in _sph_scene_series(result).items():
+                out[name] = vals
+        if k == "field":
+            out["variance"] = [float(np.var(s)) for s in result.raw]
+        if k == "quantum" and h.get("norm"):
+            out["norm"] = [float(x) for x in h["norm"]]
+    except Exception:                       # noqa: BLE001
+        pass
     return out
 
 
-def _drag_plot(result, title, explain, expect=None):
-    cds, U, A, xp = _drag_cd(result)
-    t = np.linspace(0, 1, len(cds))
-    fig, ax, plt = _new_ax("time (normalised)", "drag coefficient  C_d", title)
-    ax.plot(t, cds, color=_CYAN, lw=2.2)
-    mean_cd = float(np.mean(cds[len(cds) // 2:]))           # average over the settled second half
-    ax.axhline(mean_cd, color=_AMBER, lw=1.2, ls="--")
-    ax.text(0.97, 0.92, f"mean C_d ≈ {mean_cd:.2f}" + (f"  ({expect})" if expect else ""),
-            transform=ax.transAxes, color=_GOOD, fontsize=9, ha="right", va="top", fontweight="bold")
-    return [(title, _rgb(fig, plt), explain)], mean_cd
+# ───────────── helpers shared by metrics and plots ─────────────
+def _rt_width(result):
+    """Mixing-layer width: fraction of the height where the horizontally averaged
+    NORMALISED scalar lies in (0.1, 0.9). The scalar is normalised by the initial
+    heavy/light values, so the unmixed initial state has (near) zero width."""
+    raw = result.raw; ny = raw[0].shape[0]
+    p0 = raw[0].mean(axis=1); lo, hi = float(p0.min()), float(p0.max())
+    span = max(hi - lo, 1e-9)
+    w = []
+    for s in raw:
+        prof = (s.mean(axis=1) - lo) / span
+        mix = np.where((prof > 0.1) & (prof < 0.9))[0]
+        w.append((mix.max() - mix.min() + 1 if len(mix) else 0) / ny)
+    return np.array(w)
+
+
+def _rb_fluxes(result):
+    """Horizontally averaged heat fluxes at the final frame, in the solver's units:
+    conductive −κ d⟨T⟩/dz, convective ⟨v T⟩ (v = vertical velocity), and the Nusselt
+    number Nu = (total flux) / (κ ΔT / H), with ΔT the plate difference and H the
+    layer height, using the layer average of the total flux."""
+    raw = result.raw; vel = result.hints.get("vel"); kappa = float(result.hints.get("kappa", 0.02))
+    ny, nx = raw[0].shape; T = raw[-1]
+    Tbar = T.mean(axis=1); z = np.arange(ny, dtype=float)
+    cond = -kappa * np.gradient(Tbar, z)
+    conv = np.zeros(ny)
+    if vel:
+        _ux, uy = vel[-1]; conv = np.mean(uy * T, axis=1)
+    total = cond + conv
+    dT = float(abs(Tbar[0] - Tbar[-1])) or 1.0; H = float(ny - 1)
+    Nu = float(np.mean(total[1:-1])) / (kappa * dT / H) if kappa > 0 else float("nan")
+    return {"z": z / H, "T0": raw[0].mean(axis=1), "T": Tbar, "cond": cond, "conv": conv, "total": total,
+            "Nu": Nu, "kappa": kappa, "dT": dT, "H": H}
+
+
+def _shock_radius(result):
+    """Shock-front radius per frame (cells) from the azimuthally averaged density profile:
+    the radius of the steepest outward density rise (max dρ/dr) — one robust number per
+    frame instead of the single strongest pixel. Solid cells are excluded; in the city
+    scene reflected fronts are not separated (see the explanation)."""
+    raw = result.raw; ny, nx = raw[0].shape; h = result.hints
+    cx = nx * (0.20 if h.get("building") else 0.5); cy = ny * (0.14 if h.get("building") else 0.5)
+    yy, xx = np.mgrid[0:ny, 0:nx]; rr = np.hypot(xx - cx, yy - cy)
+    solid = h.get("solid")
+    rmax = float(rr.max()); nb = int(max(24, min(nx, ny) // 2)); edges = np.linspace(0, rmax, nb + 1)
+    bins = np.clip(np.digitize(rr.ravel(), edges) - 1, 0, nb - 1)
+    valid = np.ones(rr.size, bool) if solid is None else ~np.asarray(solid).ravel()
+    cnt = np.bincount(bins[valid], minlength=nb) + 1e-9
+    out = []
+    for rho in raw:
+        prof = np.bincount(bins[valid], weights=rho.ravel()[valid], minlength=nb) / cnt
+        d = np.gradient(prof, edges[:-1] + 0.5 * (edges[1] - edges[0]))
+        d[cnt < 3] = 0
+        k = int(np.argmax(np.abs(d)))
+        out.append(0.5 * (edges[k] + edges[k + 1]))
+    return np.array(out)
+
+
+def _compressible_ke(result):
+    """Total kinetic energy ½ Σ ρ|u|² per frame (code units, per unit cell area) — density
+    is included, unlike the incompressible per-mass definition."""
+    vel = result.hints.get("vel"); raw = result.raw
+    if not vel:
+        return np.zeros(len(raw))
+    return np.array([0.5 * float(np.sum(r * (ux * ux + uy * uy))) for r, (ux, uy) in zip(raw, vel)])
+
+
+def _sph_energy(result):
+    """Kinetic energy ½ Σ m v² (J per metre of depth, m = ρ₀ dp² with ρ₀ = 1000 kg/m³)
+    and the particle count per frame (the pour scene adds particles over time)."""
+    dp = float(result.hints.get("dp", 0.04)); m = 1000.0 * dp * dp
+    ke = np.array([0.5 * m * float(np.sum(d[:, 2] ** 2)) for d in result.raw])
+    npart = np.array([len(d) for d in result.raw])
+    return ke, npart
+
+
+def _surface_at(d, x, Ly, half=0.08):
+    """Free-surface height at x: the highest particle within ±half of x (m)."""
+    sel = d[np.abs(d[:, 0] - x) < half]
+    return float(sel[:, 1].max()) if len(sel) else 0.0
+
+
+def _sph_scene_series(result):
+    h = result.hints; sc = h.get("scene", "dam"); Lx, Ly = h.get("Lx", 1.0), h.get("Ly", 1.0); raw = result.raw
+    out = {}
+    if sc == "dam":
+        out["front_x_m"] = [float(d[d[:, 1] < 0.12 * Ly][:, 0].max()) if (d[:, 1] < 0.12 * Ly).any() else 0.0 for d in raw]
+    elif sc == "drop":
+        out["crown_height_m"] = [float(d[:, 1].max()) for d in raw]
+    elif sc == "slosh":
+        out["left_wall_level_m"] = [_surface_at(d, 0.06 * Lx, Ly) for d in raw]
+        out["right_wall_level_m"] = [_surface_at(d, 0.94 * Lx, Ly) for d in raw]
+    elif sc == "pour":
+        out["fill_height_m"] = [float(np.percentile(d[:, 1], 90)) if len(d) else 0.0 for d in raw]
+    elif sc in ("waves", "ship"):
+        for name, xf in (("gauge_1_m", 0.25), ("gauge_2_m", 0.5), ("gauge_3_m", 0.75)):
+            out[name] = [_surface_at(d, xf * Lx, Ly) for d in raw]
+        hull = h.get("hull")
+        if hull is not None:
+            out["hull_heave_m"] = [float(hp[:, 1].mean()) for hp in hull]
+            out["hull_roll_deg"] = [float(np.degrees(np.arctan2(*np.polyfit(hp[:, 0], hp[:, 1], 1)[:1], 1.0))) for hp in hull]
+    return out
+
+
+# ═════════════════════════════ plots ═════════════════════════════
+def _shedding(result):
+    h = result.hints; obs = h.get("obstacle", "Cylinder"); out = []
+    t, sig, src = _wind_series(result)
+    dt = float(np.median(np.diff(t))) if len(t) > 2 else 1.0
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "transverse velocity v at the probe (lattice)", "Wake probe — side-force proxy")
+    ax.plot(t, sig, color=_CYAN, lw=1.2); ax.axhline(0, color=_MUTED, lw=0.8, alpha=0.5)
+    out.append(("Lift signal", _rgb(fig, plt),
+                f"Transverse velocity at a point in the wake ({src}); its oscillation is the alternating "
+                "side force of vortex shedding. Units: lattice velocity. Source: the solver's wake probe "
+                "written every step, after the first 20 % of the run (start-up transient removed)."))
+    f, ok, why = _peak_frequency(sig, dt)
+    D, U = h.get("D"), h.get("U")
+    win = np.hanning(len(sig)); sp = np.abs(np.fft.rfft((sig - sig.mean()) * win)); fr = np.fft.rfftfreq(len(sig), d=dt)
+    fig, ax, plt = _new_ax("frequency (cycles per lattice step)", "amplitude", "Shedding spectrum → Strouhal number")
+    ax.plot(fr, sp, color=_AMBER, lw=1.6); ax.set_xlim(0, max(fr[1:].min() * 4, min(fr.max(), 8 * f if f > 0 else fr.max())))
+    st_txt = ""
+    if ok and D and U and obs != "Your text":
+        st = f * D / U; ax.axvline(f, color=_CYAN, lw=1.4, ls="--")
+        ref = {"Cylinder": "reference 0.18–0.21 (circular cylinder, Re 100–300, unconfined)",
+               "Square": "reference ≈ 0.13–0.15 (square, Re ≈ 100–300)"}.get(obs, "no reference for this shape")
+        _note(ax, f"St = f·D/U = {st:.3f}")
+        st_txt = (f" Measured St = {st:.3f}; {ref}. This tunnel has blockage D/H = {D / result.raw[0][0].shape[0]:.2f} "
+                  "and periodic side walls, which raise St slightly compared with an unconfined body, so treat a "
+                  "difference of a few hundredths as expected rather than as agreement or disagreement.")
+    elif not ok:
+        _note(ax, f"insufficient data: {why}", _WARN)
+        st_txt = f" No Strouhal number is reported: {why}. Run longer to get more shedding cycles."
+    out.append(("Strouhal spectrum", _rgb(fig, plt),
+                "Fourier spectrum of the probe signal (Hann window). The peak frequency f made dimensionless "
+                "with the reference length D and inflow speed U is the Strouhal number St = f·D/U. A value "
+                "is only reported when the record holds at least six shedding cycles with a clear peak." + st_txt))
+    return out
+
+
+def _drag_plot(result, title, body):
+    cds, U, D, xp = _wake_drag(result); t = _times(result)
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "C_d (wake-deficit estimate)", title)
+    ax.plot(t, cds, color=_CYAN, lw=2.0)
+    mean_cd = float(np.mean(cds[len(cds) // 2:])); ax.axhline(mean_cd, color=_AMBER, lw=1.1, ls="--")
+    _note(ax, f"mean C_d ≈ {mean_cd:.2f} (approximate)")
+    return [(title, _rgb(fig, plt),
+             f"APPROXIMATION: drag of the {body} estimated from the wake momentum deficit at one plane "
+             f"(x = {xp} cells) with the velocity clipped to [0, U] — C_d ≈ (2/D)∫(u/U)(1−u/U)dy — "
+             "normalised by the reference length D. It excludes the bypass flow and pressure terms, so "
+             "it indicates trends (bigger wake → more drag) rather than a validated force coefficient. "
+             "A boundary-force (momentum-exchange) evaluation is the quantitative route and is not implemented.")], mean_cd
 
 
 def _airfoil(result):
     vel = result.raw; out = []
-    # lift via circulation (Kutta–Joukowski), drag via wake deficit
-    gam = [];
-    for ux, uy in vel:
-        g, c = _circulation(ux, uy, result.mask); gam.append(g)
+    gam = [_circulation(ux, uy, result.mask)[0] for ux, uy in vel]
     U = float(result.hints.get("U", 0.1)) or 0.1
     _g, chord = _circulation(vel[-1][0], vel[-1][1], result.mask)
-    # Signed lift: C_l = 2*Gamma/(U*c) with Gamma the circulation around the body taken
-    # counter-clockwise (positive C_l = upward lift for a positive angle of attack). No
-    # sign is forced: a negative C_l is a real result (downward lift), not an error to hide.
-    cl = 2.0 * np.array(gam) / (U * max(chord, 1.0))
-    t = np.linspace(0, 1, len(cl))
-    fig, ax, plt = _new_ax("time (normalised)", "lift coefficient  C_l",
-                           "Lift from the bound circulation (Kutta–Joukowski)")
-    ax.plot(t, cl, color=_CYAN, lw=2.2); ax.axhline(0, color=_MUTED, lw=0.8, alpha=0.5)
-    clm = float(np.mean(cl[len(cl) // 2:]))
-    ax.text(0.97, 0.92, f"mean C_l ≈ {clm:.2f}", transform=ax.transAxes, color=_GOOD,
-            fontsize=9, ha="right", va="top", fontweight="bold")
+    cl = 2.0 * np.array(gam) / (U * max(chord, 1.0)); t = _times(result)
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "C_l = 2Γ/(U c)", "Lift from the bound circulation (Kutta–Joukowski)")
+    ax.plot(t, cl, color=_CYAN, lw=2.0); ax.axhline(0, color=_MUTED, lw=0.8, alpha=0.5)
+    clm = float(np.mean(cl[len(cl) // 2:])); _note(ax, f"mean C_l ≈ {clm:+.2f}")
     out.append(("Lift coefficient", _rgb(fig, plt),
-                "Lift comes from the circulation Γ bound to the wing: L = ρ·U·Γ. We integrate the "
-                "velocity around the airfoil to get Γ, then C_l. At a positive angle of attack the "
-                "flow turns over the top and C_l is positive — the wing pushes up."))
-    dr, cdm = _drag_plot(result, "Drag from the wake deficit",
-                         "Drag is read from the momentum the wing removes from the flow (its wake "
-                         "deficit). At this modest Reynolds number the boundary layer separates over "
-                         "the upper surface, so the drag is appreciable; lift and drag both rise with "
-                         "angle of attack until the wing stalls.")
+                "Circulation Γ = ∮u·dl on a rectangle 8 cells outside the airfoil, with the aerodynamic sign "
+                "convention (clockwise positive, so that L = ρ U Γ is upward for a nose-up airfoil in "
+                "left-to-right flow); C_l = 2Γ/(U c) with c the chord in cells (Kutta–Joukowski). Positive angle "
+                "of attack = leading edge up = positive C_l; a negative angle gives a negative C_l of similar "
+                "magnitude (mirror test in tests/). The contour also captures shed vorticity passing through "
+                "it, so the signal oscillates when the flow is unsteady."))
+    dr, _ = _drag_plot(result, "Drag (wake-deficit estimate)", "airfoil")
     return out + dr
 
 
 def _drafting(result):
-    """Centreline streamwise velocity showing the sheltered slipstream behind the riders."""
     vel = result.raw; h = result.hints
     ny, nx = vel[0][0].shape; U = float(h.get("U", 0.1)) or 0.1
     jy = int(h.get("probe_y", ny // 2))
-    ux = np.mean([f[0] for f in vel[len(vel) // 2:]], axis=0)   # time-averaged, settled
+    ux = np.mean([f[0] for f in vel[len(vel) // 2:]], axis=0)
     line = ux[jy, :] / U
     solid = np.any(result.mask[max(0, jy - 4):jy + 4, :], axis=0)
-    x = np.arange(nx) / nx
-    fig, ax, plt = _new_ax("position along the tunnel  (fraction)", "streamwise speed  u / U",
-                           "Drafting — the sheltered slipstream")
+    x = np.arange(nx)
+    fig, ax, plt = _new_ax("x (cells)", "u / U", "Slipstream along the riders' line")
     ln = line.copy(); ln[solid] = np.nan
-    ax.plot(x, ln, color=_CYAN, lw=2.0)
-    ax.axhline(1.0, color=_MUTED, lw=0.8, ls="--")
-    ax.fill_between(x, 0, 1.2, where=solid, color=_AMBER, alpha=0.25, step="mid")
-    wake = line[(x > 0.30) & (x < 0.55) & ~solid]
+    ax.plot(x, ln, color=_CYAN, lw=2.0); ax.axhline(1.0, color=_MUTED, lw=0.8, ls="--")
+    ax.fill_between(x, -0.4, 1.25, where=solid, color=_AMBER, alpha=0.25, step="mid")
+    wake = line[(x > 0.30 * nx) & (x < 0.55 * nx) & ~solid]
     mn = float(np.nanmin(wake)) if len(wake) else 1.0
-    note = f"riders shaded · slipstream drops to ≈ {mn * 100:.0f}% of U" + ("  (flow even reverses)" if mn < 0 else "")
-    ax.text(0.97, 0.08, note, transform=ax.transAxes,
-            color=_GOOD, fontsize=9, ha="right", va="bottom", fontweight="bold")
+    _note(ax, f"minimum u/U ≈ {mn:.2f} in the gap", loc="br")
     ax.axhline(0, color=_MUTED, lw=0.8, alpha=0.5); ax.set_ylim(-0.4, 1.25)
     out = [("Slipstream profile", _rgb(fig, plt),
-            "Air speed along the line through the riders (riders shaded). The leader punches a hole "
-            "in the air; right behind it the flow is much slower, so the second rider meets far less "
-            "wind and spends less effort — that low-speed pocket is exactly why drafting saves a "
-            "cyclist roughly a quarter to a third of their power.")]
-    dr, _cd = _drag_plot(result, "Combined drag of the pair",
-                         "Drag of the two riders together from the wake deficit. Because the follower "
-                         "hides in the leader's wake, a drafting pair has noticeably less drag than two "
-                         "riders ridden apart would.")
+            "Streamwise velocity along the riders' centre line (riders shaded), averaged over the settled "
+            "second half of the run and divided by the inflow speed U. The pocket of slow air behind the "
+            "leader is what a following rider sits in. This is a 2-D silhouette at a modest Reynolds "
+            "number: it shows the wake structure, not a real-world power saving.")]
+    dr, _ = _drag_plot(result, "Combined drag of the pair (wake-deficit estimate)", "pair")
     return out + dr
 
 
@@ -231,132 +466,115 @@ def _wind_tunnel(result):
     if obs == "Peloton (drafting)":
         return _drafting(result)
     if obs in ("F1 car", "Cyclist"):
-        body = "race car" if obs == "F1 car" else "rider"
-        dr, _cd = _drag_plot(result, f"Aerodynamic drag of the {body}",
-                             f"Drag is read from the momentum the {body} removes from the air (the wake "
-                             "deficit at a plane behind it). A bigger, slower wake means more drag — this "
-                             "is the number aerodynamicists fight to shrink with wings, fairings and tucks.")
+        body = "car silhouette" if obs == "F1 car" else "rider silhouette"
+        dr, _ = _drag_plot(result, f"Drag of the {body} (wake-deficit estimate)", body)
         return dr + _shedding(result)[:1]
-    # cylinder / square / diamond / text → shedding is the headline
     return _shedding(result)
 
 
-# ─────────────────────────  incompressible Navier–Stokes  ─────────────────────────
+def _energy_plot(result, title, what):
+    ke, ens = _ke_enstrophy(result)
+    if ke is None:
+        return []
+    t = _times(result)
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "½⟨|u|²⟩ (velocity²)", title)
+    ax.plot(t, ke, color=_CYAN, lw=2.0, label="kinetic energy per unit mass")
+    ax2 = ax.twinx(); ax2.plot(t, ens, color=_AMBER, lw=2.0, label="enstrophy ½⟨ω²⟩")
+    ax2.tick_params(colors=_MUTED, labelsize=8); ax2.set_ylabel("½⟨ω²⟩ (1/time²)", color=_FG, fontsize=9)
+    for s in ax2.spines.values():
+        s.set_color(_GRID)
+    lines = ax.get_lines() + ax2.get_lines(); ax.legend(lines, [l.get_label() for l in lines], facecolor=_BG, edgecolor=_GRID, labelcolor=_FG, fontsize=8, loc="best")
+    return [(title, _rgb(fig, plt),
+             "Domain-averaged kinetic energy per unit mass ½⟨|u|²⟩ (left axis, absolute values) and enstrophy "
+             "½⟨ω²⟩ (right axis) at every saved frame; ω = ∂v/∂x − ∂u/∂y by central differences. " + what)]
+
+
 def _plume_rise(result):
-    raw = result.raw; ny = raw[0].shape[0]
-    hgt = []
-    for s in raw:
-        rows = np.where(s.max(axis=1) > 0.15)[0]
-        hgt.append((rows.max() if len(rows) else 0) / ny)
-    t = np.linspace(0, 1, len(hgt))
-    fig, ax, plt = _new_ax("time (normalised)", "plume top  (fraction of height)", "Buoyant plume rise")
-    ax.plot(t, hgt, color=_CYAN, lw=2.2); ax.set_ylim(0, 1.02)
+    raw = result.raw; ny = raw[0].shape[0]; t = _times(result)
+    hgt = np.array([(np.where(s.max(axis=1) > 0.15)[0].max() if (s.max(axis=1) > 0.15).any() else 0) for s in raw], float)
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "plume top (cells)", "Buoyant plume rise")
+    ax.plot(t, hgt, color=_CYAN, lw=2.0); ax.set_ylim(0, ny)
     out = [("Plume rise", _rgb(fig, plt),
-            "Height reached by the smoke over time. Buoyancy accelerates the hot fluid upward while "
-            "it entrains cooler surroundings; the rise should climb steadily until the plume fills "
-            "the domain — the signature of a buoyancy-driven flow.")]
-    return out + _ke_enstrophy(result, "Kinetic energy & enstrophy",
-                               "Total swirling energy (kinetic energy) and small-scale rotation "
-                               "(enstrophy) over time — both grow as the smooth column rolls up into "
-                               "turbulent eddies.")
+            "Highest row where the scalar exceeds 0.15 (cells above the floor) at each saved frame. The "
+            "scalar is the transported dye/temperature proxy, not a measured temperature.")]
+    return out + _energy_plot(result, "Kinetic energy & enstrophy", "Both grow as the column rolls up into eddies.")
 
 
 def _rt_mixing(result):
-    raw = result.raw; ny = raw[0].shape[0]
-    wid = []
-    for s in raw:
-        prof = s.mean(axis=1); mix = np.where((prof > 0.1) & (prof < 0.9))[0]
-        wid.append((mix.max() - mix.min() if len(mix) else 0) / ny)
-    t = np.linspace(0, 1, len(wid))
-    fig, ax, plt = _new_ax("time (normalised)", "mixing-layer width  (fraction)", "Rayleigh–Taylor mixing growth")
-    ax.plot(t, wid, color=_AMBER, lw=2.2)
+    w = _rt_width(result); t = _times(result)
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "mixing-layer width / H", "Rayleigh–Taylor mixing-layer growth")
+    ax.plot(t, w, color=_AMBER, lw=2.0)
     return [("Mixing width", _rgb(fig, plt),
-             "Thickness of the layer where heavy and light fluid interpenetrate. After an initial "
-             "exponential instability it widens roughly with the square of time as the fingers fall "
-             "and bubbles rise — the accepted Rayleigh–Taylor growth.")]
+             "Height fraction where the horizontally averaged scalar, normalised by its initial heavy and "
+             "light values, lies between 0.1 and 0.9. The unmixed initial state therefore has near-zero width. "
+             "Classical theory gives h ≈ α A g t² late in the mixing regime; this run uses a constant-density "
+             "projection with density only in the buoyancy term (a Boussinesq-like approximation), so "
+             "quantitative growth rates at high Atwood number are not established here.")]
 
 
 def _rb_convection(result):
-    raw = result.raw; vel = result.hints.get("vel")
-    ny, nx = raw[0].shape
-    z = np.linspace(0, 1, ny)
-    T0 = raw[0].mean(axis=1); Tf = raw[-1].mean(axis=1)
-    fig, ax, plt = _new_ax("mean temperature  ⟨T⟩", "height  z  (fraction)",
-                           "Convection flattens the temperature profile")
-    ax.plot(T0, z, color=_MUTED, lw=1.6, ls="--", label="start (conduction)")
-    ax.plot(Tf, z, color=_CYAN, lw=2.2, label="convecting")
-    _legend(ax)
-    out = [("Temperature profile", _rgb(fig, plt),
-            "Horizontally-averaged temperature versus height. Pure conduction would keep the straight "
-            "dashed line. Convection stirs the interior into a nearly uniform (well-mixed) core and "
-            "squeezes the temperature change into thin layers at the hot and cold plates — the "
-            "hallmark of convective heat transport.")]
-    if vel:
-        flux = np.mean([uy * (T - T.mean(axis=1, keepdims=True)) for (ux, uy), T in zip(vel, raw)][-1],
-                       axis=1)
-        fig, ax, plt = _new_ax("convective heat flux  ⟨v′T′⟩", "height  z  (fraction)",
-                               "Upward convective heat flux")
-        ax.plot(flux, z, color=_AMBER, lw=2.2); ax.axvline(0, color=_MUTED, lw=0.8, alpha=0.6)
-        out.append(("Convective flux", _rgb(fig, plt),
-                    "The correlation of vertical velocity and temperature fluctuations, ⟨v′T′⟩. It is "
-                    "positive almost everywhere: warm parcels move up and cool parcels move down, "
-                    "carrying heat upward far faster than conduction could — that excess is the "
-                    "Nusselt enhancement."))
+    f = _rb_fluxes(result); out = []
+    fig, ax, plt = _new_ax("horizontally averaged temperature ⟨T⟩", "height z / H", "Temperature profile")
+    ax.plot(f["T0"], f["z"], color=_MUTED, lw=1.5, ls="--", label="initial (conduction)")
+    ax.plot(f["T"], f["z"], color=_CYAN, lw=2.0, label="final"); _legend(ax)
+    out.append(("Temperature profile", _rgb(fig, plt),
+                "Horizontally averaged temperature versus height at the first and last saved frames. Pure "
+                "conduction keeps the linear profile; convection mixes the interior and confines the change "
+                "to thin layers at the plates. T is the solver's dimensionless plate-to-plate temperature."))
+    fig, ax, plt = _new_ax("heat flux (solver units)", "height z / H", "Heat flux budget at the final frame")
+    ax.plot(f["cond"], f["z"], color=_MUTED, lw=1.6, label="conductive −κ d⟨T⟩/dz")
+    ax.plot(f["conv"], f["z"], color=_AMBER, lw=2.0, label="convective ⟨v T⟩")
+    ax.plot(f["total"], f["z"], color=_CYAN, lw=2.0, label="total"); ax.axvline(0, color=_MUTED, lw=0.8, alpha=0.6); _legend(ax)
+    nu_txt = f"Nu ≈ {f['Nu']:.2f}" if np.isfinite(f["Nu"]) else "Nu undefined (κ = 0)"
+    _note(ax, nu_txt)
+    out.append(("Heat flux and Nusselt number", _rgb(fig, plt),
+                f"Conductive flux −κ d⟨T⟩/dz (κ = {f['kappa']:g}), convective flux ⟨v T⟩ and their sum, all in "
+                "solver units, at the final frame. The Nusselt number is the layer-averaged total flux divided "
+                f"by the conduction flux κ ΔT/H of the motionless state ({nu_txt}); Nu = 1 means no convective "
+                "transport. Onset for rigid, conducting plates is Ra ≈ 1708 (see derived quantities for Ra)."))
     return out
 
 
 def _chimney_trajectory(result):
     raw = result.raw; ny, nx = raw[0].shape
-    s = np.mean(raw[len(raw) // 2:], axis=0)                 # settled, time-averaged plume
-    sx = nx // 4
+    s = np.mean(raw[len(raw) // 2:], axis=0); sx = nx // 4
     xs, zs = [], []
     for i in range(sx, nx - 2):
         col = s[:, i]
         if col.sum() > 0.02 * ny:
-            zc = float(np.sum(np.arange(ny) * col) / (col.sum() + 1e-9))
-            xs.append(i / nx); zs.append(zc / ny)
-    fig, ax, plt = _new_ax("downwind distance  x  (fraction)", "plume centre-line height  z  (fraction)",
-                           "Bent-over plume trajectory")
+            xs.append(i); zs.append(float(np.sum(np.arange(ny) * col) / (col.sum() + 1e-9)))
+    fig, ax, plt = _new_ax("downwind distance x (cells)", "plume centre-line height z (cells)", "Bent-over plume trajectory")
     if xs:
-        ax.plot(xs, zs, color=_CYAN, lw=2.4)
-    ax.axvline(sx / nx, color=_AMBER, lw=1.2, ls="--"); ax.text(sx / nx + 0.01, 0.05, "stack",
-                                                                color=_AMBER, fontsize=8)
-    ax.set_ylim(0, 1.0)
+        ax.plot(xs, zs, color=_CYAN, lw=2.2)
+    ax.axvline(sx, color=_AMBER, lw=1.2, ls="--"); ax.text(sx + 2, 0.05 * ny, "stack", color=_AMBER, fontsize=8); ax.set_ylim(0, ny)
     return [("Plume trajectory", _rgb(fig, plt),
-             "Height of the smoke centre-line as it travels downwind of the stack. Near the chimney "
-             "buoyancy lifts it steeply; further downwind the crosswind has bent it over toward the "
-             "horizontal. The height it levels off at is the 'plume rise' that decides how far a "
-             "pollutant spreads — it drops as the wind strengthens.")]
+             "Scalar-weighted centre-line height of the time-averaged (second half) plume as a function of "
+             "downwind distance, in cells. The height it levels off at is the plume rise; it falls as the "
+             "crosswind strengthens relative to the buoyancy.")]
 
 
 def _flame(result):
-    raw = result.raw; ny = raw[0].shape[0]
-    tip = []
-    for T in raw:
-        rows = np.where(T.max(axis=1) > 0.3)[0]
-        tip.append((rows.max() if len(rows) else 0) / ny)
-    tip = np.array(tip); t = np.linspace(0, 1, len(tip))
+    raw = result.raw; ny = raw[0].shape[0]; t = _times(result)
+    tip = np.array([(np.where(T.max(axis=1) > 0.3)[0].max() if (T.max(axis=1) > 0.3).any() else 0) for T in raw], float)
     out = []
-    fig, ax, plt = _new_ax("time (normalised)", "flame-tip height  (fraction)", "Flame tip — flicker in time")
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "flame-tip height (cells)", "Flame tip height")
     ax.plot(t, tip, color=_AMBER, lw=2.0)
     out.append(("Flame tip height", _rgb(fig, plt),
-                "Height of the luminous tip over time. After it anchors on the wick the tip "
-                "oscillates rather than sitting still — the periodic pinching of a candle flame, "
-                "driven by a buoyant vortex shed near the base, not by any imposed wobble."))
-    sig = tip - tip.mean(); n = len(sig)
-    if n >= 16:
-        win = np.hanning(n); sp = np.abs(np.fft.rfft(sig * win)); fr = np.fft.rfftfreq(n, d=1.0)
-        k = int(np.argmax(sp[1:]) + 1) if len(sp) > 2 else 0
-        fig, ax, plt = _new_ax("frequency  (cycles / frame)", "amplitude", "Flicker spectrum")
-        ax.plot(fr, sp, color=_CYAN, lw=1.8)
-        if k:
-            ax.axvline(fr[k], color=_AMBER, lw=1.3, ls="--")
-            ax.text(0.97, 0.92, f"flicker peak at {fr[k]:.3f} cyc/frame", transform=ax.transAxes,
-                    color=_GOOD, fontsize=9, ha="right", va="top", fontweight="bold")
-        out.append(("Flicker spectrum", _rgb(fig, plt),
-                    "Frequency content of the tip motion. A clear peak means the flicker is "
-                    "periodic — a real laminar flame flickers at a single dominant frequency "
-                    "(≈10–15 Hz for a candle); here it shows up as one sharp spectral spike."))
+                "Highest row where the temperature proxy T(Z) exceeds 0.3, per saved frame. The tip "
+                "oscillates as buoyant vortices are shed near the base; the source velocity at the wick is "
+                "prescribed (see the scene notes)."))
+    dt = float(np.median(np.diff(t))) if len(t) > 2 else 1.0
+    f, ok, why = _peak_frequency(tip, dt, min_cycles=4)
+    win = np.hanning(len(tip)); sp = np.abs(np.fft.rfft((tip - tip.mean()) * win)); fr = np.fft.rfftfreq(len(tip), d=dt)
+    fig, ax, plt = _new_ax(f"frequency (cycles per {_tunit(result)})", "amplitude", "Flicker spectrum")
+    ax.plot(fr, sp, color=_CYAN, lw=1.6)
+    if ok:
+        ax.axvline(f, color=_AMBER, lw=1.3, ls="--"); _note(ax, f"peak at {f:.3g}")
+    else:
+        _note(ax, f"insufficient data: {why}", _WARN)
+    out.append(("Flicker spectrum", _rgb(fig, plt),
+                "Spectrum of the tip-height record (sampled once per saved frame, so only frequencies below "
+                "half the frame rate are resolved). A peak is reported only with ≥ 4 cycles in the record."))
     return out
 
 
@@ -373,125 +591,192 @@ def _ns(result):
     return _plume_rise(result)
 
 
-# ─────────────────────────  compressible Euler  ─────────────────────────
 def _blast(result):
-    raw = result.raw; ny, nx = raw[0].shape; h = result.hints
-    cx = nx * (0.20 if h.get("building") else 0.5); cy = ny * (0.14 if h.get("building") else 0.5)
-    yy, xx = np.mgrid[0:ny, 0:nx]; rr = np.hypot(xx - cx, yy - cy)
-    R = []
-    for rho in raw:
-        gy, gx = np.gradient(rho); sch = np.hypot(gx, gy)
-        if h.get("building"):                       # ignore the static towers' edges (held dense)
-            sch[rho > 2.0] = 0.0
-        R.append(rr.flat[int(np.argmax(sch))])
-    R = np.array(R) / (np.hypot(nx, ny)); t = np.linspace(0, 1, len(R))
-    fig, ax, plt = _new_ax("time (normalised)", "shock-front radius  (fraction)", "Blast-wave expansion")
-    ax.plot(t, R, color=_CYAN, lw=2.2)
+    R = _shock_radius(result); t = _times(result); h = result.hints
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "shock radius (cells)", "Blast-wave expansion")
+    ax.plot(t, R, color=_CYAN, lw=2.0)
+    if len(t) > 3 and t[-1] > 0:
+        # power-law fit R ∝ t^n on the second half (Sedov–Taylor: n = 1/2 in 2-D for a strong point blast)
+        k = len(t) // 2; tt, rr = t[k:], R[k:]; ok = (tt > 0) & (rr > 0)
+        if ok.sum() > 2:
+            n = np.polyfit(np.log(tt[ok]), np.log(rr[ok]), 1)[0]; _note(ax, f"R ∝ t^{n:.2f} (late fit)")
+    city = " Reflections off the towers and the ground are not separated from the incident front." if h.get("building") else ""
     return [("Shock radius", _rgb(fig, plt),
-             "Radius of the strongest density jump (the shock front) versus time. A blast decelerates "
-             "as it sweeps up air, so the curve bends over — the classic Sedov–Taylor expansion behind "
-             "explosion-safety and sonic-boom estimates.")]
+             "Radius of the steepest rise of the azimuthally averaged density around the burst point, per "
+             "saved frame (cells; time in code units with the actual adaptive time step). A strong 2-D "
+             "point blast follows the Sedov–Taylor law R ∝ t^½; this finite-pressure charge starts faster "
+             "and bends toward that exponent as it sweeps up gas — the late-time fit is shown." + city)]
 
 
-def _bubble(result):
-    return _ke_enstrophy(result, "Baroclinic vorticity growth (KE & enstrophy)",
-                         "When the shock crosses the density interface of the bubble it deposits "
-                         "vorticity (the baroclinic, ∇ρ×∇p, mechanism). Kinetic energy and especially "
-                         "enstrophy jump at that moment and keep growing as the bubble rolls up — the "
-                         "Richtmyer–Meshkov instability.")
-
-
-# ─────────────────────────  SPH  ─────────────────────────
-def _particles(result):
-    raw = result.raw; h = result.hints
-    ke = np.array([0.5 * float(np.mean(d[:, 2] ** 2)) for d in raw]); ke /= (ke.max() + 1e-30)
-    t = np.linspace(0, 1, len(ke)); out = []
-    fig, ax, plt = _new_ax("time (normalised)", "kinetic energy (normalised)", "Kinetic energy of the water")
-    ax.plot(t, ke, color=_CYAN, lw=2.2)
-    out.append(("Kinetic energy", _rgb(fig, plt),
-                "Total kinetic energy of the water. It rises as gravity converts the initial height "
-                "into motion, peaks at the most violent impact/collapse, then decays as the splash "
-                "settles — energy conservation made visible."))
-    Ly = h.get("Ly", 1.0); Lx = h.get("Lx", 1.0)
-    front = []
-    for d in raw:
-        low = d[d[:, 1] < 0.12 * Ly]; front.append(low[:, 0].max() if len(low) else 0.0)
-    front = np.array(front) / Lx
-    fig, ax, plt = _new_ax("time (normalised)", "front position  (fraction of tank)", "Leading surge front")
-    ax.plot(t, front, color=_AMBER, lw=2.2)
-    out.append(("Surge front", _rgb(fig, plt),
-                "Position of the leading edge of water along the floor. For a dam break the front "
-                "advances at a near-constant speed set by the water depth (the Ritter √(gH) law) — a "
-                "standard check for a free-surface solver."))
+def _sod(result):
+    """Sod shock tube against the exact Riemann solution: density (and velocity when saved)."""
+    from . import validate
+    raw = result.raw; h = result.hints; nx = raw[0].shape[1]; t = _times(result)
+    rho = raw[-1].mean(axis=0); x = (np.arange(nx) + 0.5) / nx
+    tp = float(t[-1]) / nx                                  # code time → tube-length units
+    ex_r, ex_u, ex_p = validate.exact_sod_full(x, tp)
+    err_r = float(np.mean(np.abs(rho - ex_r)))
+    fig, ax, plt = _new_ax("x / L", "density ρ", f"Sod shock tube at t = {tp:.3f}: density vs exact")
+    ax.plot(x, ex_r, color=_MUTED, lw=1.6, ls="--", label="exact Riemann solution")
+    ax.plot(x, rho, color=_CYAN, lw=1.8, label="solver"); _legend(ax); _note(ax, f"mean |Δρ| = {err_r:.4f}")
+    out = [("Density vs exact", _rgb(fig, plt),
+            "Row-averaged density along the tube at the final frame against the exact Riemann solution (Toro): "
+            "left state (ρ, u, p) = (1, 0, 1), right (0.125, 0, 0.1), γ = 1.4, membrane at x = 0.5. From left: "
+            "rarefaction fan, contact discontinuity, shock. The MUSCL/HLLC scheme smears the contact over a few "
+            f"cells; the mean absolute density error is {err_r:.4f} at {nx} cells (first-order at discontinuities).")]
+    vel = h.get("vel")
+    if vel:
+        u = vel[-1][0].mean(axis=0); err_u = float(np.mean(np.abs(u - ex_u)))
+        fig, ax, plt = _new_ax("x / L", "velocity u", "Velocity vs exact")
+        ax.plot(x, ex_u, color=_MUTED, lw=1.6, ls="--", label="exact"); ax.plot(x, u, color=_AMBER, lw=1.8, label="solver"); _legend(ax)
+        _note(ax, f"mean |Δu| = {err_u:.4f}")
+        out.append(("Velocity vs exact", _rgb(fig, plt),
+                    "Row-averaged velocity against the exact solution: the plateau between the rarefaction tail and "
+                    "the shock is the star-region velocity u* ≈ 0.927."))
     return out
 
 
-# ─────────────────────────  LBM porous  ─────────────────────────
+def _bubble(result):
+    ke = _compressible_ke(result); t = _times(result)
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "½ Σ ρ|u|² (code units)", "Kinetic energy after the shock passes")
+    ax.plot(t, ke, color=_CYAN, lw=2.0)
+    return [("Kinetic energy", _rgb(fig, plt),
+             "Total kinetic energy ½Σρ|u|² over the domain (density included, as required for a compressible "
+             "flow), per saved frame. It jumps when the shock enters and keeps rising as baroclinic vorticity "
+             "(∇ρ × ∇p) rolls the bubble up — the Richtmyer–Meshkov mechanism.")]
+
+
+def _particles(result):
+    h = result.hints; sc = h.get("scene", "dam"); t = _times(result); out = []
+    ke, npart = _sph_energy(result)
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "kinetic energy (J per m of depth)", "Kinetic energy of the water")
+    ax.plot(t, ke, color=_CYAN, lw=2.0)
+    if npart.max() != npart.min():
+        ax2 = ax.twinx(); ax2.plot(t, npart, color=_MUTED, lw=1.2, ls="--"); ax2.set_ylabel("particles", color=_FG, fontsize=9); ax2.tick_params(colors=_MUTED, labelsize=8)
+    out.append(("Kinetic energy", _rgb(fig, plt),
+                "½ Σ m v² over the fluid particles with m = ρ₀ dp² (ρ₀ = 1000 kg/m³), i.e. joules per metre "
+                "of depth for this 2-D model. The particle count is shown when it changes (the pour scene "
+                "adds particles over time)."))
+    ss = _sph_scene_series(result)
+    if sc == "dam":
+        g, H = float(h.get("g", 9.81)), float(h.get("H", 2.0))
+        fig, ax, plt = _new_ax("time (s)", "front position (m)", "Leading surge front")
+        ax.plot(t, ss["front_x_m"], color=_AMBER, lw=2.0)
+        ax.plot(t, np.minimum(h.get("Lx", 5.0), float(h.get("a", 1.0)) + 2 * np.sqrt(g * H) * t), color=_MUTED, lw=1.2, ls="--", label="Ritter dry-bed limit 2√(gH)")
+        _legend(ax)
+        out.append(("Surge front", _rgb(fig, plt),
+                    "Position of the water front along the floor (highest x among particles below 0.12 Ly) versus "
+                    "time, with the frictionless shallow-water bound x = a + 2√(gH)·t (Ritter). A real column "
+                    "collapses vertically first, so the front lags this bound."))
+    elif sc == "drop":
+        fig, ax, plt = _new_ax("time (s)", "highest water (m)", "Crown height")
+        ax.plot(t, ss["crown_height_m"], color=_AMBER, lw=2.0)
+        out.append(("Crown height", _rgb(fig, plt),
+                    "Highest particle over time: the blob's fall, the impact, the crown/jet rise and its collapse. "
+                    "Two-dimensional water-blob impact without surface tension — not a resolved 3-D splash."))
+    elif sc == "slosh":
+        fig, ax, plt = _new_ax("time (s)", "free-surface level at the walls (m)", "Sloshing response")
+        ax.plot(t, ss["left_wall_level_m"], color=_CYAN, lw=1.8, label="left wall"); ax.plot(t, ss["right_wall_level_m"], color=_AMBER, lw=1.8, label="right wall"); _legend(ax)
+        out.append(("Wall run-up", _rgb(fig, plt),
+                    "Water level next to each wall (highest particle within a narrow strip) versus time under the "
+                    "oscillating side force. Sweep the forcing period to find the resonant response."))
+    elif sc == "pour":
+        fig, ax, plt = _new_ax("time (s)", "fill level (m, 90th percentile height)", "Filling the glass")
+        ax.plot(t, ss["fill_height_m"], color=_AMBER, lw=2.0)
+        out.append(("Fill level", _rgb(fig, plt), "Water level in the glass versus time as the stream pours in."))
+    elif sc in ("waves", "ship"):
+        fig, ax, plt = _new_ax("time (s)", "surface elevation (m)", "Wave gauges")
+        for k, c in (("gauge_1_m", _CYAN), ("gauge_2_m", _AMBER), ("gauge_3_m", _GOOD)):
+            ax.plot(t, ss[k], color=c, lw=1.6, label=k.replace("_m", "").replace("_", " ") + f" (x = {['0.25', '0.5', '0.75'][int(k[6]) - 1]} Lx)")
+        _legend(ax)
+        out.append(("Wave gauges", _rgb(fig, plt),
+                    "Free-surface elevation at three fixed positions. The delay between gauges gives the wave "
+                    "speed and wavelength; with a closed tank the reflected train returns from the right wall, "
+                    "so late-time records mix incident and reflected waves. Flat bottom — no shoaling."))
+        if "hull_heave_m" in ss:
+            fig, ax, plt = _new_ax("time (s)", "heave (m) · roll (°)", "Hull motion")
+            ax.plot(t, ss["hull_heave_m"], color=_CYAN, lw=1.8, label="heave (hull centroid height)")
+            ax2 = ax.twinx(); ax2.plot(t, ss["hull_roll_deg"], color=_AMBER, lw=1.5, label="roll (°)"); ax2.tick_params(colors=_MUTED, labelsize=8)
+            lines = ax.get_lines() + ax2.get_lines(); ax.legend(lines, [l.get_label() for l in lines], facecolor=_BG, edgecolor=_GRID, labelcolor=_FG, fontsize=8)
+            out.append(("Hull motion", _rgb(fig, plt),
+                        "Heave and roll of the rigid hull from its particle positions. The hull is driven by contact "
+                        "forces from the water, gravity and damping (not by a pressure integration)."))
+    return out
+
+
 def _porous(result):
     h = result.hints
     phi = h.get("porosity", 0.6); k = h.get("permeability", 0.0); d = 2.0 * h.get("grain", 12)
     P = np.linspace(0.35, 0.9, 120); kc = P ** 3 * d * d / (180.0 * (1.0 - P) ** 2)
-    fig, ax, plt = _new_ax("porosity  φ", "permeability  k  (lattice cells²)", "Permeability vs porosity")
-    ax.plot(P, kc, color=_MUTED, lw=1.8, ls="--", label="Kozeny–Carman")
-    ax.scatter([phi], [max(k, 1e-9)], color=_AMBER, s=90, zorder=5, edgecolor="#1a1a1a",
-               label=f"measured: φ={phi:.2f}, k={k:.2f}")
+    fig, ax, plt = _new_ax("porosity φ", "permeability k (lattice cells²)", "Permeability of this sample")
+    ax.plot(P, kc, color=_MUTED, lw=1.6, ls="--", label="Kozeny–Carman (empirical, 3-D packed beds; orientation only)")
+    ax.scatter([phi], [max(k, 1e-9)], color=_AMBER, s=90, zorder=5, edgecolor="#1a1a1a", label=f"this run: φ = {phi:.2f}, k = {k:.2f}")
     ax.set_yscale("log"); _legend(ax)
     return [("Permeability (Darcy)", _rgb(fig, plt),
-             "The measured permeability k = ν⟨u⟩/g (how easily fluid passes the rock) plotted against "
-             "the Kozeny–Carman trend. k falls steeply as the pores close up — the measured point should "
-             "fall near the reference curve (the grains are randomly sized, so an exact match isn't "
-             "expected), confirming the pore-scale flow reproduces Darcy-type behaviour.")]
+             "k = ν U_D / g from the final frame: ν = (τ − ½)/3, U_D the superficial velocity (flow averaged over "
+             "the whole sample including solid cells) and g the body force per unit mass (Guo forcing; "
+             f"here g = {h.get('force', 0):.1e}). A pore-average velocity ⟨u⟩_fluid = U_D/φ is reported separately "
+             f"({h.get('mean_ux_pore', 0) if h.get('mean_ux_pore') is not None else 'n/a'}). One point next to an "
+             "empirical curve does not establish agreement: the Kozeny–Carman line is for 3-D packed beds and is "
+             "drawn for orientation. To check Darcy behaviour, sweep the porosity or the seed (same φ, different "
+             "connectivity) with the sweep tool; the run reports k from the final state and should be run long "
+             "enough for the readout to have settled (increase Duration and compare).")]
 
 
-# ─────────────────────────  pseudo-spectral fields  ─────────────────────────
 def _field(result):
-    raw = result.raw
-    label = result.hints.get("label", "")
-    if label.startswith("V"):                                # Gray–Scott reaction–diffusion
+    raw = result.raw; label = str(result.hints.get("label", "")); t = _times(result)
+    if label.startswith("V"):
         cov = np.array([float(np.mean(s > 0.25)) for s in raw]) * 100.0
-        t = np.linspace(0, 1, len(cov))
-        fig, ax, plt = _new_ax("time (normalised)", "area in the patterned state  (%)",
-                               "Turing-pattern growth")
-        ax.plot(t, cov, color=_GOOD, lw=2.2); ax.set_ylim(0, max(60, cov.max() * 1.1))
+        fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "area with V > 0.25 (%)", "Pattern coverage")
+        ax.plot(t, cov, color=_GOOD, lw=2.0); ax.set_ylim(0, max(60, cov.max() * 1.1))
         return [("Pattern coverage", _rgb(fig, plt),
-                 "Fraction of the domain occupied by the reacting species. From a few seed spots the "
-                 "Gray–Scott pattern spreads and then saturates as spots/stripes fill the space and "
-                 "lock into a steady wavelength — diffusion-driven (Turing) pattern formation.")]
-    # ink in motion — passive dye mixing
-    var = np.array([float(np.var(s)) for s in raw]); var /= (var.max() + 1e-30)
-    t = np.linspace(0, 1, len(var))
-    fig, ax, plt = _new_ax("time (normalised)", "dye variance (normalised)", "Mixing of the dye")
-    ax.plot(t, var, color=_CYAN, lw=2.2); ax.set_ylim(0, 1.05)
+                 "Percentage of the domain where the V concentration exceeds 0.25, per saved frame. Note that "
+                 "the scheme clips U and V to [0, 1] each step; a clip that activates is a numerical intervention, "
+                 "not part of the Gray–Scott model.")]
+    var = np.array([float(np.var(s)) for s in raw])
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "dye variance ⟨c²⟩ − ⟨c⟩²", "Mixing of the dye")
+    ax.plot(t, var, color=_CYAN, lw=2.0)
+    kap = result.hints.get("kappa", None); stir = result.hints.get("stir", 1.0)
     return [("Dye mixing", _rgb(fig, plt),
-             "Variance (contrast) of the dye field. The stirring stretches the blobs into ever-finer "
-             "filaments; as they thin below the grid scale the contrast decays — the chaotic flow is "
-             "mixing the dye toward uniformity.")]
+             "Variance of the dye concentration over the domain (absolute). Stirring alone cannot reduce the "
+             "variance of a conserved scalar; the decay seen here comes from molecular diffusion "
+             f"(κ = {kap}) plus the numerical diffusion of the bilinear semi-Lagrangian scheme once "
+             f"filaments thin below the grid. Compare stirring strength {stir} with 0 (diffusion only) and "
+             "κ = 0 (stirring only) to separate the two.")]
 
 
-# ─────────────────────────  quantum  ─────────────────────────
 def _quantum(result):
     norm = result.hints.get("norm")
     if not norm:
         return []
-    t = np.linspace(0, 1, len(norm)); closed = result.hints.get("scene") == "harmonic"
-    fig, ax, plt = _new_ax("time (normalised)", "total probability  ∫|ψ|²", "Probability conservation")
-    ax.plot(t, norm, color=_CYAN, lw=2.2); ax.axhline(1.0, color=_MUTED, lw=0.8, ls="--")
+    t = _times(result); closed = result.hints.get("scene") == "harmonic"
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "total probability ∫|ψ|²", "Probability conservation")
+    ax.plot(t, norm, color=_CYAN, lw=2.0); ax.axhline(1.0, color=_MUTED, lw=0.8, ls="--")
     if closed:
-        ax.set_ylim(0.999, 1.001)
-        ax.text(0.5, 0.5, f"closed system — unitary\ndrift {max(abs(x - 1) for x in norm):.0e}",
-                transform=ax.transAxes, color=_GOOD, fontsize=10, ha="center", fontweight="bold")
-        ex = ("Total probability ∫|ψ|² for a closed well. A correct unitary solver conserves it to "
-              "round-off — the flat line confirms the split-step scheme is faithful.")
+        ax.set_ylim(0.999, 1.001); _note(ax, f"drift {max(abs(x - 1) for x in norm):.0e}")
+        ex = "Closed harmonic well: the split-step scheme is unitary, so the norm should stay 1 to round-off."
     else:
-        ax.set_ylim(0, 1.05)
-        ax.text(0.97, 0.9, "open system: probability\nleaves through the absorber", transform=ax.transAxes,
-                color=_MUTED, fontsize=9, ha="right", va="top")
-        ex = ("Total probability over time. With an absorbing boundary the packet leaves the box, so "
-              "the norm decays — exactly what an open scattering set-up should show.")
+        ax.set_ylim(0, 1.05); _note(ax, "open system: probability leaves through the absorber", _MUTED)
+        ex = "Open scattering set-up: probability leaves through the absorbing border, so the norm decays."
     return [("Probability conservation", _rgb(fig, plt), ex)]
 
 
-# ─────────────────────────  dispatch  ─────────────────────────
+def _spectral(result):
+    ke, ens = _ke_enstrophy(result); t = _times(result); h = result.hints
+    fig, ax, plt = _new_ax(f"time ({_tunit(result)})", "½⟨|u|²⟩", "2-D turbulence: energy & enstrophy")
+    ax.plot(t, ke, color=_CYAN, lw=2.0, label="kinetic energy per unit mass")
+    if h.get("init") == "Taylor–Green" and h.get("nu") is not None:
+        ax.plot(t, ke[0] * np.exp(-4.0 * float(h["nu"]) * (t - t[0])), color=_GOOD, lw=1.2, ls="--", label="analytical E₀·exp(−4νt)")
+    ax2 = ax.twinx(); ax2.plot(t, ens, color=_AMBER, lw=2.0, label="enstrophy ½⟨ω²⟩"); ax2.tick_params(colors=_MUTED, labelsize=8)
+    lines = ax.get_lines() + ax2.get_lines(); ax.legend(lines, [l.get_label() for l in lines], facecolor=_BG, edgecolor=_GRID, labelcolor=_FG, fontsize=8, loc="best")
+    extra = (" The Taylor–Green vortex decays as exp(−4νt) for wavenumber 1 in a 2π box; the dashed line is that "
+             "prediction.") if h.get("init") == "Taylor–Green" else \
+            " In decaying 2-D turbulence the energy is nearly conserved while enstrophy falls as small eddies merge (inverse cascade)."
+    return [("Energy & enstrophy", _rgb(fig, plt),
+             "Domain-averaged kinetic energy per unit mass and enstrophy (absolute, nondimensional units, L = 2π). "
+             "Time integration is explicit RK4, so with ν = 0 energy is conserved to truncation error, not exactly." + extra)]
+
+
 def plots(result):
     """Return [(title, rgb ndarray, explanation), …] of diagnostics for this result."""
     try:
@@ -503,18 +788,16 @@ def plots(result):
         if k == "lbm":
             return _wind_tunnel(result)
         if k == "spectral":
-            return _ke_enstrophy(result, "2-D turbulence — energy & enstrophy",
-                                 "Kinetic energy and enstrophy (small-scale rotation) over time. In "
-                                 "decaying 2-D turbulence energy is nearly conserved while enstrophy "
-                                 "falls as small eddies merge into larger ones — the inverse cascade.")
+            return _spectral(result)
         if k == "ns":
             return _ns(result)
         if k == "density":
-            return _blast(result) if result.hints.get("mode") == "blast" else _bubble(result)
+            mode = result.hints.get("mode")
+            return _blast(result) if mode == "blast" else (_sod(result) if mode == "sod" else _bubble(result))
         if k == "particles":
             return _particles(result)
         if k == "field":
             return _field(result)
-    except Exception:
+    except Exception:                       # noqa: BLE001 — a failed diagnostic must not break the app
         pass
     return []
