@@ -502,11 +502,16 @@ class Result:
             f0 = self.raw[0]
             arr = f0[0] if isinstance(f0, tuple) else f0
             shape = list(getattr(arr, "shape", []))
+        def scal(v):
+            return float(v) if isinstance(v, (np.floating, np.integer)) else v
         return {"kind": self.kind, "info": self.info, "views": list(self.views), "frames": self.nframes,
                 "shape": shape, "times": [float(t) for t in self.times],
                 "time_unit": h.get("time_unit", "solver units"),
-                "hints": {k: (float(v) if isinstance(v, (int, float, np.floating, np.integer)) else v)
-                          for k, v in h.items() if isinstance(v, (int, float, str, bool, np.floating, np.integer))}}
+                "warmup_dropped": h.get("warmup_dropped"),
+                "effective": {k: scal(v) for k, v in (h.get("effective") or {}).items()
+                              if isinstance(v, (int, float, str, bool, np.floating, np.integer))},
+                "hints": {k: scal(v) for k, v in h.items()
+                          if isinstance(v, (int, float, str, bool, np.floating, np.integer))}}
 
 
 # ---------- parameter descriptors (pre-run only) ----------
@@ -563,9 +568,105 @@ _H = {
 }
 
 
+# ---------- effective configuration (the numbers the solver will actually use) ----------
+def _wt_config(p):
+    """Wind tunnel: grid, reference length, τ/ν and step count. nx, ny, D and the step count
+    scale with the resolution setting, so the elapsed convective time U·steps/D is the same
+    only when the duration is scaled too — the derived readouts say so."""
+    s = _res(p); nx, ny = int(900 * s), int(300 * s)
+    Re = float(p["reynolds"]); U = float(p["speed"]); obs = p["obstacle"]
+    D = max(8.0, ny * float(p["size"]))
+    if obs == "Your text":
+        D = ny * 0.34
+    elif obs == "F1 car":
+        D = 0.34 * ny * 1.05
+    elif obs == "Cyclist":
+        D = 0.6 * ny * 0.42
+    elif obs == "Peloton (drafting)":
+        D = 0.6 * ny * 0.38
+    tau = 0.5 + 3 * (U * D / Re); steps = int(44000 * _durv(p))
+    return {"nx": nx, "ny": ny, "Re": Re, "U": U, "D": D, "tau": tau, "nu": (tau - 0.5) / 3.0, "steps": steps,
+            "save_every": max(1, steps // 120), "convective_time": U * steps / D, "mach": U * 3 ** 0.5}
+
+
+def _porous_config(p):
+    s = _res(p); nx, ny = int(380 * s), int(360 * s)
+    grain = max(4, int(float(p["grain"]) * ny)); tau = 0.8
+    force = 1.2e-5 * float(p.get("strength", 1.0))
+    fdir = 1 if str(p.get("direction", "x")).lower().startswith("y") else 0
+    steps = int(24000 * _durv(p))
+    return {"nx": nx, "ny": ny, "grain": grain, "tau": tau, "nu": (tau - 0.5) / 3.0, "force": force, "fdir": fdir,
+            "steps": steps, "save_every": max(1, steps // 120), "seed": int(p.get("seed", 1))}
+
+
+def _ns_config(mode, p):
+    s = _res(p); steps = int(4800 * _durv(p))
+    dims = {"smoke": (280, 440), "rt": (280, 440), "rb": (480, 230), "flame": (190, 360), "wind": (540, 420)}[mode]
+    nx, ny = int(dims[0] * s), int(dims[1] * s)
+    return {"nx": nx, "ny": ny, "steps": steps, "save_every": max(1, steps // 110), "dt": 1.0}
+
+
+def _sph_config(p):
+    sc = _SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam"); Lx, Ly = _SPLASH_TANK[sc]
+    a = float(p.get("dropsize", 0.4)) if sc == "drop" else float(p["width"])
+    g = float(p["gravity"]); npart = max(500.0, float(p["particles"]))
+    if sc == "pour":
+        H = Ly; dp = Lx / 44.0; tend = 3.0 * _durv(p)
+    else:
+        H = float(p["height"]); dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08)); tend = 2.0 * _durv(p)
+    Href = max(H, Ly * 0.5)                                     # the solver's reference height for c0
+    c0 = 10.0 * (g * Href) ** 0.5; dt = 0.08 * 1.3 * dp / c0
+    steps_est = tend / dt
+    return {"scene": sc, "Lx": Lx, "Ly": Ly, "a": a, "H": H, "Href": Href, "g": g, "dp": dp, "tend": tend, "c0": c0,
+            "dt": dt, "steps_est": int(steps_est), "save_every": max(20, int(steps_est // 120))}
+
+
+def _spectral_config(p, mixing=False):
+    s = _res(p); n = int(256 * s); L = 2 * np.pi; n0 = 256
+    T_end = (2600 if mixing else 2800) * _durv(p) * 0.4 * (L / n0)
+    dt = 0.4 * (L / n); steps = max(1, int(round(T_end / dt)))
+    return {"n": n, "L": L, "dt": dt, "T_end": T_end, "steps": steps, "nu": 4e-4 if mixing else float(p["viscosity"])}
+
+
+_NS_MODES = {"Rising Smoke": "smoke", "Candle Flame": "flame", "Mushroom Clouds": "rt", "Rayleigh-Benard": "rb",
+             "Chimney Plume": "wind"}
+
+
+def effective(name, params):
+    """Resolved configuration for an exhibit (defaults filled): the same numbers the runner
+    passes to the solver. Used by the derived readouts, result metadata and reports."""
+    spec = EXHIBITS[name]
+    p = {q["name"]: q["default"] for q in spec["params"]}; p.update(params or {})
+    if name == "Wind Tunnel":
+        return _wt_config(p)
+    if name == "Porous Flow":
+        return _porous_config(p)
+    if name in _NS_MODES:
+        return _ns_config(_NS_MODES[name], p)
+    if name == "The Big Splash":
+        return _sph_config(p)
+    if name == "Cloud Billows":
+        return _spectral_config(p)
+    if name == "Ink in Motion":
+        return _spectral_config(p, mixing=True)
+    return {}
+
+
+def _thin(indices, keep):
+    """Every k-th index of `indices` so that at most ~`keep` remain, always including the last one."""
+    idx = list(indices)
+    if len(idx) <= keep:
+        return idx
+    stride = max(1, (len(idx) - 1) // (keep - 1))
+    out = idx[::stride]
+    if out[-1] != idx[-1]:
+        out.append(idx[-1])
+    return out
+
+
 # ---------- runners (SOLVE → raw fields) ----------
 def _solve_windtunnel(p, pr, tmp):
-    s = _res(p); nx, ny = int(900 * s), int(300 * s)
+    cfg = _wt_config(p); nx, ny = cfg["nx"], cfg["ny"]
     Re = float(p["reynolds"]); U = float(p["speed"]); obs = p["obstacle"]
     cx, cy = int(nx * float(p.get("xpos", 0.25))), ny // 2 + 2
     D = max(8.0, ny * float(p["size"]))                     # characteristic length
@@ -590,7 +691,7 @@ def _solve_windtunnel(p, pr, tmp):
         mask = geometry.cyclist(nx, ny, cx, S, riders=2, gap=1.0); D = 0.6 * S; probe = cx + int(3 * S)
     else:                                                   # Cylinder
         mask = geometry.cylinder(nx, ny, cx, cy, D / 2); probe = cx + int(3 * D)
-    tau = 0.5 + 3 * (U * D / Re)
+    tau = cfg["tau"]
     probe = int(min(probe, 0.85 * nx))                      # keep the probe clear of the outlet sponge (last 12%)
     _ys = np.where(mask.any(axis=1))[0]                      # sample the wake at the body's height
     probe_y = int(round(_ys.mean())) if len(_ys) else ny // 2
@@ -599,21 +700,22 @@ def _solve_windtunnel(p, pr, tmp):
         mask[0:max(2, ny // 28), :] = 1                     # (otherwise periodic walls let flow wrap under)
     geometry.save_mask(mask, Path(tmp) / "m.bin")
     _ensure(_bin("lbm", "lbm2d"))
-    steps = int(44000 * _durv(p))
+    steps = cfg["steps"]; save_every = cfg["save_every"]
     pr(f"LBM wind tunnel · {obs} · {nx}×{ny}, Re={Re:.0f}, {steps} steps…")
     _run_solver([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
                  "--mask", str(Path(tmp) / "m.bin"), "--U", str(U), "--tau", f"{tau:.5f}",
-                 "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
+                 "--steps", str(steps), "--save_every", str(save_every),
                  "--out", tmp, "--probe_x", str(min(probe, nx - 2)), "--probe_y", str(probe_y)], pr)
-    save_every = max(1, steps // 120)
-    n = _nframes(tmp); stride = max(1, (n - n // 5) // 90)
-    use = range(n // 5, n, stride)
+    n = _nframes(tmp); all_t = fio.read_frame_times(tmp) or [float(i * save_every) for i in range(n)]
+    use = _thin(range(n // 5, n), 90)                       # warm-up (first 20 %) dropped; final frame always kept
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
-    times = [float(i * save_every) for i in use]          # lattice time steps of each kept frame
+    times = [all_t[i] for i in use]                         # lattice time steps of each kept frame
     hints = {"probe_x": min(probe, nx - 2), "probe_y": probe_y, "D": D, "U": U, "tau": tau,
              "nu": (tau - 0.5) / 3.0, "obstacle": obs,   # so diagnostics can pick the right plot
-             "frame_dt_steps": stride * save_every,       # for the lift / Strouhal diagnostic
-             "time_unit": "lattice steps", "steps": steps, "dx": 1.0}
+             "frame_dt_steps": (use[1] - use[0]) * save_every if len(use) > 1 else save_every,
+             "time_unit": "lattice steps", "steps": steps, "dx": 1.0,
+             "warmup_dropped": {"frames": n // 5, "until_time": all_t[n // 5] if n > n // 5 else None},
+             "convective_time": cfg["convective_time"], "effective": cfg}
     probe_csv = Path(tmp) / "probe.csv"
     if probe_csv.exists():                                 # high-rate wake probe (every step)
         try:
@@ -627,44 +729,51 @@ def _solve_windtunnel(p, pr, tmp):
 
 
 def _solve_porous(p, pr, tmp):
-    s = _res(p); nx, ny = int(380 * s), int(360 * s)
-    phi = float(p["porosity"]); grain = max(4, int(float(p["grain"]) * ny))
-    mask = geometry.porous(nx, ny, solid_frac=1.0 - phi, grain=grain, seed=int(p.get("seed", 1)))
+    cfg = _porous_config(p); nx, ny = cfg["nx"], cfg["ny"]
+    phi = float(p["porosity"]); grain = cfg["grain"]
+    mask = geometry.porous(nx, ny, solid_frac=1.0 - phi, grain=grain, seed=cfg["seed"])
     geometry.save_mask(mask, Path(tmp) / "m.bin")
     _ensure(_bin("lbm", "lbm2d"))
-    tau, force = 0.8, 1.2e-5 * float(p.get("strength", 1.0))   # viscous (Stokes regime → Darcy valid), gentle body force
-    fdir = 1 if str(p.get("direction", "x")).lower().startswith("y") else 0
-    steps = int(24000 * _durv(p))
+    tau, force, fdir, steps = cfg["tau"], cfg["force"], cfg["fdir"], cfg["steps"]
     pr(f"LBM porous medium · φ={phi:.2f} · {nx}×{ny} · force along {'y' if fdir else 'x'}…")
     _run_solver([str(_bin("lbm", "lbm2d")), "--nx", str(nx), "--ny", str(ny),
-                 "--mask", str(Path(tmp) / "m.bin"), "--periodic", "1", "--force", str(force), "--fdir", str(fdir),
-                 "--tau", str(tau), "--steps", str(steps), "--save_every", str(max(1, steps // 120)),
-                 "--out", tmp], pr)
-    n = _nframes(tmp); use = range(n // 3, n, max(1, (n - n // 3) // 70))
+                 "--mask", str(Path(tmp) / "m.bin"), "--periodic", "1", "--U", "0", "--force", str(force),
+                 "--fdir", str(fdir), "--tau", str(tau), "--steps", str(steps), "--save_every", str(cfg["save_every"]),
+                 "--out", tmp], pr)                                       # --U 0: the fluid really starts at rest
+    n = _nframes(tmp); all_t = fio.read_frame_times(tmp) or [float(i * cfg["save_every"]) for i in range(n)]
+    use = _thin(range(n // 3, n), 70)
     raw = [_read_vel(tmp, i, nx, ny) for i in use]
-    times = [float(i * max(1, steps // 120)) for i in use]
+    times = [all_t[i] for i in use]
     meta = fio.read_meta(tmp)
     poro = meta.get("porosity", phi); perm = meta.get("permeability", 0.0)
+    # convergence record: k at every saved frame → settled if the last 10 % of the run changed k by < 1 %
+    kh = np.zeros((0, 2))
+    try:
+        kh = np.loadtxt(Path(tmp) / "perm.csv", delimiter=",", skiprows=1)
+        kh = kh.reshape(-1, 2) if kh.size else np.zeros((0, 2))
+    except Exception:
+        pass
+    settled, k_change = False, None
+    if len(kh) >= 4:
+        k_end = kh[-1, 1]; k_prev = kh[max(0, int(0.9 * len(kh)) - 1), 1]
+        k_change = float(abs(k_end - k_prev) / (abs(k_end) + 1e-30)); settled = k_change < 0.01
+    upore = meta.get("mean_ux_pore") or 0.0; re_pore = abs(upore) * grain / cfg["nu"]
     hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force, "tau": tau,
-             "direction": "y" if fdir else "x", "seed": int(p.get("seed", 1)),
-             "nu": (tau - 0.5) / 3.0, "mean_ux_pore": meta.get("mean_ux_pore"), "mean_ux": meta.get("mean_ux"),
-             "time_unit": "lattice steps", "steps": steps, "dx": 1.0}
-    return Result("porous", raw, f"porous · φ={poro:.2f} · k_{'y' if fdir else 'x'}={perm:.2e}", mask=mask, hints=hints, times=times)
+             "direction": "y" if fdir else "x", "seed": cfg["seed"],
+             "nu": cfg["nu"], "mean_ux_pore": upore, "mean_ux": meta.get("mean_ux"),
+             "k_status": "settled" if settled else "transient", "k_change_last10pct": k_change,
+             "k_history_step": kh[:, 0].tolist() if len(kh) else [], "k_history": kh[:, 1].tolist() if len(kh) else [],
+             "re_pore": re_pore, "time_unit": "lattice steps", "steps": steps, "dx": 1.0,
+             "warmup_dropped": {"frames": n // 3, "until_time": all_t[n // 3] if n > n // 3 else None}, "effective": cfg}
+    tag = "k" if settled else "k (transient)"
+    return Result("porous", raw, f"porous · φ={poro:.2f} · {tag}_{'y' if fdir else 'x'}={perm:.2e}", mask=mask, hints=hints, times=times)
 
 
 def _solve_ns(mode, p, pr, tmp):
-    s = _res(p); steps = int(4800 * _durv(p))
-    if mode in ("smoke", "rt"):
-        nx, ny = int(280 * s), int(440 * s)         # tall box for rising plumes / fingers
-    elif mode == "rb":
-        nx, ny = int(480 * s), int(230 * s)         # wide, shallow cell for convection rolls
-    elif mode == "flame":
-        nx, ny = int(190 * s), int(360 * s)         # tall, narrow box for a slender candle flame
-    else:                                           # wind
-        nx, ny = int(540 * s), int(420 * s)         # tall, wide box: open top, the plume rises & blows across
+    cfg = _ns_config(mode, p); nx, ny, steps = cfg["nx"], cfg["ny"], cfg["steps"]
     _ensure(_bin("incompressible", "ins2d"))
     args = [str(_bin("incompressible", "ins2d")), "--mode", mode, "--nx", str(nx),
-            "--ny", str(ny), "--steps", str(steps), "--save_every", str(max(1, steps // 110)),
+            "--ny", str(ny), "--steps", str(steps), "--save_every", str(cfg["save_every"]),
             "--out", tmp, "--visc", str(p["viscosity"])]
     if mode == "smoke":
         args += ["--buoy", str(p["buoyancy"]), "--conf", str(p["confinement"]), "--srcw", str(p["source"]),
@@ -688,14 +797,14 @@ def _solve_ns(mode, p, pr, tmp):
         hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
     pr(f"Navier–Stokes ({mode}) {nx}×{ny}, {steps} steps…")
     _run_solver(args, pr)
-    n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
+    n = _nframes(tmp); idx = _thin(range(n), 100)
     raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
-    save_every = max(1, steps // 110)
-    times = [float(i * save_every) for i in idx]             # solver steps (dt = 1 in ins2d)
-
+    all_t = fio.read_frame_times(tmp) or [float(i * cfg["save_every"]) for i in range(n)]
+    times = [all_t[i] for i in idx]                          # solver steps (dt = 1 in ins2d)
     hints["vel"] = [fio.read_frame(tmp, i, nx, ny, prefix="vel") for i in idx]   # for Speed/Vorticity/Streamlines
     hints["ns_mode"] = mode                                  # so diagnostics can pick the right plot
-    hints.update({"time_unit": "solver steps (dt = 1)", "steps": steps, "dx": 1.0, "nu": float(p["viscosity"])})
+    hints.update({"time_unit": "solver steps (dt = 1)", "steps": steps, "dx": 1.0, "nu": float(p["viscosity"]),
+                  "effective": cfg})
     mask = None
     if mode == "wind":                                       # draw the solid chimney stack
         stack_h = int(0.32 * ny); sxx = nx // 4
@@ -734,8 +843,10 @@ def _solve_euler(mode, p, pr, tmp):
     _run_solver([str(_bin("compressible", "euler2d")), "--mode", mode, "--nx", str(nx),
                  "--ny", str(ny), "--tend", str(tend), "--cfl", "0.4", "--steps", "200000",
                  "--save_every", "12", "--out", tmp] + extra, pr, tend=tend)
-    n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
+    n = _nframes(tmp); idx = _thin(range(n), 100)
     raw = [_read_scalar(tmp, i, nx, ny) for i in idx]
+    meta_e = fio.read_meta(tmp)
+    hints.update({"pmin": meta_e.get("pmin"), "rhomin": meta_e.get("rhomin")})
     ft = Path(tmp) / "frame_times.txt"                       # actual (adaptive-dt) time of every saved frame
     all_t = [float(x) for x in ft.read_text().split()] if ft.exists() else []
     times = [all_t[i] for i in idx] if len(all_t) >= n else [float(i) for i in idx]
@@ -761,19 +872,9 @@ _SPLASH_TANK = {"dam": (5.0, 3.2), "drop": (5.0, 3.2), "slosh": (5.0, 3.2), "res
 
 
 def _solve_dam(p, pr, tmp):
-    sc = _SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam")
-    Lx, Ly = _SPLASH_TANK[sc]
-    a = float(p.get("dropsize", 0.4)) if sc == "drop" else float(p["width"])
-    g = float(p["gravity"])
-    npart = max(500.0, float(p["particles"]))
-    if sc == "pour":                          # a glass: scale sound speed to the glass, resolve its width
-        H = Ly; dp = Lx / 44.0; tend = 3.0 * _durv(p)
-    else:
-        H = float(p["height"]); dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08))
-        tend = 2.0 * _durv(p)
-    c0 = 10.0 * (g * max(H, Ly * 0.5)) ** 0.5         # solver's sound speed (for frame cadence)
-    steps_est = tend / (0.08 * 1.3 * dp / c0)
-    save_every = max(20, int(steps_est // 120))       # ~120 frames whatever the scene scale
+    cfg = _sph_config(p)
+    sc, Lx, Ly, a, H, g, dp, tend = cfg["scene"], cfg["Lx"], cfg["Ly"], cfg["a"], cfg["H"], cfg["g"], cfg["dp"], cfg["tend"]
+    save_every = cfg["save_every"]                    # ~120 frames whatever the scene scale
     args = [str(_bin("sph", "sph2d")), "--scene", sc, "--a", str(a), "--H", str(H),
             "--Lx", str(Lx), "--Ly", str(Ly), "--dp", str(dp), "--g", str(g),
             "--tend", str(tend), "--save_every", str(save_every), "--out", tmp]
@@ -790,16 +891,18 @@ def _solve_dam(p, pr, tmp):
     _ensure(_bin("sph", "sph2d"))
     pr(f"SPH · {p.get('scene', 'Dam break')} · dp={dp:.3f}…")
     _run_solver(args, pr)
-    n = _nframes(tmp); skip = max(1, n // 100); idx = list(range(0, n, skip))
+    n = _nframes(tmp); idx = _thin(range(n), 100)
     raw = [np.fromfile(Path(tmp) / f"frame_{i:05d}.bin", dtype=np.float32).reshape(-1, 3) for i in idx]
     ft = Path(tmp) / "frame_times.txt"
     all_t = [float(x) for x in ft.read_text().split()] if ft.exists() else []
     times = [all_t[i] for i in idx] if len(all_t) >= n else [float(i) for i in idx]
+    meta_s = fio.read_meta(tmp)
     if sc == "pour":          # colour by the pour/impact speed, not a dam-height scale
         vmax = 1.3 * max(float(p.get("pourv", 1.4)), float(np.sqrt(2 * g * Ly)))
     else:
         vmax = 1.2 * float(np.sqrt(2 * g * max(H, Ly * 0.5)))
     hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": vmax, "scene": sc, "g": g, "H": H, "tend": tend, "a": a,
+             "c0": cfg["c0"], "rho_rms_dev": meta_s.get("rho_rms_dev"), "effective": cfg,
              "time_unit": "s" if len(all_t) >= n else "frame"}
     if sc == "ship":
         hints["hull"] = [np.fromfile(Path(tmp) / f"hull_{i:05d}.bin", dtype=np.float32).reshape(-1, 2)
@@ -810,7 +913,7 @@ def _solve_dam(p, pr, tmp):
 
 def _solve_spectral(p, pr, tmp):
     from .spectral import Spectral2D, double_shear_layer, random_field
-    s = _res(p); n = int(256 * s); nu = float(p["viscosity"]); L = 2 * np.pi
+    cfg = _spectral_config(p); n, nu, L = cfg["n"], cfg["nu"], cfg["L"]
     sim = Spectral2D(n=n, L=L, nu=nu)
     if p.get("init") == "Random turbulence":
         wh = random_field(n, seed=int(p.get("seed", 1))); label = "decaying turbulence"
@@ -824,8 +927,7 @@ def _solve_spectral(p, pr, tmp):
     # the duration at the reference grid (n0=256) and take however many CFL-limited steps
     # that needs here. (Before, the step count was fixed while dt ~ 1/n, so "Ultra"
     # silently simulated about half the time of "Medium".)
-    n0 = 256; T_end = 2800 * _durv(p) * 0.4 * (L / n0)
-    dt = 0.4 * (L / n); steps = max(1, int(round(T_end / dt)))
+    T_end, dt, steps = cfg["T_end"], cfg["dt"], cfg["steps"]
     pr(f"spectral {n}×{n}, ν={nu:.1e}, T={T_end:.2f}, {steps} steps…")
     vel = []; times = []; _pp = max(1, steps // 50); every = max(1, steps // 90)
     for st in range(steps + 1):
@@ -848,9 +950,8 @@ def _solve_spectral(p, pr, tmp):
 
 def _solve_mixing(p, pr, tmp):
     from .spectral import Spectral2D, random_field, advect_sl
-    s = _res(p); n = int(256 * s); nu = 4e-4
-    n0 = 256; T_end = 2600 * _durv(p) * 0.4 * (2 * np.pi / n0)   # experiment-defined interval (same policy as _solve_spectral)
-    sim = Spectral2D(n=n, nu=nu); wh = random_field(n, seed=int(p.get("seed", 3))); dt = 0.4 * (2 * np.pi / n); steps = max(1, int(round(T_end / dt)))
+    cfg = _spectral_config(p, mixing=True); n, nu, T_end, dt, steps = cfg["n"], cfg["nu"], cfg["T_end"], cfg["dt"], cfg["steps"]
+    sim = Spectral2D(n=n, nu=nu); wh = random_field(n, seed=int(p.get("seed", 3)))
     stir = float(p.get("stir", 1.0))                       # 0 = diffusion only, 1 = full stirring
     L = 2 * np.pi
     # dye: alternating horizontal bands (so stirring shows the folding/filamentation)

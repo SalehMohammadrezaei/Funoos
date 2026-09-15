@@ -180,15 +180,17 @@ SCENES = [
                "(tests/, error 0.07 %). The Kozeny–Carman line in the plot is an empirical 3-D relation shown "
                "for orientation only; agreement with it is not claimed for this 2-D geometry.",
      "refs": [R["bear"], R["guo"], R["kruger"]]},
-    {"method": LBM, "exhibit": "Porous Flow", "key": "porous_connectivity", "name": "Same Porosity, Different Connectivity",
+    {"method": LBM, "exhibit": "Porous Flow", "key": "porous_connectivity", "name": "Similar Porosity, Different Arrangement",
      "phenomenon": "Porous media", "preset": {"porosity": 0.60, "grain": 0.035, "seed": 7}, "status": "numerical",
      "question": "Why can equal porosity produce different permeability?",
-     "blurb": "The same porosity and grain size as the previous scene, but a different random arrangement. "
-              "The pore space is equal; the paths through it are not.",
+     "blurb": "The same target porosity and grain size as the default sample, but a different random arrangement. "
+              "The measured porosities differ slightly (about 0.598 versus 0.600 at Medium — the random pack does not "
+              "hit the target exactly; both are shown in the readouts); the paths through the pore space differ much more.",
      "try": ["Compare k with the porous_phi60 scene (run history → Compare).", "Try seeds 2–10 with the sweep tool "
              "to see the spread of k at fixed porosity."],
      "observe": "The streamline view: a few wide channels carry most of the flow.",
-     "checks": "Numerical check (self-consistency): porosity is the same to within one cell; k differs by the connectivity.",
+     "checks": "Numerical check (self-consistency): compare the two measured porosities (they differ by a few hundred "
+               "cells out of ~137 000) with the two permeabilities; the k difference is far larger than the porosity difference.",
      "refs": [R["bear"]]},
     {"method": LBM, "exhibit": "Porous Flow", "key": "porous_aniso", "name": "Directional Permeability",
      "phenomenon": "Porous media", "preset": {"porosity": 0.60, "grain": 0.035, "direction": "y"}, "status": "numerical",
@@ -570,6 +572,118 @@ SCENES = [
 
 PHENOMENA = ["Wakes & aerodynamics", "Porous media", "Buoyancy & convection", "Shocks & compressible flow",
              "Free surfaces & waves", "Vortices & mixing", "Pattern formation"]
+
+# ───────────────────────── experiments: gallery cards with named presets ─────────────────────────
+# Every scene key above belongs to exactly one experiment (checked in tests). Scene keys stay the
+# stable identifiers used by saved setups, favourites, recents and clips; an experiment groups the
+# presets of one investigation under one card, one question and one representative preview.
+EXPERIMENTS = [
+    {"id": "cylinder_wake", "name": "Cylinder wake", "question": "How does the wake change with Reynolds number?",
+     "presets": [("lbm_cylinder_steady", "Steady wake (Re 40)"), ("lbm_cylinder", "Vortex shedding (Re 180)")],
+     "representative": "lbm_cylinder",
+     "compare": [("lbm_cylinder_steady", "lbm_cylinder", "Steady versus shedding wake at the same size and speed (matched elapsed convective time).")]},
+    {"id": "airfoil_lift", "name": "Airfoil lift", "question": "How do geometry and angle affect circulation, separation and signed lift?",
+     "presets": [("lbm_airfoil_neg", "−14°"), ("lbm_airfoil_zero", "0° baseline"), ("lbm_airfoil", "+14°")], "representative": "lbm_airfoil",
+     "compare": [("lbm_airfoil_zero", "lbm_airfoil", "Zero-angle baseline versus +14°: circulation-derived lift appears; drag from the wake deficit is approximate."),
+                 ("lbm_airfoil_neg", "lbm_airfoil", "Angle reversal at matched conditions: C_l changes sign with similar magnitude.")]},
+    {"id": "cycling_drafting", "name": "Cycling and drafting", "question": "How does a second rider change the wake and the drag estimate?",
+     "presets": [("lbm_cyclist", "Single rider"), ("lbm_peloton", "Two riders")], "representative": "lbm_peloton",
+     "compare": [("lbm_cyclist", "lbm_peloton", "Isolated rider versus two riders at the same speed; the combined wake-deficit drag is an approximation.")]},
+    {"id": "flow_text", "name": "Flow around text", "question": "How do gaps and letter shapes redirect the flow?", "presets": [("lbm_name", "Your text")], "representative": "lbm_name"},
+    {"id": "car_silhouette", "name": "Car silhouette", "question": "Where does a bluff vehicle shape shed its wake?", "presets": [("lbm_f1", "Car")], "representative": "lbm_f1"},
+    {"id": "porous_flow", "name": "Porous flow", "question": "How readily does a grain pack transmit fluid, and why?",
+     "presets": [("porous_phi60", "Default sample"), ("porous_connectivity", "Different arrangement"), ("porous_aniso", "Directional flow")],
+     "representative": "porous_phi60",
+     "compare": [("porous_phi60", "porous_connectivity", "Similar porosity, different arrangement: both measured porosities are shown; k differs by connectivity."),
+                 ("porous_phi60", "porous_aniso", "Same sample driven along x and along y: k_x versus k_y (force magnitude held).")]},
+    {"id": "rising_smoke", "name": "Rising smoke", "question": "How does buoyancy turn a smooth column into a turbulent plume?", "presets": [("ns_smoke", "Smoke plume")], "representative": "ns_smoke"},
+    {"id": "rayleigh_taylor", "name": "Rayleigh–Taylor instability", "question": "How does the density contrast set the growth of the instability?",
+     "presets": [("ns_rt_single", "Single mode"), ("ns_rt", "Multiple modes")], "representative": "ns_rt"},
+    {"id": "candle_flame", "name": "Candle flame", "question": "What shapes a laminar diffusion flame and makes its tip flicker?", "presets": [("ns_flame", "Flame model")], "representative": "ns_flame"},
+    {"id": "heated_layer", "name": "Heated-layer convection", "question": "When does convection develop, and how does heat transport change?",
+     "presets": [("ns_rb_conduction", "Conduction baseline"), ("ns_rb", "Convection cells"), ("ns_rb_vigorous", "Vigorous convection")], "representative": "ns_rb"},
+    {"id": "chimney_plume", "name": "Chimney plume", "question": "How does the plume trajectory change with wind speed?",
+     "presets": [("ns_chimney_calm", "Calm air"), ("ns_chimney", "Moderate crosswind"), ("ns_chimney_strong", "Strong crosswind")], "representative": "ns_chimney"},
+    {"id": "sod_tube", "name": "Sod shock tube", "question": "Where are the shock, the contact and the rarefaction, and how large is the error?", "presets": [("euler_sod", "Sod tube")], "representative": "euler_sod",
+     "compare": [("euler_sod", None, "Computed density and velocity against the exact Riemann solution, with mean absolute errors (in the diagnostics).")]},
+    {"id": "open_blast", "name": "Open-air blast", "question": "How fast does a blast front expand, and how does it slow down?", "presets": [("euler_blast", "Blast wave")], "representative": "euler_blast"},
+    {"id": "blast_obstacles", "name": "Blast and obstacles", "question": "How do boundaries alter shock propagation?",
+     "presets": [("euler_city", "Held obstacles"), ("euler_city_erosion", "Experimental erosion")], "representative": "euler_city"},
+    {"id": "shock_bubble", "name": "Shock–bubble interaction", "question": "How does the density contrast alter the interface deformation?",
+     "presets": [("euler_bubble", "Light bubble"), ("euler_bubble_heavy", "Heavy bubble"), ("euler_twin", "Twin bubbles")], "representative": "euler_bubble"},
+    {"id": "still_water", "name": "Still-water baseline", "question": "Does water at rest stay at rest?", "presets": [("sph_rest", "Hydrostatic rest")], "representative": "sph_rest",
+     "compare": [("sph_rest", None, "Residual motion and hydrostatic surface before adding waves or moving bodies.")]},
+    {"id": "dam_break", "name": "Dam break", "question": "How does the released potential energy drive the surge?", "presets": [("sph_dam", "Dam break")], "representative": "sph_dam"},
+    {"id": "blob_impact", "name": "Water-blob impact", "question": "How do impact speed and size change the splash?", "presets": [("sph_drop", "Blob impact")], "representative": "sph_drop"},
+    {"id": "sloshing", "name": "Sloshing tank", "question": "How does the response depend on the forcing frequency?", "presets": [("sph_slosh", "Sloshing")], "representative": "sph_slosh"},
+    {"id": "pouring", "name": "Pouring", "question": "How does a continuous stream fill a container?", "presets": [("sph_pour", "Pour")], "representative": "sph_pour"},
+    {"id": "wave_tank", "name": "Wave tank", "question": "What wavelength, amplitude and reflection does the wavemaker produce?", "presets": [("sph_waves", "Wave train")], "representative": "sph_waves"},
+    {"id": "floating_hull", "name": "Floating hull", "question": "Are flotation and motion consistent with the body parameters?",
+     "presets": [("sph_ship_still", "Still water"), ("sph_ship", "Waves")], "representative": "sph_ship"},
+    {"id": "kelvin_helmholtz", "name": "Kelvin–Helmholtz instability", "question": "How does a shear layer roll up, and how do the billows pair?", "presets": [("spec_kh", "Shear layers")], "representative": "spec_kh"},
+    {"id": "decaying_turbulence", "name": "Decaying turbulence", "question": "Why do two-dimensional eddies grow as the flow decays?", "presets": [("spec_decay", "Random field")], "representative": "spec_decay"},
+    {"id": "taylor_green", "name": "Taylor–Green vortex", "question": "Does the solver reproduce the exact viscous decay, and does it improve with refinement?", "presets": [("spec_tg", "Taylor–Green")], "representative": "spec_tg",
+     "compare": [("spec_tg", None, "Computed kinetic energy against E₀·exp(−4νt) with the relative error (in the diagnostics).")]},
+    {"id": "dye_transport", "name": "Dye transport", "question": "How much apparent mixing comes from stirring and how much from diffusion?",
+     "presets": [("mix_diffusion", "Diffusion only"), ("mix_stir", "Stirring only"), ("mix_bands", "Stirring with diffusion")], "representative": "mix_bands",
+     "compare": [("mix_diffusion", "mix_bands", "Diffusion alone versus stirring with diffusion from the same initial bands."),
+                 ("mix_stir", "mix_bands", "Stirring alone (numerical diffusion only) versus stirring with physical diffusion.")]},
+    {"id": "gray_scott", "name": "Gray–Scott patterns", "question": "Which parameter changes alter the morphology?",
+     "presets": [("rd_spots", "Spots"), ("rd_stripes", "Stripes/coral"), ("rd_maze", "Labyrinth"), ("rd_mitosis", "Replication"), ("rd_custom", "Custom")],
+     "representative": "rd_spots"},
+]
+
+
+def experiment_of(key):
+    for e in EXPERIMENTS:
+        for k, _label in e["presets"]:
+            if k == key:
+                return e
+    return None
+
+
+def preset_label(key):
+    e = experiment_of(key)
+    if not e:
+        return None
+    return dict(e["presets"]).get(key)
+
+
+def experiments():
+    """Experiments with their presets resolved to scene records (gallery cards)."""
+    out = []
+    for e in EXPERIMENTS:
+        presets = []
+        for k, label in e["presets"]:
+            sc = scene(k)
+            if sc:
+                presets.append({"key": k, "label": label, "name": sc["name"], "status": sc["status"],
+                                "status_label": STATUS_LABEL[sc["status"]], "method": sc["method"]})
+        rep = scene(e["representative"]) or scene(e["presets"][0][0])
+        out.append({"id": e["id"], "name": e["name"], "question": e["question"], "presets": presets,
+                    "representative": e["representative"], "phenomenon": rep["phenomenon"], "method": rep["method"],
+                    "methods": sorted({p["method"] for p in presets}), "n_presets": len(presets),
+                    "compare": [{"a": a, "b": b, "text": txt} for a, b, txt in e.get("compare", [])]})
+    return out
+
+
+def check_experiments():
+    """Every scene maps to exactly one experiment; every experiment preset exists."""
+    seen = {}
+    problems = []
+    for e in EXPERIMENTS:
+        for k, _ in e["presets"]:
+            if scene(k) is None:
+                problems.append(f"experiment {e['id']}: unknown scene {k}")
+            if k in seen:
+                problems.append(f"scene {k} is in both {seen[k]} and {e['id']}")
+            seen[k] = e["id"]
+        if scene(e["representative"]) is None or e["representative"] not in dict(e["presets"]):
+            problems.append(f"experiment {e['id']}: representative is not one of its presets")
+    for s in SCENES:
+        if s["key"] not in seen:
+            problems.append(f"scene {s['key']} belongs to no experiment")
+    return problems
 STATUS_LABEL = {"analytical": "Analytical comparison", "numerical": "Numerical check", "qualitative": "Qualitative demonstration"}
 
 
@@ -596,10 +710,11 @@ def scene(key):
 
 
 def counts():
-    """Scene/method/solver counts generated from the registry (never maintained by hand)."""
+    """Experiment/preset/method/solver counts generated from the registry (never maintained by hand)."""
     from . import engine
     methods = {s["method"] for s in SCENES}
-    return {"scenes": len(SCENES), "methods": len(methods), "solvers": 5, "exhibits": len(engine.EXHIBITS)}
+    return {"experiments": len(EXPERIMENTS), "presets": len(SCENES), "scenes": len(SCENES),
+            "methods": len(methods), "solvers": 5, "exhibits": len(engine.EXHIBITS)}
 
 
 def scene_layers(key):

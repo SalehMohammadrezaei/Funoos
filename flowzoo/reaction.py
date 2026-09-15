@@ -41,12 +41,15 @@ def gray_scott(n=256, F=0.035, k=0.065, Du=0.16, Dv=0.08, steps=10000,
     rng = np.random.default_rng(seed)
     U = np.ones((n, n)); V = np.zeros((n, n))
     nb = int(rng.integers(8, 16)) if nseeds is None else int(nseeds)
+    # blob centres and radii are drawn as FRACTIONS of the box (reference grid 220), so the same
+    # seed places the same blobs at every resolution
     for _ in range(nb):
-        cx, cy = rng.integers(0, n, 2); r = rng.integers(6, 14)
+        fx, fy = rng.uniform(0, 1, 2); fr = rng.uniform(6 / 220, 14 / 220)
+        cx, cy, r = fx * n, fy * n, fr * n
         y, x = np.ogrid[:n, :n]
         m = (x - cx) ** 2 + (y - cy) ** 2 <= r * r
         U[m] = 0.50; V[m] = 0.25
-    if noise:
+    if noise:                                       # grid-scale noise cannot be resolution-independent; it is small
         U += noise * rng.standard_normal((n, n)); V += noise * rng.standard_normal((n, n))
     U = np.clip(U, 0, 1); V = np.clip(V, 0, 1)
     every = max(1, steps // nframes); pevery = max(1, steps // 50)

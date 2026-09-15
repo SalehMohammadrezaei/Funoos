@@ -225,6 +225,8 @@ class Job:
         self.cancel = threading.Event()
         self.created = time.time()
         self.history = [("preparing", self.created)]
+        self.provenance = {"app_version": APP_VERSION, "solver_versions": engine.solver_versions(),
+                           "started": time.strftime("%Y-%m-%dT%H:%M:%S")}       # frozen when the job is created
 
     def set_state(self, state):
         if state not in STATES:
@@ -240,7 +242,21 @@ class Job:
         return {"job_id": self.id, "exhibit": self.exhibit, "params": dict(self._params),
                 "state": self.state, "error": self.error, "run_id": self.run_id,
                 "cancel_requested": self.cancel.is_set(), "created": self.created,
+                "provenance": self.provenance, "parent": getattr(self, "parent", None),
                 "history": [{"state": s, "t": t} for s, t in self.history]}
+
+
+def _frame_sel(res, when):
+    """Frame index from a clip fraction, an explicit {'index': i} / {'time': t} dict, or None (last)."""
+    if isinstance(when, dict):
+        if when.get("index") is not None:
+            return int(when["index"]) % res.nframes
+        if when.get("time") is not None:
+            return analysis.frame_index(res, {"time": float(when["time"])})
+        when = when.get("frac", 1.0)
+    if when is None:
+        return res.nframes - 1
+    return analysis.frame_index(res, float(when))
 
 
 def _errtext(e):
@@ -654,7 +670,7 @@ class Api:
             cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
             vmin = None if vmin in (None, "") else float(vmin)
             vmax = None if vmax in (None, "") else float(vmax)
-            frac = float(frac); i = int(round(max(0.0, min(1.0, frac)) * (res.nframes - 1)))
+            i = _frame_sel(res, frac)
             img = res.frame(i, view, cm, vmin, vmax)
             return {"ok": True, "run_id": run_id, "req": req, "view": view, "cmap": cm, "index": i,
                     "time": float(res.times[i]), "img": _b64_png(img)}
@@ -726,7 +742,7 @@ class Api:
         try:
             view = res.view_name(view); cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
             vmin = None if vmin in (None, "") else float(vmin); vmax = None if vmax in (None, "") else float(vmax)
-            i = int(round(max(0.0, min(1.0, float(frac))) * (res.nframes - 1)))
+            i = _frame_sel(res, frac)
             path = self._ask_save(f"{self._slug(res)}_{view.replace(' ', '_')}_f{i:03d}", "png", "PNG image")
             if not path:
                 return {"ok": True, "path": None}
@@ -803,6 +819,8 @@ class Api:
             exhibit = job.exhibit if job else None
             params = dict(job.params) if job else {}
             rec = self.project(scene, exhibit, params, view, cmap, False, run_id) if exhibit else {"result": res.meta()}
+            if rec.get("run"):
+                rec["solver_versions"] = rec["run"]["provenance"].get("solver_versions"); rec["derived"] = schema.derived(exhibit, rec["run"]["params"])
             view = res.view_name(view); cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
             still = _b64_png(res.frame(-1, view, cm))
             plots = [(t, _b64_png(img), ex) for t, img, ex in postproc.plots(res)]
@@ -859,28 +877,36 @@ class Api:
             return {"ok": False, "error": _errtext(e), "run_id": run_id, "req": req}
 
     # ---------- experiments: projects, sweeps, comparison, probes ----------
-    def project(self, scene, exhibit, params, view=None, cmap=None, advanced=False, run_id=None):
-        """The complete resolved setup as a JSON-able project record."""
+    def project(self, scene, exhibit, params, view=None, cmap=None, advanced=False, run_id=None, presentation=None):
+        """The complete setup as a JSON-able record (schema_version 2).
+
+        `draft` is the editable control state at save time; `run` (when a run is referenced)
+        is that run's FROZEN configuration, metadata and provenance recorded when it started.
+        The two are stored separately and `draft_matches_run` says whether they agree."""
         val = schema.validate(exhibit, params or {}, allow_outside=True)
-        rec = {"app": "Funoos", "version": APP_VERSION, "saved": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        rec = {"app": "Funoos", "version": APP_VERSION, "schema_version": 2, "saved": time.strftime("%Y-%m-%dT%H:%M:%S"),
                "scene": scene, "exhibit": exhibit, "params": val.params, "advanced": bool(advanced),
-               "derived": schema.derived(exhibit, val.params), "view": view, "cmap": cmap,
-               "solver_versions": engine.solver_versions()}
+               "derived": schema.derived(exhibit, val.params), "effective": engine.effective(exhibit, val.params),
+               "solver_versions": engine.solver_versions(),           # of the code at save time (the run's own are under run.provenance)
+               "presentation": {"view": view, "cmap": cmap, **(presentation or {})}}
         res = self.store.result(run_id) if run_id else None
-        if res is not None:
-            rec["result"] = res.meta()
-            with self._lock:
-                job = self._jobs.get(run_id)
-            rec["status"] = job.state if job else "completed"
+        with self._lock:
+            job = self._jobs.get(run_id) if run_id else None
+        if job is not None:
+            rec["run"] = {"run_id": run_id, "exhibit": job.exhibit, "params": dict(job.params), "status": job.state,
+                          "provenance": job.provenance, "parent": getattr(job, "parent", None),
+                          "effective": engine.effective(job.exhibit, dict(job.params)) if job.exhibit in engine.EXHIBITS else {},
+                          "result": res.meta() if res is not None else None}
+            rec["draft_matches_run"] = (job.exhibit == exhibit and dict(job.params) == val.params)
         return rec
 
-    def save_project(self, scene, exhibit, params, view=None, cmap=None, advanced=False, run_id=None):
+    def save_project(self, scene, exhibit, params, view=None, cmap=None, advanced=False, run_id=None, presentation=None):
         """Write the resolved setup to a user-chosen .funoos.json file."""
         if not self._win:
             return {"ok": False, "error": "no window"}
         try:
             import webview
-            rec = self.project(scene, exhibit, params, view, cmap, advanced, run_id)
+            rec = self.project(scene, exhibit, params, view, cmap, advanced, run_id, presentation)
             name = "".join(c if c.isalnum() else "_" for c in (scene or exhibit)).strip("_")[:40] or "experiment"
             sel = self._win.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"{name}.funoos.json",
                                                file_types=("Funoos setup (*.json)", "All files (*.*)"))
@@ -919,6 +945,9 @@ class Api:
             val = schema.validate(rec["exhibit"], rec.get("params") or {}, allow_outside=True)
             rec["params"] = val.params
             rec["validation"] = val.as_dict()
+            if "presentation" not in rec:                     # schema_version 1 files
+                rec["presentation"] = {"view": rec.get("view"), "cmap": rec.get("cmap")}
+            rec.setdefault("schema_version", 1)
             return {"ok": True, "config": rec, "path": str(path)}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e)}
@@ -940,6 +969,11 @@ class Api:
             return {"ok": False, "error": f"{name} is not a numeric parameter"}
         job = self._new_job(exhibit, dict(params or {}, **{name: values[0]}), view, cmap, job_id)
         items = []; errors = []
+        # retention: a sweep must not evict its own children before it finishes; the count limit is
+        # raised to hold them (the memory/disk budgets still apply, large results spill to disk)
+        need = len(values) + 1
+        if self.store.max_runs < need:
+            self.store.max_runs = need
         try:
             job.set_state("running")
             for k, val_ in enumerate(values):
@@ -950,9 +984,17 @@ class Api:
                 if not v.ok:
                     errors.append({"value": val_, "error": "; ".join(v.errors)}); continue
                 self._emit_progress(job.id, f"sweep {k + 1}/{len(values)}: {name} = {val_:g}")
-                res = engine.solve_exhibit(exhibit, v.params, progress=lambda m: self._emit_progress(job.id, f"[{k + 1}/{len(values)}] {m}"),
-                                           cancel=job.cancel)
                 rid = f"{job.id}-{k}"
+                with self._lock:                                        # each child is a job of its own
+                    child = Job(rid, exhibit, v.params, view, cmap); child.parent = job.id; child.set_state("running")
+                    self._jobs[rid] = child
+                try:
+                    res = engine.solve_exhibit(exhibit, v.params, progress=lambda m: self._emit_progress(job.id, f"[{k + 1}/{len(values)}] {m}"),
+                                               cancel=job.cancel)
+                except Exception as e:                                  # noqa: BLE001
+                    child.error = _errtext(e); child.set_state("cancelled" if isinstance(e, engine.Cancelled) else "failed")
+                    raise
+                child.run_id = rid; child.set_state("completed")
                 self.store.add(rid, res, res.info)
                 vw = res.view_name(view); cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[res.kind]
                 metrics = postproc.metrics(res) if hasattr(postproc, "metrics") else {}
@@ -978,7 +1020,9 @@ class Api:
                         ax.plot(xs, ys, "o-", color=postproc._CYAN, lw=2)
                         plot = _b64_png(postproc._rgb(fig, plt))
             return {"ok": True, "job_id": job.id, "state": "completed", "name": name, "items": items,
-                    "errors": errors, "plot": plot, "views": list(engine.VIEWS.values())[0] if not items else None}
+                    "errors": errors, "plot": plot, "retained": [it["run_id"] in self.store for it in items],
+                    "store": {"runs": len(self.store), "max_runs": self.store.max_runs, "bytes": self.store.total_bytes(),
+                              "disk_bytes": self.store.disk_total()}}
         except engine.Cancelled:
             job.set_state("cancelled")
             return {"ok": False, "job_id": job.id, "state": "cancelled", "error": "cancelled", "items": items}
@@ -987,24 +1031,30 @@ class Api:
             return {"ok": False, "job_id": job.id, "state": "failed", "error": job.error, "items": items}
 
     def compare(self, run_a, run_b, view, cmap=None, fps=26, req=None):
-        """Side-by-side clip of two stored runs, synchronised by simulation time (or clip
-        fraction when the time units differ), drawn with one shared colour scale."""
+        """Side-by-side clip of two stored runs over their SHARED time interval, drawn with one
+        colour scale. Requires the same solver family, view and time unit; the reply states the
+        alignment so nothing is silently resampled or repeated."""
         a = self.store.result(run_a); b = self.store.result(run_b)
         if a is None or b is None:
             return {"ok": False, "error": "run expired", "req": req}
+        ok, why = analysis.compare_check(a, b, view)
+        if not ok:
+            return {"ok": False, "error": "cannot compare: " + why, "req": req, "incompatible": True}
         try:
             cm = cmap if (cmap in render.COLORMAPS) else engine.DEFCMAP[a.kind]
-            frames = analysis.compare_frames(a, b, view, cm)
-            times = []
+            grid, ia, ib, note = analysis.compare_plan(a, b)
+            if not grid:
+                return {"ok": False, "error": "cannot compare: " + note, "req": req, "incompatible": True}
+            times = []; scale = {}
 
             def gen():
-                for fr, t in frames:
-                    times.append(t); yield fr
+                for fr, t, (vmin, vmax) in analysis.compare_frames(a, b, view, cm):
+                    times.append(t); scale["vmin"], scale["vmax"] = vmin, vmax; yield fr
             with self._encode:
                 vid = _b64_mp4(gen(), fps)
-            return {"ok": True, "req": req, "video": vid, "times": times, "run_a": run_a, "run_b": run_b,
-                    "synchronised": a.hints.get("time_unit") == b.hints.get("time_unit"),
-                    "info": f"{a.info}   |   {b.info}"}
+            return {"ok": True, "req": req, "video": vid, "times": times, "run_a": run_a, "run_b": run_b, "view": a.view_name(view),
+                    "cmap": cm, "vmin": scale.get("vmin"), "vmax": scale.get("vmax"), "time_unit": a.hints.get("time_unit", "frame"),
+                    "note": note, "label_a": a.info, "label_b": b.info, "info": f"{a.info}   |   {b.info}", "frames": len(times)}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e), "req": req}
 
@@ -1019,7 +1069,7 @@ class Api:
             xf = float(xfrac) / max(1e-9, 1.0 - pf)
             if xf > 1.0:
                 return {"ok": True, "req": req, "outside": True}
-            out = analysis.value_at(res, view, xf, float(yfrac), when)
+            out = analysis.value_at(res, view, xf, float(yfrac), {"index": _frame_sel(res, when)})
             return {"ok": True, "req": req, "outside": False, **out}
         except Exception as e:                      # noqa: BLE001
             return {"ok": False, "error": _errtext(e), "req": req}
@@ -1043,7 +1093,7 @@ class Api:
         if res is None:
             return {"ok": False, "error": "run expired", "req": req}
         try:
-            pr = analysis.line_profile(res, view, axis, float(frac), when)
+            pr = analysis.line_profile(res, view, axis, float(frac), index=_frame_sel(res, when))
             fig, ax, plt = postproc._new_ax("position (fraction)" if axis == "x" else pr["label"],
                                             pr["label"] if axis == "x" else "height (fraction)",
                                             f"Profile along {axis} at t = {pr['time']:g}")

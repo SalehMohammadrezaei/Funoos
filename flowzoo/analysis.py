@@ -35,6 +35,8 @@ def frame_index(res, when):
     """Frame index from a clip fraction (0..1) or an absolute time (> 1 or 'time' dict)."""
     n = res.nframes
     if isinstance(when, dict):
+        if when.get("index") is not None:
+            return int(when["index"]) % n
         t = float(when.get("time", 0.0)); return int(np.argmin(np.abs(np.asarray(res.times) - t)))
     f = float(when)
     return int(round(max(0.0, min(1.0, f)) * (n - 1)))
@@ -89,21 +91,47 @@ def line_profile(res, view, axis="x", frac=0.5, when=1.0, index=None, ix=None, i
             "time": float(res.times[i]), **at}
 
 
-def compare_frames(a, b, view, cmap, vmin=None, vmax=None, shared_scale=True):
-    """Yield side-by-side frames of two results synchronised by simulation time when
-    both carry comparable times (same time unit), otherwise by clip fraction.
-    With `shared_scale` both are drawn with one colour range so colours are comparable."""
+def compare_check(a, b, view):
+    """Are two results comparable in `view`? Same kind, same view available, same time unit."""
     va, vb = a.view_name(view), b.view_name(view)
-    same_units = a.hints.get("time_unit") == b.hints.get("time_unit") and a.hints.get("time_unit") not in (None, "frame")
+    if a.kind != b.kind:
+        return False, f"different solver families ({a.kind} vs {b.kind})"
+    if va != vb or view not in a.views:
+        return False, f"view {view!r} is not available for both runs"
+    ua, ub = a.hints.get("time_unit", "frame"), b.hints.get("time_unit", "frame")
+    if ua != ub:
+        return False, f"different time units ({ua} vs {ub})"
+    return True, ""
+
+
+def compare_plan(a, b):
+    """Time alignment over the SHARED interval only: the union of both frame times inside
+    [max(t0), min(t1)], each mapped to its nearest frame in each run. No frame is repeated
+    beyond a run's duration. Returns (times, ia, ib, note)."""
     ta = np.asarray(a.times, float); tb = np.asarray(b.times, float)
-    if same_units:
-        grid = np.union1d(ta, tb)
-        ia = [int(np.argmin(np.abs(ta - t))) for t in grid]; ib = [int(np.argmin(np.abs(tb - t))) for t in grid]
-    else:
-        n = max(a.nframes, b.nframes)
-        ia = [int(round(k / max(1, n - 1) * (a.nframes - 1))) for k in range(n)]
-        ib = [int(round(k / max(1, n - 1) * (b.nframes - 1))) for k in range(n)]
-        grid = [k for k in range(n)]
+    lo, hi = max(ta[0], tb[0]), min(ta[-1], tb[-1])
+    if hi < lo:
+        return [], [], [], "the runs do not overlap in time"
+    grid = np.union1d(ta[(ta >= lo) & (ta <= hi)], tb[(tb >= lo) & (tb <= hi)])
+    ia = [int(np.argmin(np.abs(ta - t))) for t in grid]; ib = [int(np.argmin(np.abs(tb - t))) for t in grid]
+    dta = float(np.median(np.diff(ta))) if len(ta) > 1 else 0.0; dtb = float(np.median(np.diff(tb))) if len(tb) > 1 else 0.0
+    note = (f"shared interval [{lo:g}, {hi:g}] {a.hints.get('time_unit', '')}; each frame shows the nearest saved frame "
+            f"of each run (frame spacing {dta:g} vs {dtb:g})")
+    if lo > min(ta[0], tb[0]) or hi < max(ta[-1], tb[-1]):
+        note += "; frames outside the shared interval are not shown"
+    return grid.tolist(), ia, ib, note
+
+
+def compare_frames(a, b, view, cmap, vmin=None, vmax=None, shared_scale=True):
+    """Yield (frame, time) side by side over the shared interval (see compare_plan) with one
+    colour range for both runs."""
+    ok, why = compare_check(a, b, view)
+    if not ok:
+        raise ValueError("cannot compare: " + why)
+    va, vb = a.view_name(view), b.view_name(view)
+    grid, ia, ib, _note = compare_plan(a, b)
+    if not grid:
+        raise ValueError("cannot compare: the runs do not overlap in time")
     if shared_scale and vmin is None and vmax is None:
         na, nb = a.derived(va)["norm"], b.derived(vb)["norm"]
         vmin, vmax = min(na.vmin, nb.vmin), max(na.vmax, nb.vmax)
@@ -118,4 +146,4 @@ def compare_frames(a, b, view, cmap, vmin=None, vmax=None, shared_scale=True):
                 return f
             out = np.zeros((H, f.shape[1], 3), np.uint8); out[:] = np.array([10, 11, 18], np.uint8)
             out[:f.shape[0]] = f; return out
-        yield np.concatenate([pad(fa), np.full((H, 6, 3), 40, np.uint8), pad(fb)], axis=1), float(grid[k])
+        yield np.concatenate([pad(fa), np.full((H, 6, 3), 40, np.uint8), pad(fb)], axis=1), float(grid[k]), (vmin, vmax)

@@ -176,7 +176,24 @@ int main(int argc,char**argv){
         for(int j=0;j<stack_h;j++) for(int i=std::max(0,sx-stack_hw);i<=std::min(nx-1,sx+stack_hw);i++){
             u[IX(i,j)]=0; v[IX(i,j)]=0; } };
 
-    for(int step=0; step<=a.steps; step++){
+    // frame i holds the state at the START of the step it is saved in (time = step, dt = 1);
+    // frame 0 is the initial state and the final state is always saved after the loop
+    std::ofstream ftimes(a.out+"/frame_times.txt"); int last_saved=-1;
+    auto save_frame=[&](int step){
+        std::vector<float> buf(N);
+        // flame renders the luminous temperature field T(Z); other modes render the scalar
+        for(int k=0;k<N;k++) buf[k]=(float)(flame ? Tof(s[k]) : s[k]);
+        char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
+        std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
+        std::vector<float> vb(2*N);                 // velocity field (for Speed/streamlines)
+        for(int k=0;k<N;k++){ vb[k]=(float)u[k]; vb[N+k]=(float)v[k]; }
+        char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
+        std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
+        ftimes<<step*a.dt<<"\n"; nf++; last_saved=step;
+        if(step%(a.save_every*3)==0) printf("step %d/%d (%d frames)\n",step,a.steps,nf);
+    };
+    for(int step=0; step<a.steps; step++){
+        if(step%a.save_every==0) save_frame(step);
         // forces: buoyancy + (smoke/wind) continuous source + vorticity confinement
         if(hassrc){
             // flicker: a wobbling, pulsing source so the plume dances like a flame
@@ -260,20 +277,8 @@ int main(int argc,char**argv){
             set_bc(u,1); set_bc(v,2);
         }
 
-        if(step%a.save_every==0){
-            std::vector<float> buf(N);
-            // flame renders the luminous temperature field T(Z); other modes render the scalar
-            for(int k=0;k<N;k++) buf[k]=(float)(flame ? Tof(s[k]) : s[k]);
-            char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
-            std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
-            std::vector<float> vb(2*N);                 // velocity field (for Speed/streamlines)
-            for(int k=0;k<N;k++){ vb[k]=(float)u[k]; vb[N+k]=(float)v[k]; }
-            char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
-            std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float));
-            nf++;
-            if(step%(a.save_every*3)==0) printf("step %d/%d (%d frames)\n",step,a.steps,nf);
-        }
     }
+    if(last_saved!=a.steps) save_frame(a.steps);       // final state (the run length need not divide the interval)
     std::ofstream meta(a.out+"/meta.txt");
     meta<<"nx "<<nx<<"\nny "<<ny<<"\nmode_smoke "<<(smoke?1:0)<<"\nnframes "<<nf<<"\n";
     printf("done: %d frames -> %s\n",nf,a.out.c_str());

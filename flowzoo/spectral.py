@@ -61,15 +61,38 @@ class Spectral2D:
         return np.real(np.fft.ifft2(wh))
 
 
-def random_field(n, L=2 * np.pi, k0=14.0, seed=0):
-    """Random vorticity with a peaked spectrum → decaying turbulence (the derived velocity is solenoidal)."""
+N_REF = 256      # reference spectral resolution of random initial conditions
+
+
+def random_field(n, L=2 * np.pi, k0=14.0, seed=0, n_ref=N_REF):
+    """Random vorticity with a peaked spectrum → decaying turbulence (the derived velocity is
+    solenoidal). The random phases are drawn on a FIXED reference grid (n_ref × n_ref
+    spectral modes) and the field is then truncated or zero-padded to the target grid, so
+    the same seed gives the same continuous initial condition at every resolution (tested)."""
     rng = np.random.default_rng(seed)
-    k1 = np.fft.fftfreq(n, d=L / n) * 2 * np.pi
-    kx = k1[:, None]; ky = k1[None, :]; k = np.sqrt(kx ** 2 + ky ** 2)
-    amp = k / (1.0 + (k / k0) ** 4)
-    w = np.real(np.fft.ifft2(amp * np.exp(1j * rng.uniform(0, 2 * np.pi, (n, n)))))
-    w -= w.mean(); w /= (w.std() + 1e-12)
-    return np.fft.fft2(w)
+    k1r = np.fft.fftfreq(n_ref, d=L / n_ref) * 2 * np.pi
+    kxr = k1r[:, None]; kyr = k1r[None, :]; kr = np.sqrt(kxr ** 2 + kyr ** 2)
+    amp = kr / (1.0 + (kr / k0) ** 4)
+    wh_ref = amp * np.exp(1j * rng.uniform(0, 2 * np.pi, (n_ref, n_ref)))       # spectral coefficients on the reference grid
+    w_ref = np.real(np.fft.ifft2(wh_ref)); w_ref -= w_ref.mean(); w_ref /= (w_ref.std() + 1e-12)
+    wh_ref = np.fft.fft2(w_ref)
+    wh_ref[n_ref // 2, :] = 0; wh_ref[:, n_ref // 2] = 0      # no Nyquist content: the spectrum then pads/truncates exactly
+    if n == n_ref:
+        return wh_ref
+    return _resample_spectral(wh_ref, n)
+
+
+def _resample_spectral(wh, n):
+    """Truncate or zero-pad a 2-D spectrum to n × n modes (physical values preserved).
+    Truncation keeps |k| < n/2 only, so the coarse field is the exact low-pass of the fine one."""
+    m = wh.shape[0]; out = np.zeros((n, n), complex)
+    h = min(m, n) // 2
+    for sx in (slice(0, h), slice(-h, None)):
+        for sy in (slice(0, h), slice(-h, None)):
+            out[sx, sy] = wh[sx, sy]
+    if n < m:
+        out[n // 2, :] = 0; out[:, n // 2] = 0
+    return out * (n * n) / (m * m)
 
 
 def advect_sl(c, u, v, dt, L):

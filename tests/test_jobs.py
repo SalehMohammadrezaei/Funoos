@@ -290,7 +290,7 @@ def test_compare_probe_inspect_profile():
     assert a["ok"] and b["ok"]
     n0 = len(_ENCODES)
     c = api.compare("ca", "cb", "Speed", "Turbo", 26, req=4)
-    assert c["ok"] and c["req"] == 4 and c["synchronised"] and len(_ENCODES) == n0 + 1 and _ENCODES[-1] == 3
+    assert c["ok"] and c["req"] == 4 and "shared interval" in c["note"] and len(_ENCODES) == n0 + 1 and _ENCODES[-1] == 3
     assert api.compare("ca", "zz", "Speed")["ok"] is False
     i = api.inspect("ca", "Speed", 0.03, 0.5, 1.0, req=1)        # the 8-cell field is ~7 % of the frame width
     assert i["ok"] and not i["outside"] and i["value"] is not None and i["label"] == "speed |u|"
@@ -392,6 +392,53 @@ def test_probe_export_uses_the_displayed_cell():
         assert f"frame {lp['index']}" in h2 and f"time {lp['time']}" in h2, h2
         rows = Path(c2["path"]).read_text().splitlines()[2:]
         assert len(rows) == 8 and abs(float(rows[3].split(",")[1]) - lp["values"][3]) < 1e-12
+
+
+def test_compare_requires_compatibility_and_uses_shared_interval():
+    api = Api(store=RunStore(max_runs=6, max_bytes=10 ** 9), sweep=False)
+    a = api.run("__quick__", {"a": 1}, None, None, 26, "sa"); assert a["ok"]
+    # a second result with a longer, offset time axis: shared interval is [1, 2]
+    yy, xx = np.mgrid[0:8, 0:8]
+    long = engine.Result("lbm", [(np.sin(xx / 3.0 + 0.1 * i).astype(np.float32), np.cos(yy / 3.0).astype(np.float32)) for i in range(5)],
+                         "long", hints={"dx": 1.0}, times=[1.0, 1.5, 2.0, 3.0, 4.0])
+    api.store.add("sb", long)
+    n0 = len(_ENCODES)
+    c = api.compare("sa", "sb", "Speed", "Turbo", 26, req=1)
+    assert c["ok"] and c["times"] == [1.0, 1.5, 2.0] and _ENCODES[-1] == 3, c.get("times")
+    assert "shared interval [1, 2]" in c["note"] and "not shown" in c["note"] and c["vmin"] is not None
+    other = engine.Result("field", [np.random.rand(8, 8) for _ in range(3)], "field", hints={"label": "dye"}, times=[0.0, 1.0, 2.0])
+    api.store.add("sc", other)
+    r = api.compare("sa", "sc", "Speed"); assert r["ok"] is False and r.get("incompatible") and "families" in r["error"]
+    units = engine.Result("lbm", long.raw, "u", hints={"dx": 1.0, "time_unit": "s"}, times=[1.0, 1.5, 2.0, 3.0, 4.0])
+    api.store.add("sd", units)
+    r = api.compare("sa", "sd", "Speed"); assert r["ok"] is False and "time units" in r["error"]
+
+
+def test_sweep_children_are_jobs_and_are_retained():
+    api = Api(store=RunStore(max_runs=2, max_bytes=10 ** 9), sweep=False)      # store smaller than the sweep
+    r = api.sweep("__quick__", {}, "a", [1, 2, 3, 4, 5], None, None, "swj")
+    assert r["ok"] and len(r["items"]) == 5 and all(r["retained"]), "all five children kept"
+    for k, it in enumerate(r["items"]):
+        j = api.job(it["run_id"])
+        assert j["ok"] and j["state"] == "completed" and j["params"]["a"] == k + 1 and j["parent"] == "swj"
+        assert j["provenance"]["solver_versions"] and j["provenance"]["started"]
+    rec = api.project(None, "__quick__", {"a": 99}, None, None, False, r["items"][2]["run_id"])
+    assert rec["schema_version"] == 2 and rec["run"]["params"]["a"] == 3 and rec["params"]["a"] == 99
+    assert rec["draft_matches_run"] is False and rec["run"]["provenance"]["solver_versions"]
+    rec2 = api.project(None, "__quick__", {"a": 3}, None, None, False, r["items"][2]["run_id"])
+    assert rec2["draft_matches_run"] is True
+
+
+def test_provenance_frozen_at_start():
+    api = _api(); r = api.run("__quick__", {}, None, None, 26, "prov"); assert r["ok"]
+    before = api.job("prov")["provenance"]
+    orig = engine.solver_versions; engine.solver_versions = lambda: {"lbm2d": {"source_sha256": "changed"}}
+    try:
+        assert api.job("prov")["provenance"] == before, "recorded at start, not reconstructed later"
+        rec = api.project(None, "__quick__", {}, None, None, False, "prov")
+        assert rec["run"]["provenance"] == before
+    finally:
+        engine.solver_versions = orig
 
 
 # ----------------------------------------------------------------- result store

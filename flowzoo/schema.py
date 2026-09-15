@@ -174,37 +174,29 @@ def _derived(exhibit, params):
         out.append({"label": label, "value": value, "units": units, "note": note})
 
     if exhibit == "Wind Tunnel":
-        nx, ny = int(900 * s), int(300 * s)
-        Re = float(p["reynolds"]); U = float(p["speed"]); obs = p["obstacle"]
-        D = max(8.0, ny * float(p["size"]))
-        if obs == "Your text":
-            D = ny * 0.34
-        elif obs == "F1 car":
-            D = 0.34 * ny * 1.05
-        elif obs == "Cyclist":
-            D = 0.6 * ny * 0.42
-        elif obs == "Peloton (drafting)":
-            D = 0.6 * ny * 0.38
-        tau = 0.5 + 3 * (U * D / Re); nu = (tau - 0.5) / 3
-        add("grid", f"{nx} × {ny}", "cells")
-        add("reference length D", f"{D:.1f}", "cells", "chord = 2.6 D for the airfoil; fixed by the silhouette for vehicles/text")
+        c = engine.effective(exhibit, p); nx, ny, D, tau, nu, U = c["nx"], c["ny"], c["D"], c["tau"], c["nu"], c["U"]
+        add("grid", f"{nx} × {ny}", "cells", "changes with the resolution setting")
+        add("reference length D", f"{D:.1f}", "cells", "chord = 2.6 D for the airfoil; fixed by the silhouette for vehicles/text; scales with resolution")
         add("viscosity ν = (τ−½)/3", f"{nu:.2e}", "lattice", "recomputed so Re = U·D/ν holds at the chosen speed")
         add("relaxation time τ", f"{tau:.4f}", "", "τ close to 0.5 is under-resolved (use a lower Re or higher speed)")
-        add("lattice Mach U/c_s", f"{U * math.sqrt(3):.3f}", "", "keep ≲ 0.3 for weak compressibility")
-        add("time steps", f"{int(44000 * dur)}", "lattice steps")
+        add("lattice Mach U/c_s", f"{c['mach']:.3f}", "", "keep ≲ 0.3 for weak compressibility")
+        add("time steps", f"{c['steps']}", "lattice steps")
+        add("elapsed convective time U·t/D", f"{c['convective_time']:.1f}", "",
+            "D grows with resolution while the step count does not, so a resolution change shortens this: "
+            "increase the duration to keep the same physical interval")
         if tau < 0.505:
             add("⚠ τ", "very close to 0.5", "", "the BGK scheme becomes inaccurate/unstable")
     elif exhibit == "Porous Flow":
-        nx, ny = int(380 * s), int(360 * s)
-        grain = max(4, int(float(p["grain"]) * ny)); tau, force = 0.8, 1.2e-5
-        add("grid", f"{nx} × {ny}", "cells"); add("grain radius", f"{grain}", "cells")
-        add("viscosity ν", f"{(tau - 0.5) / 3:.3f}", "lattice"); add("body force density g", f"{force:.1e}", "lattice", "Stokes regime")
-        add("time steps", f"{int(24000 * dur)}", "lattice steps")
+        c = engine.effective(exhibit, p)
+        add("grid", f"{c['nx']} × {c['ny']}", "cells"); add("grain radius", f"{c['grain']}", "cells")
+        add("viscosity ν", f"{c['nu']:.3f}", "lattice")
+        add("body force per unit mass g", f"{c['force']:.2e}", "lattice", f"= 1.2e-5 × strength {float(p.get('strength', 1.0)):g}; Stokes regime")
+        add("driving direction", c["fdir"] and "y" or "x")
+        add("time steps", f"{c['steps']}", "lattice steps", "k is reported as 'transient' unless the last 10 % of the run changed it by < 1 %")
     elif exhibit in ("Rising Smoke", "Candle Flame", "Mushroom Clouds", "Rayleigh-Benard", "Chimney Plume"):
-        dims = {"Rising Smoke": (280, 440), "Mushroom Clouds": (280, 440), "Rayleigh-Benard": (480, 230),
-                "Candle Flame": (190, 360), "Chimney Plume": (540, 420)}[exhibit]
-        nx, ny = int(dims[0] * s), int(dims[1] * s)
-        add("grid", f"{nx} × {ny}", "cells (dx = dt = 1)"); add("time steps", f"{int(4800 * dur)}", "steps")
+        c = engine.effective(exhibit, p); nx, ny = c["nx"], c["ny"]
+        add("grid", f"{nx} × {ny}", "cells (dx = dt = 1)", "coefficients are in grid units, so the physical experiment changes with resolution")
+        add("time steps", f"{c['steps']}", "steps")
         if exhibit == "Rayleigh-Benard":
             nu = float(p["viscosity"]); kap = float(p.get("kappa", 0.02)); b = float(p["buoyancy"])
             H = ny
@@ -231,29 +223,21 @@ def _derived(exhibit, params):
         add("post-shock density ρ₂/ρ₁", f"{rr:.3f}", "", "Rankine–Hugoniot"); add("post-shock pressure p₂/p₁", f"{pr:.3f}")
         add("Atwood number (bubble vs air)", f"{(float(p['densratio']) - 1) / (float(p['densratio']) + 1):.3f}")
     elif exhibit == "The Big Splash":
-        sc = engine._SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam"); Lx, Ly = engine._SPLASH_TANK[sc]
-        g = float(p["gravity"]); npart = max(500.0, float(p["particles"]))
-        if sc == "pour":
-            H = Ly; dp = Lx / 44.0
-        else:
-            H = float(p["height"]) if sc == "dam" else Ly * 0.5
-            dp = float(np.clip(np.sqrt(Lx * Ly * 0.4 / npart), 0.02, 0.08))
-        c0 = 10.0 * (g * max(H, Ly * 0.5)) ** 0.5
+        c = engine.effective(exhibit, p); sc, Lx, Ly, dp, c0 = c["scene"], c["Lx"], c["Ly"], c["dp"], c["c0"]
         add("tank", f"{Lx} × {Ly}", "m"); add("particle spacing dp", f"{dp:.3f}", "m", "clamped to 0.02–0.08 m")
-        fill = {"dam": float(p.get("width", 1.0)) * float(p.get("height", 2.0)), "drop": Lx * 0.30 * Ly,
-                "slosh": Lx * 0.42 * Ly, "rest": Lx * 0.42 * Ly, "waves": Lx * 0.40 * Ly, "ship": Lx * 0.40 * Ly,
-                "pour": 0.0}.get(sc, 0.0)
+        fill = {"dam": c["a"] * c["H"], "drop": Lx * 0.30 * Ly, "slosh": Lx * 0.42 * Ly, "rest": Lx * 0.42 * Ly,
+                "waves": Lx * 0.40 * Ly, "ship": Lx * 0.40 * Ly, "pour": 0.0}.get(sc, 0.0)
         add("estimated particles", f"{int(fill / dp / dp)}" if sc != "pour" else "emitted continuously (≤ 22 000)", "", "the particle count is set by dp and the water area")
-        add("numerical sound speed c₀", f"{c0:.1f}", "m/s", "10 × √(g H): weakly compressible")
-        add("time step", f"{0.08 * 1.3 * dp / c0:.2e}", "s")
+        add("numerical sound speed c₀", f"{c0:.1f}", "m/s", f"10 × √(g·H_ref) with H_ref = max(H, Ly/2) = {c['Href']:.2f} m, exactly as the solver")
+        add("time step", f"{c['dt']:.2e}", "s"); add("end time", f"{c['tend']:.2f}", "s")
         if sc == "pour":
             sw = max(3.0 * dp, float(p.get("spout", 0.045)) * Lx)
             add("applied spout half-width", f"{sw:.4f}", "m", "≥ 3 dp so the stream is resolved")
     elif exhibit in ("Cloud Billows", "Ink in Motion"):
-        n = int(256 * s); L = 2 * math.pi; dt = 0.4 * (L / n)
-        T_end = (2800 if exhibit == "Cloud Billows" else 2600) * dur * 0.4 * (L / 256)
-        add("grid", f"{n} × {n}", "", "periodic box L = 2π"); add("time step", f"{dt:.4f}"); add("end time", f"{T_end:.2f}")
-        add("steps", f"{max(1, int(round(T_end / dt)))}")
+        c = engine.effective(exhibit, p); n, dt, T_end = c["n"], c["dt"], c["T_end"]
+        add("grid", f"{n} × {n}", "", "periodic box L = 2π; the end time does not depend on the resolution")
+        add("time step", f"{dt:.4f}", "", "advection CFL; the viscous term is integrated exactly"); add("end time", f"{T_end:.2f}")
+        add("steps", f"{c['steps']}")
         if exhibit == "Cloud Billows":
             add("viscosity ν", f"{float(p['viscosity']):.2e}")
     elif exhibit == "Turing Patterns":

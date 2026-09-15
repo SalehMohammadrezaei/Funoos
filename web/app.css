@@ -326,3 +326,7 @@ input[type=range]{accent-color:var(--blue-br)}
   .screen{min-height:320px}
   .wordmark{font-size:64px}
 }
+
+.match{font-size:11px;margin-top:4px;min-height:14px}.match.ok{color:#a9e6a0}.match.stale{color:#e0a23a}
+.cmpinfo{position:absolute;left:12px;right:12px;bottom:12px;background:rgba(8,16,30,.9);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:11.5px;color:var(--read);z-index:3}
+.sweepcard.expired{opacity:.55}

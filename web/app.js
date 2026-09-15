@@ -5,6 +5,7 @@ let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS =
 // counters — a response is applied only if its token is still the latest of its
 // kind, so an older render/detail/diagnostics reply can never overwrite a newer one.
 let JOB = null, ADV = false;                                 // ADV: advanced mode (extra controls, soft limits allowed)
+let CMP = null;                                              // comparison display state {a, b, view, times, unit, vmin, vmax, note}
 const REQ = { run: 0, view: 0, detail: 0, diag: 0, est: 0, der: 0, probe: 0, cmp: 0 };
 const nextReq = k => ++REQ[k];
 const isCurrent = (k, t) => REQ[k] === t;
@@ -263,10 +264,12 @@ function buildRelated(t, key) {
 function section(head, body) { const s = el("div", "section"); s.append(el("div", "kicker", head.toUpperCase()), el("div", "read body", body)); return s; }
 
 /* ───────── studio ───────── */
-let CUR_PRESET = null, CUR_SCENE = null, CUR_DETAIL = null;
+let CUR_PRESET = null, CUR_SCENE = null, CUR_DETAIL = null, PENDING_PRES = null;   // presentation to apply after the next run
 async function studioPick(sel) {
   const key = sel.value; if (!key) return;
-  let d; try { d = await call("scene_detail", key, nextReq("detail")); } catch (e) { toast(errText(e), "err"); return; }
+  const t = nextReq("detail"); let d;
+  try { d = await call("scene_detail", key, t); } catch (e) { toast(errText(e), "err"); return; }
+  if (!isCurrent("detail", t) || d.key !== key) return;       // a newer pick won
   openStudio(d);
 }
 function fillStudioPicker() {
@@ -348,7 +351,17 @@ function renderParams() {
   validateAll();
 }
 function toggleAdvanced() { ADV = !ADV; renderParams(); refreshEstimate(); }
+function markMatch() {
+  const m = $("#s-match"); if (!m) return;
+  if (!RUN || !RUN.params) { m.textContent = ""; return; }
+  const same = SPEC.every(q => !visible(q) || String(fmtNum(RUN.params[q.name])) === String(fmtNum(PSTATE[q.name])));
+  m.textContent = same ? "✓ result matches the current controls" : "⚠ result is from an earlier setup — controls have changed";
+  m.className = "match " + (same ? "ok" : "stale");
+}
 function fmtNum(v) { return (typeof v === "number" && !Number.isInteger(v)) ? +v.toPrecision(6) : v; }
+// Complete numeric parsing: "0,01" → 0.01, "1e" / "2abc" / "" → NaN (never a silently truncated value).
+const NUM_RE = /^[+-]?(\d+([.,]\d*)?|[.,]\d+)([eE][+-]?\d+)?$/;
+function parseNum(s) { s = String(s).trim(); if (!NUM_RE.test(s)) return NaN; return Number(s.replace(",", ".")); }
 function field(q) {
   const f = el("div", "field"); f.dataset.name = q.name;
   const id = "p-" + q.name;
@@ -365,7 +378,7 @@ function field(q) {
     inp.inputMode = q.type === "int" ? "numeric" : (q.type === "float" ? "decimal" : "text");
     if (q.type === "int") inp.step = "1";
     inp.onfocus = () => { inp.dataset.before = JSON.stringify(PSTATE[q.name]); };
-    inp.oninput = () => { PSTATE[q.name] = q.type === "float" || q.type === "int" ? parseFloat(inp.value) : inp.value; validateOne(q, f); refreshEstimate(); };
+    inp.oninput = () => { PSTATE[q.name] = q.type === "float" || q.type === "int" ? parseNum(inp.value) : inp.value; validateOne(q, f); validateAll(); refreshEstimate(); };
     inp.onchange = () => { if (inp.dataset.before !== JSON.stringify(PSTATE[q.name])) pushUndo(JSON.parse(inp.dataset.before), q.name); };
   }
   f.append(inp);
@@ -378,8 +391,9 @@ function field(q) {
 function checkParam(q, v) {
   if (q.type === "choice") return q.choices.includes(v) ? null : "choose one of the options";
   if (q.type === "str") return (v == null || !String(v).trim()) ? "enter some text" : null;
-  if (v == null || v === "" || !Number.isFinite(+v)) return "enter a number";
-  v = +v;
+  if (v == null || v === "" || !Number.isFinite(typeof v === "number" ? v : parseNum(v))) return "enter a number (e.g. 0.01 or 1e-3)";
+  v = typeof v === "number" ? v : parseNum(v);
+  if (q.type === "int" && !Number.isInteger(v)) return "warn:will be rounded to " + Math.round(v);
   if (q.hard_min != null && v < q.hard_min) return "must be ≥ " + q.hard_min + (q.units ? " " + q.units : "") + " (solver limit)";
   if (q.hard_max != null && v > q.hard_max) return "must be ≤ " + q.hard_max + (q.units ? " " + q.units : "") + " (solver limit)";
   const out = (q.min != null && v < q.min) || (q.max != null && v > q.max);
@@ -394,6 +408,7 @@ function validateOne(q, f) {
   const inp = f.querySelector("input,select"); if (inp) inp.setAttribute("aria-invalid", msg && !/^warn:/.test(msg) ? "true" : "false");
 }
 function validateAll() {
+  markMatch();
   let bad = 0;
   document.querySelectorAll("#s-params .field").forEach(f => { const q = SPEC.find(x => x.name === f.dataset.name); if (q) { validateOne(q, f); if (f.classList.contains("invalid")) bad++; } });
   const btn = $("#s-run"); if (btn && !JOB) { btn.disabled = bad > 0; btn.title = bad ? "Fix the highlighted values first" : ""; }
@@ -427,8 +442,13 @@ async function runSim() {
   if (!isCurrent("run", t)) return;                            // scene changed / newer run: this reply is stale
   JOB = null; setRunning(false); $("#s-skel").classList.remove("on"); hideStill(); heroActive(CUR === "intro" && !REDUCED);
   if (r && r.ok) {                                             // the previous RUN is replaced only now
-    RUN = r; FPS = 26;
+    RUN = r; FPS = 26; leaveCompare(); markMatch();
     buildViewbar(r); setVideo(r.video, false); renderKPIs(r.stats || []);
+    if (PENDING_PRES) {                                        // a loaded setup's presentation, applied once the view bar exists
+      const pp = PENDING_PRES; PENDING_PRES = null;
+      if (pp.cmap) { const cm = $("#s-cmap"); if ([...cm.options].some(o => o.value === pp.cmap)) cm.value = pp.cmap; }
+      if ((pp.view && pp.view !== r.view) || (pp.cmap && pp.cmap !== r.defcmap) || pp.vmin != null || pp.vmax != null) switchView(pp.view || r.view, true);
+    }
     if (r.validation && r.validation.warnings && r.validation.warnings.length) toast(r.validation.warnings[0], "");
     if (r.validation && r.validation.applied && r.validation.applied.length) toast("Applied: " + r.validation.applied.join("; "), "");
     $("#s-status").textContent = "✓ " + r.info; refreshHistory(); zoomReset();
@@ -492,11 +512,11 @@ function buildViewbar(r) {
   const sel = r.cmaps.includes(keep) ? keep : r.defcmap;        // colour choice survives a new run
   for (const c of r.cmaps) { const o = elt("option", null, c); o.value = c; if (c === sel) o.selected = true; cm.append(o); }
 }
-async function switchView(v) {
-  if (!RUN || v === RUN.view) return;
+async function switchView(v, force) {
+  if (!RUN || (v === RUN.view && !CMP && !force)) return; leaveCompare();
   const t = nextReq("view"), rid = RUN.run_id; setBusy("rendering " + v + "…");
   try {
-    const r = await call("render_view", rid, v, $("#s-cmap").value, 26, t);
+    const r = await call("render_view", rid, v, $("#s-cmap").value, 26, t, $("#x-vmin").value, $("#x-vmax").value);   // manual limits stay across views
     if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;   // stale: a newer view/run won
     hideStill(); RUN.view = r.view; setVideo(r.video, true);
     document.querySelectorAll("#s-views button").forEach(b => b.classList.toggle("on", b.textContent === r.view));
@@ -505,9 +525,9 @@ async function switchView(v) {
   if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
 }
 async function recolor() {
-  if (!RUN) return;
+  if (!RUN) return; if (CMP) { leaveCompare(); return switchView(RUN.view); }
   const t = nextReq("view"), rid = RUN.run_id, cmap = $("#s-cmap").value;
-  const v = $("#s-video"), frac = (v.duration ? v.currentTime / v.duration : 1.0);
+  const idx = curFrame(), frac = idx == null ? 1.0 : { index: idx, frac: 1.0 };
   // 1) instant: re-map the frame on screen with the new palette (one PNG, no encoding)
   try {
     const p = await call("preview_frame", rid, RUN.view, cmap, frac, t);
@@ -516,7 +536,7 @@ async function recolor() {
   } catch (e) { /* fall through to the clip */ }
   // 2) then the full clip (cached per palette after the first time)
   try {
-    const r = await call("render_view", rid, RUN.view, cmap, 26, t);
+    const r = await call("render_view", rid, RUN.view, cmap, 26, t, $("#x-vmin").value, $("#x-vmax").value);
     if (!isCurrent("view", t) || !RUN || RUN.run_id !== rid) return;
     hideStill(); setVideo(r.video, true); $("#s-status").textContent = "✓ " + RUN.info + (r.cached ? "  (cached)" : "");
   } catch (e) {
@@ -553,7 +573,8 @@ async function saveClip(fmt) {
 async function exportAction(sel) {
   const what = sel.value; sel.value = "";
   if (!RUN) { toast("Run a simulation first", "err"); return; }
-  const v = $("#s-video"), frac = v.duration ? v.currentTime / v.duration : 1.0, cmap = $("#s-cmap").value;
+  if (CMP && what !== "project" && what !== "options") { toast("Exports refer to a single run: switch a view to leave the comparison first", "err"); return; }
+  const idx = curFrame(), frac = idx == null ? 1.0 : { index: idx, frac: 1.0 }, cmap = $("#s-cmap").value;
   try {
     let r;
     if (what === "mp4" || what === "gif") { await saveClip(what); return; }
@@ -630,8 +651,9 @@ function presetAction(sel) {
 async function saveProject() {
   if (!CUR_EXH) return;
   try {
-    const r = await call("save_project", CUR_SCENE, CUR_EXH, { ...PSTATE }, RUN && RUN.view, $("#s-cmap").value, ADV, RUN && RUN.run_id);
-    if (r.path) toast("Setup saved: " + r.path, "ok");
+    const pres = { vmin: $("#x-vmin").value || null, vmax: $("#x-vmax").value || null, fps: +($("#x-fps").value || 26), zoom: ZOOM.k };
+    const r = await call("save_project", CUR_SCENE, CUR_EXH, { ...PSTATE }, RUN && RUN.view, $("#s-cmap").value, ADV, RUN && RUN.run_id, pres);
+    if (r.path) toast("Setup saved: " + r.path + (RUN && RUN.params && JSON.stringify(RUN.params) !== JSON.stringify(PSTATE) ? " (draft differs from the displayed run; both are recorded)" : ""), "ok");
   } catch (e) { toast("Save failed: " + errText(e), "err"); }
 }
 async function loadProject() {
@@ -648,7 +670,10 @@ async function applyProject(cfg) {
   }
   if (cfg.exhibit !== CUR_EXH) { toast("This setup is for " + cfg.exhibit + "; open that scene first", "err"); return; }
   pushUndo(); PSTATE = { ...sceneDefaults(), ...(cfg.params || {}) }; ADV = !!cfg.advanced;
-  if (cfg.cmap) { const cm = $("#s-cmap"); if (cm && [...cm.options].some(o => o.value === cfg.cmap)) cm.value = cfg.cmap; }
+  const pres = cfg.presentation || {};
+  PENDING_PRES = { view: pres.view || null, cmap: pres.cmap || null, vmin: pres.vmin, vmax: pres.vmax };
+  if (pres.cmap) { const cm = $("#s-cmap"); if (cm && [...cm.options].some(o => o.value === pres.cmap)) cm.value = pres.cmap; else CUR_CMAP = pres.cmap; }
+  if (pres.vmin != null) $("#x-vmin").value = pres.vmin; if (pres.vmax != null) $("#x-vmax").value = pres.vmax;
   renderParams(); refreshEstimate();
   const w = (cfg.validation && cfg.validation.warnings) || [];
   toast("Setup loaded" + (w.length ? " (" + w[0] + ")" : ""), "ok");
@@ -686,16 +711,19 @@ async function duplicateRun(rid) {
 async function compareWith(rid) {
   if (!RUN) { toast("Run a simulation first", "err"); return; }
   if (rid === RUN.run_id) { toast("Pick a different run to compare with", "err"); return; }
-  const t = nextReq("cmp"); setBusy("rendering side-by-side…");
+  const t = nextReq("cmp"), cur = RUN.run_id, view = RUN.view; setBusy("rendering side-by-side…");
   try {
-    const r = await call("compare", rid, RUN.run_id, RUN.view, $("#s-cmap").value, 26, t);
-    if (!isCurrent("cmp", t)) return;
+    const r = await call("compare", rid, cur, view, $("#s-cmap").value, 26, t);
+    if (!isCurrent("cmp", t) || !RUN || RUN.run_id !== cur) return;     // the active run changed meanwhile
+    CMP = { a: rid, b: cur, view: r.view, times: r.times, unit: r.time_unit, vmin: r.vmin, vmax: r.vmax, note: r.note, label_a: r.label_a, label_b: r.label_b, cmap: r.cmap };
     hideStill(); setVideo(r.video, false);
-    $("#s-status").textContent = "⇄ " + r.info + (r.synchronised ? "  (synchronised by simulation time)" : "  (aligned by clip position — different time units)");
+    $("#s-status").textContent = `⇄ comparison · left: ${r.label_a} · right: ${r.label_b} · ${r.note}`;
+    const ci = $("#s-cmpinfo"); if (ci) { ci.style.display = "block"; ci.textContent = `Comparison of ${r.frames} shared frames, one colour scale ${(+r.vmin).toPrecision(3)} – ${(+r.vmax).toPrecision(3)} (${r.view}). ${r.note}. Probes and exports refer to the single run again once you switch a view or run.`; }
     toast("Left: earlier run · Right: current run · one shared colour scale", "");
   } catch (e) { if (isCurrent("cmp", t)) toast(errText(e), "err"); }
   if (isCurrent("cmp", t) && !JOB) $("#s-skel").classList.remove("on");
 }
+function leaveCompare() { CMP = null; const ci = $("#s-cmpinfo"); if (ci) ci.style.display = "none"; }
 /* parameter sweep (bounded queue, one cancellable job) */
 function openSweep() {
   const box = $("#s-sweep"); if (!box) return;
@@ -730,9 +758,11 @@ function showSweep(r) {
   const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = "sweep";
   p.append(elt("div", "kicker", "parameter sweep · " + r.name));
   if (r.plot) { const i = el("img"); i.src = r.plot; i.alt = "readout versus " + r.name; p.append(i); }
+  if (r.store) p.append(elt("div", "muted small", `${r.items.length} results kept in the run history (${r.store.runs} of ${r.store.max_runs} slots, ${(r.store.bytes / 1048576).toFixed(0)} MB in memory, ${(r.store.disk_bytes / 1048576).toFixed(0)} MB on disk). Each result is a run of its own: duplicate, report and export work from the history.`));
   const grid = el("div", "sweepgrid");
-  for (const it of r.items) {
-    const card = el("div", "sweepcard");
+  for (const [k, it] of r.items.entries()) {
+    const card = el("div", "sweepcard" + (r.retained && r.retained[k] === false ? " expired" : ""));
+    if (r.retained && r.retained[k] === false) card.append(elt("div", "verr", "no longer in memory (evicted)"));
     const im = el("img"); im.src = it.frame; im.alt = r.name + " = " + it.value; card.append(im);
     card.append(elt("div", "sv", r.name + " = " + it.value));
     const ks = Object.keys(it.metrics || {});
@@ -760,6 +790,11 @@ async function openSweepRun(it) {
 /* probes and frame inspection: click on the field */
 let PROBE = false;
 function toggleProbe() { PROBE = !PROBE; const b = $("#s-probe"); if (b) { b.classList.toggle("on", PROBE); b.setAttribute("aria-pressed", PROBE ? "true" : "false"); } $("#s-status").textContent = PROBE ? "📍 click on the field to read a value, probe a point in time, or draw a profile" : "Ready."; }
+function curFrame() {                     // index of the encoded frame on screen
+  const v = $("#s-video"); if (!v.duration || !RUN || !RUN.meta) return null;
+  const n = RUN.meta.frames || 1;
+  return Math.min(n - 1, Math.max(0, Math.floor(v.currentTime * FPS + 1e-6)));
+}
 function _fieldFrac(ev) {
   // fractions of the rendered frame (object-fit: contain letterboxing accounted for), +y up
   const v = $("#s-video"), st = $("#s-still");
@@ -775,36 +810,41 @@ function _fieldFrac(ev) {
 }
 async function stageClick(ev) {
   if (!PROBE || !RUN || ZOOM.dragging) return;
+  if (CMP) { toast("Probes refer to a single run: switch a view to leave the comparison first", "err"); return; }
   const f = _fieldFrac(ev); if (!f) return;
-  const v = $("#s-video"), frac = v.duration ? v.currentTime / v.duration : 1.0;
-  const t = nextReq("probe");
+  const idx = curFrame(); const frac = idx == null ? 1.0 : idx;
+  const t = nextReq("probe"), rid = RUN.run_id, view = RUN.view;   // resolve the selection ONCE
   try {
-    const r = await call("inspect", RUN.run_id, RUN.view, f.fx, f.fy, frac, t);
+    const r = await call("inspect", rid, view, f.fx, f.fy, { index: idx == null ? undefined : idx, frac: 1.0 }, t);
+    if (!RUN || RUN.run_id !== rid) return;
     if (!isCurrent("probe", t)) return;
     if (r.outside) { $("#s-status").textContent = "(colourbar panel)"; return; }
     const val = r.value == null ? (r.solid ? "solid" : "no fluid") : (+r.value).toPrecision(4);
     $("#s-status").textContent = `📍 ${r.label} = ${val} at cell (${r.ix}, ${r.iy}), t = ${(+r.time).toPrecision(4)}`;
     if (ev.shiftKey) { await showProfile(f, "x"); return; }
     if (ev.altKey) { await showProfile(f, "y"); return; }
-    const pr = await call("probe", RUN.run_id, RUN.view, f.fx, f.fy, t);
-    if (!isCurrent("probe", t)) return;
-    const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = RUN.run_id;
+    const pr = await call("probe", rid, view, f.fx, f.fy, t);
+    if (!isCurrent("probe", t) || !RUN || RUN.run_id !== rid) return;
+    const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = rid;
     const card = el("div", "plot"); card.append(elt("div", "kicker", "point probe · " + pr.label));
     const i = el("img"); i.src = pr.plot; i.alt = "probe time series"; card.append(i);
-    card.append(elt("div", "explain", `Value of ${pr.label} at cell (${pr.ix}, ${pr.iy}) over the saved frames (time in ${pr.time_unit}). Shift-click for a horizontal profile, Alt-click for a vertical one.`));
-    const ex = elt("button", "linkbtn", "⬇ CSV"); ex.onclick = async () => { try { const s = await call("export_csv", RUN.run_id, "probe", { view: RUN.view, xfrac: f.fx, yfrac: f.fy }); if (s.path) toast("Saved " + s.path, "ok"); } catch (e) { toast(errText(e), "err"); } };
+    card.append(elt("div", "explain", `Value of ${pr.label} at cell (${pr.ix}, ${pr.iy}) of run ${rid} over the saved frames (time in ${pr.time_unit}). Shift-click for a horizontal profile, Alt-click for a vertical one.`));
+    const sel = { rid, view, ix: pr.ix, iy: pr.iy };            // captured now: the export refers to THIS plot
+    const ex = elt("button", "linkbtn", "⬇ CSV"); ex.onclick = async () => { try { const s = await call("export_csv", sel.rid, "probe", { view: sel.view, ix: sel.ix, iy: sel.iy }); if (s.path) toast("Saved " + s.path, "ok"); } catch (e) { toast(errText(e), "err"); } };
     card.append(ex); p.append(card); p.style.display = "block";
   } catch (e) { if (isCurrent("probe", t)) toast(errText(e), "err"); }
 }
 async function showProfile(f, axis) {
-  const v = $("#s-video"), frac = v.duration ? v.currentTime / v.duration : 1.0;
-  const t = nextReq("probe");
-  const pr = await call("line_profile", RUN.run_id, RUN.view, axis, axis === "x" ? f.fy : f.fx, frac, t);
-  if (!isCurrent("probe", t)) return;
-  const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = RUN.run_id;
+  const idx = curFrame();
+  const t = nextReq("probe"), rid = RUN.run_id, view = RUN.view;
+  const pr = await call("line_profile", rid, view, axis, axis === "x" ? f.fy : f.fx, { index: idx == null ? undefined : idx, frac: 1.0 }, t);
+  if (!isCurrent("probe", t) || !RUN || RUN.run_id !== rid) return;
+  const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = rid;
   const card = el("div", "plot"); card.append(elt("div", "kicker", "line profile · " + pr.label));
   const i = el("img"); i.src = pr.plot; i.alt = "line profile"; card.append(i);
-  const ex = elt("button", "linkbtn", "⬇ CSV"); ex.onclick = async () => { try { const s = await call("export_csv", RUN.run_id, "profile", { view: RUN.view, axis, frac: axis === "x" ? f.fy : f.fx }); if (s.path) toast("Saved " + s.path, "ok"); } catch (e) { toast(errText(e), "err"); } };
+  card.append(elt("div", "explain", `${pr.label} along ${axis} at ${axis === "x" ? "row " + pr.iy : "column " + pr.ix}, frame ${pr.index} (t = ${pr.time}) of run ${rid}.`));
+  const sel = { rid, view, axis, index: pr.index, ix: pr.ix, iy: pr.iy };
+  const ex = elt("button", "linkbtn", "⬇ CSV"); ex.onclick = async () => { try { const s = await call("export_csv", sel.rid, "profile", { view: sel.view, axis: sel.axis, index: sel.index, ix: sel.ix, iy: sel.iy }); if (s.path) toast("Saved " + s.path, "ok"); } catch (e) { toast(errText(e), "err"); } };
   card.append(ex); p.append(card); p.style.display = "block";
 }
 /* zoom & pan of the stage (CSS transform; the data are untouched) */

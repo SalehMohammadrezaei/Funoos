@@ -133,7 +133,28 @@ int main(int argc, char** argv) {
     const double mass0 = total_mass();
     int nframes = 0;
 
-    for (int step=0; step<=a.steps; step++) {
+    // frame i holds the state at the START of the step it is saved in (time = step); frame 0 is the
+    // initial state and the final state is always saved after the loop
+    std::ofstream ftimes(a.out + "/frame_times.txt"); int last_saved = -1;
+    auto save_frame = [&](int step) {
+            if (a.periodic) permh << step << "," << perm_now() << "\n";
+            std::vector<float> buf(2*N);
+            #pragma omp parallel for schedule(static)
+            for (int j=0;j<ny;j++) for (int i=0;i<nx;i++) {
+                int s=j*nx+i; double rho=0,ux=0,uy=0;
+                for (int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
+                buf[s]   = (float)((ux+0.5*(a.fdir?0.0:a.force))/rho);   // same velocity definition as collision
+                buf[N+s] = (float)((uy+0.5*(a.fdir?a.force:0.0))/rho);
+            }
+            char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nframes);
+            std::ofstream of(fn,std::ios::binary);
+            of.write((char*)buf.data(), buf.size()*sizeof(float));
+            ftimes << step << "\n"; nframes++; last_saved = step;
+            if (step % (a.save_every*3)==0)
+                printf("step %d/%d  (%d frames)\n", step, a.steps, nframes);
+            };
+    for (int step=0; step<a.steps; step++) {
+        if (step % a.save_every == 0) save_frame(step);
         // --- collide (in place) ---
         #pragma omp parallel for schedule(static)
         for (int j=0;j<ny;j++) for (int i=0;i<nx;i++) {
@@ -192,24 +213,10 @@ int main(int argc, char** argv) {
             for (int k=0;k<NQ;k++){ rho+=f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
             probe << step << "," << (uy/rho) << "\n";
         }
-        if (step % a.save_every == 0) {
-            if (a.periodic) permh << step << "," << perm_now() << "\n";
-            std::vector<float> buf(2*N);
-            #pragma omp parallel for schedule(static)
-            for (int j=0;j<ny;j++) for (int i=0;i<nx;i++) {
-                int s=j*nx+i; double rho=0,ux=0,uy=0;
-                for (int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
-                buf[s]   = (float)((ux+0.5*(a.fdir?0.0:a.force))/rho);   // same velocity definition as collision
-                buf[N+s] = (float)((uy+0.5*(a.fdir?a.force:0.0))/rho);
-            }
-            char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nframes);
-            std::ofstream of(fn,std::ios::binary);
-            of.write((char*)buf.data(), buf.size()*sizeof(float));
-            nframes++;
-            if (step % (a.save_every*3)==0)
-                printf("step %d/%d  (%d frames)\n", step, a.steps, nframes);
-        }
+
     }
+
+    if (last_saved != a.steps) save_frame(a.steps);     // final state
 
     // Darcy (superficial) velocity: flow averaged over the WHOLE sample with solids
     // counting as u=0, i.e. U_D = phi*<u>_pore. Uses the same macroscopic velocity as
