@@ -132,10 +132,12 @@ def test_text_geometry_font_fallback():
 
 
 def test_run_history_bounded():
-    from funoos_app import _bound_runs, MAX_RUNS
-    runs = {f"r{i}": i for i in range(MAX_RUNS + 4)}
-    _bound_runs(runs)
-    assert len(runs) == MAX_RUNS and list(runs) == [f"r{i}" for i in range(4, MAX_RUNS + 4)]
+    """Completed runs live in a bounded store (count + memory budget); see tests/test_jobs.py."""
+    from funoos_app import RunStore, MAX_RUNS
+    st = RunStore(max_runs=MAX_RUNS, max_bytes=10 ** 12)
+    for i in range(MAX_RUNS + 4):
+        st.add(f"r{i}", np.zeros(4))
+    assert len(st) == MAX_RUNS and st.ids() == [f"r{i}" for i in range(4, MAX_RUNS + 4)]
 
 
 def test_mixing_bands_orientation():

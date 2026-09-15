@@ -186,6 +186,17 @@ python funoos_app.py        # or run.bat on Windows
 
 The gallery clips ship in `results/gallery/`; regenerate any time with `python render_gallery.py High 1.8`.
 
+### Runs, Cancel and memory
+Every **Run** is a job with an immutable copy of the parameters and an explicit
+state (preparing → running → rendering → completed / cancelled / failed). **Cancel**
+really stops the solver (the C++ process is killed; Python solvers stop at their
+next progress tick) and the previous result stays on screen. View switches keep
+the playback position, speed and palette. Completed results are kept in a bounded
+store — at most `FUNOOS_MAX_RUNS` (default 3) runs and `FUNOOS_MEMORY_MB`
+(default 1024) of field data; the least recently used unpinned run is released
+first (`pin_run` keeps one). Solver scratch folders are removed on completion,
+cancel, failure and exit, and any left by a crash are swept at the next launch.
+
 ### Command-line demos
 Each grid/particle exhibit also has a standalone script that writes a GIF + MP4:
 ```bash
