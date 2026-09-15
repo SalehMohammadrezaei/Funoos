@@ -321,15 +321,25 @@ def save_png(frame, path):
 
 
 def video_info(path):
-    """(frames, width, height, fps) of an encoded clip via ffprobe (for tests/exports)."""
-    import shutil, json
+    """(frames, width, height, fps) of an encoded clip. Uses ffprobe when available and
+    otherwise decodes with ffmpeg itself (the packaged app bundles only ffmpeg)."""
+    import shutil, json, re
     probe = shutil.which("ffprobe") or str(Path(_ffmpeg()).with_name("ffprobe"))
-    out = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-count_frames",
-                          "-show_entries", "stream=width,height,nb_read_frames,r_frame_rate",
-                          "-of", "json", str(path)], capture_output=True, text=True, check=True).stdout
-    st = json.loads(out)["streams"][0]
-    num, den = st["r_frame_rate"].split("/")
-    return int(st["nb_read_frames"]), int(st["width"]), int(st["height"]), float(num) / float(den)
+    if Path(probe).exists():
+        out = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-count_frames",
+                              "-show_entries", "stream=width,height,nb_read_frames,r_frame_rate",
+                              "-of", "json", str(path)], capture_output=True, text=True, check=True).stdout
+        st = json.loads(out)["streams"][0]
+        num, den = st["r_frame_rate"].split("/")
+        return int(st["nb_read_frames"]), int(st["width"]), int(st["height"]), float(num) / float(den)
+    r = subprocess.run([_ffmpeg(), "-i", str(path), "-map", "0:v:0", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    err = r.stderr
+    m = re.search(r"Stream #0:0.*?(\d{2,5})x(\d{2,5}).*?([\d.]+) fps", err, re.S)
+    frames = re.findall(r"frame=\s*(\d+)", err)
+    if not m or not frames:
+        raise RuntimeError("could not read the clip with ffmpeg: " + err[-300:])
+    return int(frames[-1]), int(m.group(1)), int(m.group(2)), float(m.group(3))
 
 
 def symmetric_limit(field, pct=99.5):
