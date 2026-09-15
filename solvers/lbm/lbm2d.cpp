@@ -37,7 +37,7 @@ static const double w[NQ]  = {4.0/9,
 
 struct Args {
     int nx=900, ny=300, steps=60000, save_every=200;
-    int probe_x=-1, probe_y=-1, periodic=0;
+    int probe_x=-1, probe_y=-1, periodic=0, fdir=0;   // fdir: 0 = force along +x, 1 = along +y
     double U=0.08, tau=0.56, force=0.0;     // force = body force (Darcy/periodic mode)
     std::string mask, out="frames";
 };
@@ -58,6 +58,7 @@ static Args parse(int argc, char** argv) {
         else if (k=="--probe_y") a.probe_y=atoi(v.c_str());
         else if (k=="--force") a.force=atof(v.c_str());
         else if (k=="--periodic") a.periodic=atoi(v.c_str());
+        else if (k=="--fdir") a.fdir=atoi(v.c_str());
     }
     if (a.probe_x<0) a.probe_x = a.nx*2/5;
     if (a.probe_y<0) a.probe_y = a.ny/2;
@@ -126,13 +127,15 @@ int main(int argc, char** argv) {
             } else {                              // BGK (+ optional Guo body force in +x)
                 double rho=0,ux=0,uy=0;
                 for (int k=0;k<NQ;k++){ rho+=fl[k]; ux+=cx[k]*fl[k]; uy+=cy[k]*fl[k]; }
-                double Fx=a.force;
-                ux=(ux+0.5*Fx)/rho; uy/=rho;       // Guo half-force in the velocity
+                double Fx=a.fdir? 0.0 : a.force, Fy=a.fdir? a.force : 0.0;
+                ux=(ux+0.5*Fx)/rho; uy=(uy+0.5*Fy)/rho;   // Guo half-force in the velocity
                 double u2=ux*ux+uy*uy, om=omega[i];
                 for (int k=0;k<NQ;k++){
                     double cu=cx[k]*ux+cy[k]*uy;
                     double feq=w[k]*rho*(1.0+3*cu+4.5*cu*cu-1.5*u2);
-                    double Si=Fx? (1.0-0.5*om)*w[k]*(3*(cx[k]-ux)+9*cu*cx[k])*Fx : 0.0;
+                    // Guo forcing term: (1-ω/2) w_k [3 (c_k - u)·F + 9 (c_k·u)(c_k·F)]
+                    double cF=cx[k]*Fx+cy[k]*Fy;
+                    double Si=a.force? (1.0-0.5*om)*w[k]*(3*((cx[k]-ux)*Fx+(cy[k]-uy)*Fy)+9*cu*cF) : 0.0;
                     f[k*N+s]=fl[k]-om*(fl[k]-feq)+Si;
                 }
             }
@@ -175,8 +178,8 @@ int main(int argc, char** argv) {
             for (int j=0;j<ny;j++) for (int i=0;i<nx;i++) {
                 int s=j*nx+i; double rho=0,ux=0,uy=0;
                 for (int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
-                buf[s]   = (float)((ux+0.5*a.force)/rho);   // same velocity definition as collision
-                buf[N+s] = (float)(uy/rho);
+                buf[s]   = (float)((ux+0.5*(a.fdir?0.0:a.force))/rho);   // same velocity definition as collision
+                buf[N+s] = (float)((uy+0.5*(a.fdir?a.force:0.0))/rho);
             }
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nframes);
             std::ofstream of(fn,std::ios::binary);
@@ -191,10 +194,13 @@ int main(int argc, char** argv) {
     // counting as u=0, i.e. U_D = phi*<u>_pore. Uses the same macroscopic velocity as
     // collision (Guo half-force). Previously the pore average was used as U_D, which
     // over-states k by 1/phi.
+    // (the velocity component ALONG the force direction is used, so k is the
+    //  permeability in that direction: x for --fdir 0, y for --fdir 1)
     double sumux=0; long nfluid=0;
     for (int s=0;s<N;s++) if(!solid[s]){
-        double rho=0,ux=0; for(int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; }
-        sumux += (ux+0.5*a.force)/rho; nfluid++;
+        double rho=0,ux=0,uy=0; for(int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
+        double ua = a.fdir? (uy+0.5*a.force)/rho : (ux+0.5*a.force)/rho;
+        sumux += ua; nfluid++;
     }
     double nu=(a.tau-0.5)/3.0;
     double meanux_pore = nfluid ? sumux/nfluid : 0.0;   // interstitial (pore-average) velocity

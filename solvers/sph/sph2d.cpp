@@ -30,7 +30,7 @@
 
 struct Args{ double a=1.0,H=2.0,Lx=5.0,Ly=3.2,dp=0.03,g=9.81,tend=2.0;
              double dh=0.70, sloshA=0.7, sloshT=1.1, sw=0.045, pourv=2.2,
-                    waveA=0.0, waveT=0.9, shipsz=1.0;   // per-scene controls
+                    waveA=-1.0, waveT=0.9, shipsz=1.0;  // per-scene controls (waveA < 0 = default stroke, 0 = still paddle)
              int save_every=12; std::string scene="dam",out="frames"; };
 static Args parse(int c,char**v){ Args a;
     for(int i=1;i<c-1;i+=2){ std::string k=v[i],x=v[i+1];
@@ -85,7 +85,7 @@ int main(int argc,char**argv){
         if(cy+R>A.Ly-2*dp) cy=A.Ly-2*dp-R;                  // keep clear of the ceiling
         if(cy-R<Hp+4*dp)   cy=Hp+4*dp+R;                    // and well above the pool
         add_disk(cx,cy,R,0.0); }
-    else if(sc=="slosh"){ double Hs=0.42*A.Ly; add_block(0,A.Lx,0,Hs,Hs); }
+    else if(sc=="slosh"||sc=="rest"){ double Hs=0.42*A.Ly; add_block(0,A.Lx,0,Hs,Hs); }   // rest: still water (hydrostatic baseline)
     else if(sc=="waves"||sc=="ship"){ double Ho=0.40*A.Ly; add_block(0,A.Lx,0,Ho,Ho); }
     // pour starts from an empty glass and fills via continuous emission
 
@@ -136,7 +136,7 @@ int main(int argc,char**argv){
     int nf=0;
     const double kw=0.10*c0*c0/h;                 // (still used by the ship-hull contact)
     const double sx=A.Lx*0.5, sw=std::max(3.0*dp, A.sw*A.Lx);       // pour stream half-width
-    const double Tw=A.waveT, paddle=(A.waveA>0.0)? A.waveA : std::min(0.5, 0.12*A.Lx);
+    const double Tw=A.waveT, paddle=(A.waveA>=0.0)? A.waveA : std::min(0.5, 0.12*A.Lx);
     const double Ts=A.sloshT, sloshA=A.sloshA*g;
     const int Ncap=22000;
 

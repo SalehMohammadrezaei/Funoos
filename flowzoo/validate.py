@@ -6,10 +6,16 @@ import numpy as np
 
 def exact_sod(x, t, gamma=1.4, x0=0.5,
               left=(1.0, 0.0, 1.0), right=(0.125, 0.0, 0.1)):
-    """Exact Riemann (Sod) solution: density at positions `x` and time `t`.
+    """Exact Riemann (Sod) solution: density at positions `x` and time `t` (Toro, Ch. 4)."""
+    return exact_sod_full(x, t, gamma, x0, left, right)[0]
 
-    Returns rho(x). Standard star-region pressure via Newton iteration, then
-    sampling of rarefaction / contact / shock structure (Toro, Ch. 4).
+
+def exact_sod_full(x, t, gamma=1.4, x0=0.5,
+                   left=(1.0, 0.0, 1.0), right=(0.125, 0.0, 0.1)):
+    """Exact Riemann (Sod) solution: (rho, u, p) at positions `x` and time `t`.
+
+    Star-region pressure via Newton iteration, then sampling of the
+    rarefaction / contact / shock structure (Toro, Ch. 4).
     """
     rL, uL, pL = left
     rR, uR, pR = right
@@ -38,34 +44,44 @@ def exact_sod(x, t, gamma=1.4, x0=0.5,
     ps = p
     us = 0.5 * (uL + uR) + 0.5 * (fK(ps, rR, pR, aR) - fK(ps, rL, pL, aL))
 
-    out = np.empty_like(np.asarray(x, dtype=float))
-    for k, xi in enumerate(np.atleast_1d(x)):
+    xs = np.atleast_1d(np.asarray(x, dtype=float))
+    rho = np.empty_like(xs); uu = np.empty_like(xs); pp = np.empty_like(xs)
+    for k, xi in enumerate(xs):
         S = (xi - x0) / t
         if S <= us:  # left of contact
             if ps > pL:  # left shock
                 SL = uL - aL * np.sqrt((g + 1) / (2 * g) * ps / pL + (g - 1) / (2 * g))
-                out[k] = rL if S < SL else rL * (ps / pL + (g - 1) / (g + 1)) / \
-                    ((g - 1) / (g + 1) * ps / pL + 1)
+                if S < SL:
+                    rho[k], uu[k], pp[k] = rL, uL, pL
+                else:
+                    rho[k] = rL * (ps / pL + (g - 1) / (g + 1)) / ((g - 1) / (g + 1) * ps / pL + 1); uu[k] = us; pp[k] = ps
             else:        # left rarefaction
                 rs = rL * (ps / pL) ** (1 / g)
                 SHL = uL - aL; asl = aL * (ps / pL) ** ((g - 1) / (2 * g)); STL = us - asl
-                if S < SHL: out[k] = rL
-                elif S > STL: out[k] = rs
+                if S < SHL:
+                    rho[k], uu[k], pp[k] = rL, uL, pL
+                elif S > STL:
+                    rho[k], uu[k], pp[k] = rs, us, ps
                 else:
                     u = 2 / (g + 1) * (aL + (g - 1) / 2 * uL + S)
                     a = 2 / (g + 1) * (aL + (g - 1) / 2 * (uL - S))
-                    out[k] = rL * (a / aL) ** (2 / (g - 1))
+                    rho[k] = rL * (a / aL) ** (2 / (g - 1)); uu[k] = u; pp[k] = pL * (a / aL) ** (2 * g / (g - 1))
         else:        # right of contact
             if ps > pR:  # right shock
                 SR = uR + aR * np.sqrt((g + 1) / (2 * g) * ps / pR + (g - 1) / (2 * g))
-                out[k] = rR if S > SR else rR * (ps / pR + (g - 1) / (g + 1)) / \
-                    ((g - 1) / (g + 1) * ps / pR + 1)
+                if S > SR:
+                    rho[k], uu[k], pp[k] = rR, uR, pR
+                else:
+                    rho[k] = rR * (ps / pR + (g - 1) / (g + 1)) / ((g - 1) / (g + 1) * ps / pR + 1); uu[k] = us; pp[k] = ps
             else:        # right rarefaction
                 rs = rR * (ps / pR) ** (1 / g)
                 SHR = uR + aR; asr = aR * (ps / pR) ** ((g - 1) / (2 * g)); STR = us + asr
-                if S > SHR: out[k] = rR
-                elif S < STR: out[k] = rs
+                if S > SHR:
+                    rho[k], uu[k], pp[k] = rR, uR, pR
+                elif S < STR:
+                    rho[k], uu[k], pp[k] = rs, us, ps
                 else:
+                    u = 2 / (g + 1) * (aR - (g - 1) / 2 * (uR - S)) * 0 + (2 / (g + 1)) * (-aR + (g - 1) / 2 * uR + S)
                     a = 2 / (g + 1) * (aR - (g - 1) / 2 * (uR - S))
-                    out[k] = rR * (a / aR) ** (2 / (g - 1))
-    return out
+                    rho[k] = rR * (a / aR) ** (2 / (g - 1)); uu[k] = u; pp[k] = pR * (a / aR) ** (2 * g / (g - 1))
+    return rho, uu, pp
