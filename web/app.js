@@ -4,8 +4,8 @@ let RUN = null, SPEC = null, PSTATE = {}, CUR_EXH = null, CUR_CMAP = null, FPS =
 // JOB: the simulation currently in flight (null when idle). REQ: per-request-type
 // counters — a response is applied only if its token is still the latest of its
 // kind, so an older render/detail/diagnostics reply can never overwrite a newer one.
-let JOB = null;
-const REQ = { run: 0, view: 0, detail: 0, diag: 0, est: 0 };
+let JOB = null, ADV = false;                                 // ADV: advanced mode (extra controls, soft limits allowed)
+const REQ = { run: 0, view: 0, detail: 0, diag: 0, est: 0, der: 0, probe: 0, cmp: 0 };
 const nextReq = k => ++REQ[k];
 const isCurrent = (k, t) => REQ[k] === t;
 
@@ -79,7 +79,7 @@ window.addEventListener("pointermove", e => {
 });
 
 /* boot */
-function boot() { buildGallery(); show("intro"); }
+function boot() { buildGallery(); initStage(); show("intro"); }
 if (window.pywebview && window.pywebview.api) boot();
 else window.addEventListener("pywebviewready", boot);
 
@@ -207,15 +207,17 @@ function buildRelated(t, key) {
 function section(head, body) { const s = el("div", "section"); s.append(el("div", "kicker", head.toUpperCase()), el("div", "read body", body)); return s; }
 
 /* ───────── studio ───────── */
+let CUR_PRESET = null, CUR_SCENE = null;
 function openStudio(d) {
   if (JOB) { cancelSim(); JOB = null; }                        // leaving the scene abandons its run
   nextReq("run"); nextReq("view"); nextReq("diag");            // responses for the old scene are stale now
   $("#s-skel").classList.remove("on");
-  CUR_EXH = d.exhibit; CUR_CMAP = d.cmap || null; SPEC = d.params; PSTATE = {};
+  CUR_EXH = d.exhibit; CUR_CMAP = d.cmap || null; SPEC = d.params; PSTATE = {}; CUR_PRESET = d.preset || null; CUR_SCENE = d.key || null;
+  UNDO = []; REDO = []; updateUndoButtons();
   for (const q of SPEC) PSTATE[q.name] = q.default;
   if (d.preset) for (const k in d.preset) PSTATE[k] = d.preset[k];
   $("#s-name").textContent = (d.name || "parameters").toUpperCase();
-  renderParams(); refreshEstimate();
+  renderParams(); refreshEstimate(); refreshPresetMenu(); refreshHistory(); zoomReset();
   RUN = null; $("#s-video").style.display = "none"; $("#s-hint").style.display = "block"; hideStill();
   $("#s-views").innerHTML = ""; $("#s-cmap").innerHTML = ""; $("#s-plotpanel").style.display = "none";
   $("#s-kpis").innerHTML = '<div class="muted" style="font-size:12px">Run a simulation to see live readouts.</div>';
@@ -235,33 +237,107 @@ function refreshEstimate() {
       const secs = e.seconds < 90 ? Math.round(e.seconds) + " s" : Math.round(e.seconds / 60) + " min";
       el_.textContent = `≈ ${e.grid[0]}×${e.grid[1]} grid · ${e.frames} frames · ${e.mb} MB · ~${secs} (estimate, ${e.threads} threads)`;
     } catch (err) { /* estimate is advisory */ }
+    const td = nextReq("der");
+    try {
+      const d = await call("derived", CUR_EXH, { ...PSTATE });
+      if (!isCurrent("der", td)) return;
+      renderDerived(d.items || []);
+    } catch (err) { /* derived quantities are advisory */ }
   }, 250);
+}
+function renderDerived(items) {
+  const box = $("#s-derived"); if (!box) return; box.innerHTML = "";
+  if (!items.length) return;
+  box.append(elt("div", "kicker", "derived quantities"));
+  for (const it of items) {
+    const row = el("div", "drow"); row.append(elt("span", "dl", it.label), elt("span", "dv", it.value + (it.units ? " " + it.units : "")));
+    if (it.note) row.title = it.note;
+    box.append(row);
+  }
 }
 function renderParams() {
   const root = $("#s-params"); root.innerHTML = ""; const groups = {};
-  for (const q of SPEC) { if (!visible(q)) continue; (groups[q.group] || (groups[q.group] = [])).push(q); }
+  for (const q of SPEC) { if (!visible(q) || (q.advanced && !ADV)) continue; (groups[q.group] || (groups[q.group] = [])).push(q); }
   for (const g of ["Geometry", "Physics", "Render"]) {
     if (!groups[g]) continue;
-    const blk = el("div", "pgroup"); blk.append(el("div", "kicker", g));
+    const blk = el("div", "pgroup");
+    const head = elt("div", "kicker", g);
+    const rst = elt("button", "linkbtn", "reset"); rst.type = "button"; rst.title = "Reset this group to the scene defaults";
+    rst.setAttribute("aria-label", "Reset " + g + " parameters"); rst.onclick = () => resetGroup(g);
+    head.append(rst); blk.append(head);
     for (const q of groups[g]) blk.append(field(q)); root.append(blk);
   }
+  const advb = $("#s-adv"); if (advb) { advb.textContent = ADV ? "Advanced mode: on" : "Advanced mode: off"; advb.setAttribute("aria-pressed", ADV ? "true" : "false"); }
+  const hasAdv = SPEC.some(q => q.advanced); if (advb) advb.style.display = "inline-block";
+  validateAll();
 }
+function toggleAdvanced() { ADV = !ADV; renderParams(); refreshEstimate(); }
+function fmtNum(v) { return (typeof v === "number" && !Number.isInteger(v)) ? +v.toPrecision(6) : v; }
 function field(q) {
-  const f = el("div", "field"); const lab = el("label", null, q.label || q.name);
-  if (q.type === "float") lab.append(el("span", "rng", `&nbsp;&nbsp;(${q.min} – ${q.max})`));
+  const f = el("div", "field"); f.dataset.name = q.name;
+  const id = "p-" + q.name;
+  const lab = elt("label", null, q.label || q.name); lab.htmlFor = id;
+  if (q.units) lab.append(" ", elt("span", "units", "(" + q.units + ")"));
+  if (q.type === "float" || q.type === "int") lab.append(elt("span", "rng", "  " + q.min + " – " + q.max));
   f.append(lab); let inp;
   if (q.type === "choice") {
-    inp = el("select");
-    for (const c of q.choices) { const o = el("option", null, c); o.value = c; if (c === PSTATE[q.name]) o.selected = true; inp.append(o); }
-    inp.onchange = () => { PSTATE[q.name] = inp.value; renderParams(); refreshEstimate(); };
+    inp = el("select"); inp.id = id;
+    for (const c of q.choices) { const o = elt("option", null, c); o.value = c; if (c === PSTATE[q.name]) o.selected = true; inp.append(o); }
+    inp.onchange = () => { pushUndo(); PSTATE[q.name] = inp.value; renderParams(); refreshEstimate(); };
   } else {
-    inp = el("input"); inp.type = "text"; inp.value = PSTATE[q.name];
-    inp.oninput = () => { PSTATE[q.name] = q.type === "float" ? parseFloat(inp.value) : inp.value; refreshEstimate(); };
+    inp = el("input"); inp.id = id; inp.type = "text"; inp.value = fmtNum(PSTATE[q.name]);
+    inp.inputMode = q.type === "int" ? "numeric" : (q.type === "float" ? "decimal" : "text");
+    if (q.type === "int") inp.step = "1";
+    inp.onfocus = () => { inp.dataset.before = JSON.stringify(PSTATE[q.name]); };
+    inp.oninput = () => { PSTATE[q.name] = q.type === "float" || q.type === "int" ? parseFloat(inp.value) : inp.value; validateOne(q, f); refreshEstimate(); };
+    inp.onchange = () => { if (inp.dataset.before !== JSON.stringify(PSTATE[q.name])) pushUndo(JSON.parse(inp.dataset.before), q.name); };
   }
-  f.append(inp); return f;
+  f.append(inp);
+  const help = elt("div", "help", (q.help || "") + (q.fixed ? "  Held fixed: " + q.fixed + "." : ""));
+  help.id = id + "-help"; inp.setAttribute("aria-describedby", help.id); f.append(help);
+  f.append(elt("div", "verr", "")); validateOne(q, f);
+  return f;
 }
+// client-side validation (the backend repeats it before any solver starts)
+function checkParam(q, v) {
+  if (q.type === "choice") return q.choices.includes(v) ? null : "choose one of the options";
+  if (q.type === "str") return (v == null || !String(v).trim()) ? "enter some text" : null;
+  if (v == null || v === "" || !Number.isFinite(+v)) return "enter a number";
+  v = +v;
+  if (q.hard_min != null && v < q.hard_min) return "must be ≥ " + q.hard_min + (q.units ? " " + q.units : "") + " (solver limit)";
+  if (q.hard_max != null && v > q.hard_max) return "must be ≤ " + q.hard_max + (q.units ? " " + q.units : "") + " (solver limit)";
+  const out = (q.min != null && v < q.min) || (q.max != null && v > q.max);
+  if (out && !ADV) return "outside the recommended range " + q.min + " – " + q.max + " (turn on advanced mode to explore)";
+  if (out) return "warn:outside the recommended range " + q.min + " – " + q.max;
+  return null;
+}
+function validateOne(q, f) {
+  const msg = checkParam(q, PSTATE[q.name]); const e = f.querySelector(".verr");
+  f.classList.toggle("invalid", !!msg && !/^warn:/.test(msg)); f.classList.toggle("warn", !!msg && /^warn:/.test(msg));
+  e.textContent = msg ? msg.replace(/^warn:/, "") : "";
+  const inp = f.querySelector("input,select"); if (inp) inp.setAttribute("aria-invalid", msg && !/^warn:/.test(msg) ? "true" : "false");
+}
+function validateAll() {
+  let bad = 0;
+  document.querySelectorAll("#s-params .field").forEach(f => { const q = SPEC.find(x => x.name === f.dataset.name); if (q) { validateOne(q, f); if (f.classList.contains("invalid")) bad++; } });
+  const btn = $("#s-run"); if (btn && !JOB) { btn.disabled = bad > 0; btn.title = bad ? "Fix the highlighted values first" : ""; }
+  return bad === 0;
+}
+/* undo / redo / reset */
+let UNDO = [], REDO = [];
+function pushUndo(prevVal, name) {
+  const snap = { ...PSTATE }; if (name !== undefined) snap[name] = prevVal;
+  UNDO.push(snap); if (UNDO.length > 50) UNDO.shift(); REDO = []; updateUndoButtons();
+}
+function undoParams() { if (!UNDO.length) return; REDO.push({ ...PSTATE }); PSTATE = UNDO.pop(); renderParams(); refreshEstimate(); updateUndoButtons(); }
+function redoParams() { if (!REDO.length) return; UNDO.push({ ...PSTATE }); PSTATE = REDO.pop(); renderParams(); refreshEstimate(); updateUndoButtons(); }
+function updateUndoButtons() { const u = $("#s-undo"), r = $("#s-redo"); if (u) u.disabled = !UNDO.length; if (r) r.disabled = !REDO.length; }
+function sceneDefaults() { const d = {}; for (const q of SPEC) d[q.name] = q.default; if (CUR_PRESET) for (const k in CUR_PRESET) d[k] = CUR_PRESET[k]; return d; }
+function resetGroup(g) { pushUndo(); const d = sceneDefaults(); for (const q of SPEC) if (q.group === g) PSTATE[q.name] = d[q.name]; renderParams(); refreshEstimate(); }
+function resetAll() { pushUndo(); PSTATE = sceneDefaults(); renderParams(); refreshEstimate(); }
 async function runSim() {
   if (JOB || !CUR_EXH) return;                                 // one job at a time (button is disabled anyway)
+  if (!validateAll()) { toast("Fix the highlighted values first", "err"); return; }
   const t = nextReq("run");
   JOB = { id: newId(), exhibit: CUR_EXH, params: Object.freeze({ ...PSTATE }), cancelling: false, token: t };
   setRunning(true);
@@ -270,14 +346,16 @@ async function runSim() {
   $("#s-status").textContent = "⏳ preparing…"; heroActive(false);
   const view = (RUN && RUN.view) || null, cmap = $("#s-cmap").value || CUR_CMAP;   // keep the user's colour choice
   let r = null, err = null;
-  try { r = await api().run(JOB.exhibit, JOB.params, view, cmap, 26, JOB.id); }
+  try { r = await api().run(JOB.exhibit, JOB.params, view, cmap, 26, JOB.id, ADV); }
   catch (e) { err = errText(e); }
   if (!isCurrent("run", t)) return;                            // scene changed / newer run: this reply is stale
   JOB = null; setRunning(false); $("#s-skel").classList.remove("on"); hideStill(); heroActive(CUR === "intro" && !REDUCED);
   if (r && r.ok) {                                             // the previous RUN is replaced only now
     RUN = r; FPS = 26;
     buildViewbar(r); setVideo(r.video, false); renderKPIs(r.stats || []);
-    $("#s-status").textContent = "✓ " + r.info;
+    if (r.validation && r.validation.warnings && r.validation.warnings.length) toast(r.validation.warnings[0], "");
+    if (r.validation && r.validation.applied && r.validation.applied.length) toast("Applied: " + r.validation.applied.join("; "), "");
+    $("#s-status").textContent = "✓ " + r.info; refreshHistory(); zoomReset();
     $("#s-plots").classList.add("ready");                       // draw attention to the diagnostics
     toast("Done — open 📊 Diagnostic plots for the analysis", "ok");
     if (r.evicted && r.evicted.length) toast("Older result" + (r.evicted.length > 1 ? "s" : "") + " released to stay within the memory budget", "");
@@ -300,6 +378,7 @@ async function cancelSim() {
 function setRunning(on) {
   const btn = $("#s-run"), cb = $("#s-cancel");
   btn.disabled = on; btn.textContent = on ? "●  Simulating…" : "▶  Run simulation";
+  const sw = $("#s-sweep-run"); if (sw) sw.disabled = on;
   if (cb) { cb.style.display = on ? "block" : "none"; cb.disabled = false; }
 }
 function renderKPIs(stats) {
@@ -414,6 +493,238 @@ async function togglePlots() {
   } catch (e) { if (isCurrent("diag", t)) { toast(errText(e), "err"); $("#s-status").textContent = "⚠ " + errText(e); } }
   if (isCurrent("diag", t) && !JOB) $("#s-skel").classList.remove("on");
 }
+
+/* ───────── experiments: presets · projects · history · sweeps · compare · probes · zoom ───────── */
+function _lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+function _lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage may be unavailable */ } }
+function presetKey() { return "funoos.presets." + CUR_EXH; }
+function refreshPresetMenu() {
+  const sel = $("#s-presets"); if (!sel) return; sel.innerHTML = "";
+  const o0 = elt("option", null, "★ presets…"); o0.value = ""; sel.append(o0);
+  const saved = _lsGet(presetKey(), {});
+  for (const n of Object.keys(saved).sort()) { const o = elt("option", null, n); o.value = "load:" + n; sel.append(o); }
+  const s1 = elt("option", null, "＋ save current as…"); s1.value = "save"; sel.append(s1);
+  if (Object.keys(saved).length) { const s2 = elt("option", null, "－ delete a preset…"); s2.value = "del"; sel.append(s2); }
+}
+function presetAction(sel) {
+  const v = sel.value; sel.value = "";
+  const saved = _lsGet(presetKey(), {});
+  if (v === "save") {
+    const n = prompt("Name for this setup:"); if (!n) return;
+    saved[n] = { ...PSTATE }; _lsSet(presetKey(), saved); refreshPresetMenu(); toast("Preset saved: " + n, "ok");
+  } else if (v === "del") {
+    const n = prompt("Delete which preset?\n" + Object.keys(saved).join(", ")); if (!n || !(n in saved)) return;
+    delete saved[n]; _lsSet(presetKey(), saved); refreshPresetMenu();
+  } else if (v.startsWith("load:")) {
+    const n = v.slice(5); if (!(n in saved)) return;
+    pushUndo(); PSTATE = { ...sceneDefaults(), ...saved[n] }; renderParams(); refreshEstimate(); toast("Preset loaded: " + n, "ok");
+  }
+}
+async function saveProject() {
+  if (!CUR_EXH) return;
+  try {
+    const r = await call("save_project", CUR_SCENE, CUR_EXH, { ...PSTATE }, RUN && RUN.view, $("#s-cmap").value, ADV, RUN && RUN.run_id);
+    if (r.path) toast("Setup saved: " + r.path, "ok");
+  } catch (e) { toast("Save failed: " + errText(e), "err"); }
+}
+async function loadProject() {
+  try {
+    const r = await call("load_project");
+    if (!r.config) return;
+    await applyProject(r.config);
+  } catch (e) { toast("Load failed: " + errText(e), "err"); }
+}
+async function applyProject(cfg) {
+  if (cfg.scene && cfg.scene !== CUR_SCENE) {
+    let d = null; try { d = await call("scene_detail", cfg.scene, nextReq("detail")); } catch (e) { d = null; }
+    if (d && d.exhibit === cfg.exhibit) { openStudio(d); }
+  }
+  if (cfg.exhibit !== CUR_EXH) { toast("This setup is for " + cfg.exhibit + "; open that scene first", "err"); return; }
+  pushUndo(); PSTATE = { ...sceneDefaults(), ...(cfg.params || {}) }; ADV = !!cfg.advanced;
+  if (cfg.cmap) { const cm = $("#s-cmap"); if (cm && [...cm.options].some(o => o.value === cfg.cmap)) cm.value = cfg.cmap; }
+  renderParams(); refreshEstimate();
+  const w = (cfg.validation && cfg.validation.warnings) || [];
+  toast("Setup loaded" + (w.length ? " (" + w[0] + ")" : ""), "ok");
+}
+/* run history: duplicate a setup, pin, compare */
+async function refreshHistory() {
+  const box = $("#s-history"); if (!box) return;
+  let r; try { r = await call("runs"); } catch (e) { return; }
+  box.innerHTML = "";
+  if (!r.runs.length) return;
+  box.append(elt("div", "kicker", "run history"));
+  for (const run of r.runs.slice().reverse()) {
+    const row = el("div", "hrow" + (RUN && RUN.run_id === run.run_id ? " cur" : ""));
+    const nm = elt("span", "hname", run.info); nm.title = run.info; row.append(nm);
+    const pin = elt("button", "linkbtn", run.pinned ? "★" : "☆"); pin.title = run.pinned ? "Unpin (may be evicted)" : "Pin (never evicted)";
+    pin.setAttribute("aria-label", (run.pinned ? "Unpin" : "Pin") + " run " + run.info);
+    pin.onclick = async () => { try { await call("pin_run", run.run_id, !run.pinned); refreshHistory(); } catch (e) { toast(errText(e), "err"); } };
+    const dup = elt("button", "linkbtn", "⧉"); dup.title = "Duplicate: load this run's setup into the controls";
+    dup.setAttribute("aria-label", "Load setup of run " + run.info);
+    dup.onclick = () => duplicateRun(run.run_id);
+    const cmp = elt("button", "linkbtn", "⇄"); cmp.title = "Compare this run with the current one, side by side";
+    cmp.setAttribute("aria-label", "Compare run " + run.info + " with the current run");
+    cmp.onclick = () => compareWith(run.run_id);
+    row.append(pin, dup, cmp); box.append(row);
+  }
+}
+async function duplicateRun(rid) {
+  try {
+    const j = await call("job", rid);
+    if (j.exhibit !== CUR_EXH) { toast("That run is a different scene (" + j.exhibit + ")", "err"); return; }
+    pushUndo(); PSTATE = { ...sceneDefaults(), ...j.params }; renderParams(); refreshEstimate();
+    toast("Setup loaded from the run — change one thing and Run", "ok");
+  } catch (e) { toast(errText(e), "err"); }
+}
+async function compareWith(rid) {
+  if (!RUN) { toast("Run a simulation first", "err"); return; }
+  if (rid === RUN.run_id) { toast("Pick a different run to compare with", "err"); return; }
+  const t = nextReq("cmp"); setBusy("rendering side-by-side…");
+  try {
+    const r = await call("compare", rid, RUN.run_id, RUN.view, $("#s-cmap").value, 26, t);
+    if (!isCurrent("cmp", t)) return;
+    hideStill(); setVideo(r.video, false);
+    $("#s-status").textContent = "⇄ " + r.info + (r.synchronised ? "  (synchronised by simulation time)" : "  (aligned by clip position — different time units)");
+    toast("Left: earlier run · Right: current run · one shared colour scale", "");
+  } catch (e) { if (isCurrent("cmp", t)) toast(errText(e), "err"); }
+  if (isCurrent("cmp", t) && !JOB) $("#s-skel").classList.remove("on");
+}
+/* parameter sweep (bounded queue, one cancellable job) */
+function openSweep() {
+  const box = $("#s-sweep"); if (!box) return;
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  const sel = $("#s-sweep-param"); sel.innerHTML = "";
+  for (const q of SPEC) if ((q.type === "float" || q.type === "int") && visible(q) && (!q.advanced || ADV)) { const o = elt("option", null, q.label); o.value = q.name; sel.append(o); }
+  sel.onchange = () => { const q = SPEC.find(x => x.name === sel.value); if (q) $("#s-sweep-values").placeholder = `e.g. ${q.min}, ${(q.min + q.max) / 2}, ${q.max}`; };
+  sel.onchange(); box.style.display = "block"; sel.focus();
+}
+async function runSweep() {
+  if (JOB || !CUR_EXH) return;
+  const name = $("#s-sweep-param").value, raw = $("#s-sweep-values").value;
+  const values = raw.split(/[,\s]+/).filter(x => x !== "").map(Number);
+  if (!values.length || values.some(v => !Number.isFinite(v))) { toast("Enter a comma-separated list of numbers", "err"); return; }
+  if (values.length > 8) { toast("At most 8 values per sweep", "err"); return; }
+  const t = nextReq("run");
+  JOB = { id: newId(), exhibit: CUR_EXH, params: Object.freeze({ ...PSTATE }), cancelling: false, token: t, sweep: true };
+  setRunning(true); $("#s-skel").classList.add("on"); $("#s-plotpanel").style.display = "none"; heroActive(false);
+  $("#s-status").textContent = "⏳ sweep: preparing…"; $("#s-sweep").style.display = "none";
+  let r = null, err = null;
+  try { r = await api().sweep(JOB.exhibit, JOB.params, name, values, RUN && RUN.view, $("#s-cmap").value, JOB.id, ADV); }
+  catch (e) { err = errText(e); }
+  if (!isCurrent("run", t)) return;
+  JOB = null; setRunning(false); $("#s-skel").classList.remove("on"); heroActive(CUR === "intro" && !REDUCED);
+  if (r && r.ok) {
+    showSweep(r); $("#s-status").textContent = `✓ sweep of ${name}: ${r.items.length} runs`; refreshHistory();
+  } else if (r && r.state === "cancelled") {
+    $("#s-status").textContent = "■ Sweep cancelled" + (r.items && r.items.length ? ` (${r.items.length} runs kept)` : ""); if (r.items && r.items.length) showSweep(r);
+  } else { const m = err || (r && r.error) || "unknown error"; $("#s-status").textContent = "⚠ " + m; toast("Sweep failed: " + m, "err"); }
+}
+function showSweep(r) {
+  const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = "sweep";
+  p.append(elt("div", "kicker", "parameter sweep · " + r.name));
+  if (r.plot) { const i = el("img"); i.src = r.plot; i.alt = "readout versus " + r.name; p.append(i); }
+  const grid = el("div", "sweepgrid");
+  for (const it of r.items) {
+    const card = el("div", "sweepcard");
+    const im = el("img"); im.src = it.frame; im.alt = r.name + " = " + it.value; card.append(im);
+    card.append(elt("div", "sv", r.name + " = " + it.value));
+    const ks = Object.keys(it.metrics || {});
+    if (ks.length) card.append(elt("div", "sm", ks.slice(0, 3).map(k => k + " " + (+it.metrics[k]).toPrecision(3)).join(" · ")));
+    card.tabIndex = 0; card.setAttribute("role", "button"); card.title = "Open this run";
+    card.onclick = () => openSweepRun(it); card.onkeydown = e => { if (e.key === "Enter") openSweepRun(it); };
+    grid.append(card);
+  }
+  p.append(grid);
+  for (const e of (r.errors || [])) p.append(elt("div", "verr", r.name + " = " + e.value + ": " + e.error));
+  p.style.display = "block";
+}
+async function openSweepRun(it) {
+  const t = nextReq("view"); setBusy("rendering " + it.info + "…");
+  try {
+    const r = await call("render_view", it.run_id, (RUN && RUN.view) || null, $("#s-cmap").value, 26, t);
+    if (!isCurrent("view", t)) return;
+    RUN = { run_id: it.run_id, view: r.view, info: it.info, views: RUN ? RUN.views : [r.view], cmaps: RUN ? RUN.cmaps : [], stats: it.stats };
+    buildViewbar({ views: RUN.views, view: r.view, cmaps: RUN.cmaps.length ? RUN.cmaps : [$("#s-cmap").value], defcmap: $("#s-cmap").value });
+    hideStill(); setVideo(r.video, false); renderKPIs(it.stats || []); $("#s-plotpanel").style.display = "none";
+    $("#s-status").textContent = "✓ " + it.info; refreshHistory();
+  } catch (e) { if (isCurrent("view", t)) toast(errText(e), "err"); }
+  if (isCurrent("view", t) && !JOB) $("#s-skel").classList.remove("on");
+}
+/* probes and frame inspection: click on the field */
+let PROBE = false;
+function toggleProbe() { PROBE = !PROBE; const b = $("#s-probe"); if (b) { b.classList.toggle("on", PROBE); b.setAttribute("aria-pressed", PROBE ? "true" : "false"); } $("#s-status").textContent = PROBE ? "📍 click on the field to read a value, probe a point in time, or draw a profile" : "Ready."; }
+function _fieldFrac(ev) {
+  // fractions of the rendered frame (object-fit: contain letterboxing accounted for), +y up
+  const v = $("#s-video"), st = $("#s-still");
+  const src = st.style.display === "block" ? st : v;
+  const rect = src.getBoundingClientRect();
+  const nw = src.videoWidth || src.naturalWidth, nh = src.videoHeight || src.naturalHeight;
+  if (!nw || !nh) return null;
+  const sc = Math.min(rect.width / nw, rect.height / nh), w = nw * sc, h = nh * sc;
+  const x0 = rect.left + (rect.width - w) / 2, y0 = rect.top + (rect.height - h) / 2;
+  const fx = (ev.clientX - x0) / w, fy = 1 - (ev.clientY - y0) / h;
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null;
+  return { fx, fy };
+}
+async function stageClick(ev) {
+  if (!PROBE || !RUN || ZOOM.dragging) return;
+  const f = _fieldFrac(ev); if (!f) return;
+  const v = $("#s-video"), frac = v.duration ? v.currentTime / v.duration : 1.0;
+  const t = nextReq("probe");
+  try {
+    const r = await call("inspect", RUN.run_id, RUN.view, f.fx, f.fy, frac, t);
+    if (!isCurrent("probe", t)) return;
+    if (r.outside) { $("#s-status").textContent = "(colourbar panel)"; return; }
+    const val = r.value == null ? (r.solid ? "solid" : "no fluid") : (+r.value).toPrecision(4);
+    $("#s-status").textContent = `📍 ${r.label} = ${val} at cell (${r.ix}, ${r.iy}), t = ${(+r.time).toPrecision(4)}`;
+    if (ev.shiftKey) { await showProfile(f, "x"); return; }
+    if (ev.altKey) { await showProfile(f, "y"); return; }
+    const pr = await call("probe", RUN.run_id, RUN.view, f.fx, f.fy, t);
+    if (!isCurrent("probe", t)) return;
+    const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = RUN.run_id;
+    const card = el("div", "plot"); card.append(elt("div", "kicker", "point probe · " + pr.label));
+    const i = el("img"); i.src = pr.plot; i.alt = "probe time series"; card.append(i);
+    card.append(elt("div", "explain", `Value of ${pr.label} at cell (${pr.ix}, ${pr.iy}) over the saved frames (time in ${pr.time_unit}). Shift-click for a horizontal profile, Alt-click for a vertical one.`));
+    const ex = elt("button", "linkbtn", "⬇ CSV"); ex.onclick = async () => { try { const s = await call("export_csv", RUN.run_id, "probe", { view: RUN.view, xfrac: f.fx, yfrac: f.fy }); if (s.path) toast("Saved " + s.path, "ok"); } catch (e) { toast(errText(e), "err"); } };
+    card.append(ex); p.append(card); p.style.display = "block";
+  } catch (e) { if (isCurrent("probe", t)) toast(errText(e), "err"); }
+}
+async function showProfile(f, axis) {
+  const v = $("#s-video"), frac = v.duration ? v.currentTime / v.duration : 1.0;
+  const t = nextReq("probe");
+  const pr = await call("line_profile", RUN.run_id, RUN.view, axis, axis === "x" ? f.fy : f.fx, frac, t);
+  if (!isCurrent("probe", t)) return;
+  const p = $("#s-plotpanel"); p.innerHTML = ""; p.dataset.run = RUN.run_id;
+  const card = el("div", "plot"); card.append(elt("div", "kicker", "line profile · " + pr.label));
+  const i = el("img"); i.src = pr.plot; i.alt = "line profile"; card.append(i);
+  const ex = elt("button", "linkbtn", "⬇ CSV"); ex.onclick = async () => { try { const s = await call("export_csv", RUN.run_id, "profile", { view: RUN.view, axis, frac: axis === "x" ? f.fy : f.fx }); if (s.path) toast("Saved " + s.path, "ok"); } catch (e) { toast(errText(e), "err"); } };
+  card.append(ex); p.append(card); p.style.display = "block";
+}
+/* zoom & pan of the stage (CSS transform; the data are untouched) */
+const ZOOM = { k: 1, x: 0, y: 0, dragging: false, sx: 0, sy: 0, ox: 0, oy: 0 };
+function applyZoom() {
+  const tr = `translate(${ZOOM.x}px, ${ZOOM.y}px) scale(${ZOOM.k})`;
+  for (const id of ["#s-video", "#s-still"]) { const e = $(id); if (e) { e.style.transform = tr; e.style.transformOrigin = "center center"; } }
+  const z = $("#s-zoom"); if (z) z.textContent = Math.round(ZOOM.k * 100) + "%";
+}
+function zoomBy(f) { ZOOM.k = Math.min(8, Math.max(1, ZOOM.k * f)); if (ZOOM.k === 1) { ZOOM.x = ZOOM.y = 0; } applyZoom(); }
+function zoomReset() { ZOOM.k = 1; ZOOM.x = ZOOM.y = 0; applyZoom(); }
+function initStage() {
+  const sc = $("#s-screen"); if (!sc) return;
+  sc.addEventListener("wheel", e => { if (!RUN) return; e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
+  sc.addEventListener("pointerdown", e => { if (ZOOM.k === 1) return; ZOOM.dragging = false; ZOOM.sx = e.clientX; ZOOM.sy = e.clientY; ZOOM.ox = ZOOM.x; ZOOM.oy = ZOOM.y; sc.setPointerCapture(e.pointerId); sc.dataset.down = "1"; });
+  sc.addEventListener("pointermove", e => { if (sc.dataset.down !== "1") return; const dx = e.clientX - ZOOM.sx, dy = e.clientY - ZOOM.sy; if (Math.hypot(dx, dy) > 3) ZOOM.dragging = true; ZOOM.x = ZOOM.ox + dx; ZOOM.y = ZOOM.oy + dy; applyZoom(); });
+  sc.addEventListener("pointerup", e => { sc.dataset.down = "0"; setTimeout(() => { ZOOM.dragging = false; }, 0); });
+  sc.addEventListener("click", stageClick);
+}
+document.addEventListener("keydown", e => {
+  if (CUR !== "studio" || e.target.matches("input,select,textarea")) return;
+  if (e.key === " ") { e.preventDefault(); vToggle(); }
+  else if (e.key === "ArrowLeft") { vStep(-1); } else if (e.key === "ArrowRight") { vStep(1); }
+  else if (e.key === "+" || e.key === "=") { zoomBy(1.15); } else if (e.key === "-") { zoomBy(1 / 1.15); } else if (e.key === "0") { zoomReset(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redoParams(); else undoParams(); }
+  else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { runSim(); }
+});
 
 /* transport */
 const sv = () => $("#s-video");

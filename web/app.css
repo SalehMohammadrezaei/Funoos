@@ -163,6 +163,21 @@ h2{font-size:17px;font-weight:700}
 .cancelbtn:disabled{opacity:.5;cursor:default}
 .status{margin-top:10px;font-size:12px;color:var(--muted);min-height:16px}
 .estimate{font-size:11px;margin-top:4px;min-height:14px;color:var(--dim)}
+.ptools{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px}
+.linkbtn{background:transparent;border:1px solid var(--line);color:var(--muted);font-family:var(--font);font-size:10.5px;font-weight:600;
+  padding:3px 8px;border-radius:8px;cursor:pointer}
+.linkbtn:hover{color:#fff;background:var(--glass-2)} .linkbtn:disabled{opacity:.4;cursor:default}
+.pgroup>.kicker .linkbtn{float:right;margin-top:-3px}
+.field .units{font-size:11px;color:var(--dim);font-weight:500}
+.field .help{font-size:11px;color:var(--dim);line-height:1.4;margin-top:4px}
+.field .verr{font-size:11px;color:#f08a8a;min-height:0;margin-top:2px}
+.field.invalid input,.field.invalid select{border-color:#e35d6a} .field.warn input{border-color:#e0a23a}
+.field.warn .verr{color:#e0a23a}
+.derived{margin-top:6px;font-size:11px;color:var(--read);max-height:160px;overflow-y:auto}
+.derived .kicker{margin:6px 0 4px;font-size:10px}
+.derived .drow{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px solid var(--line-2)}
+.derived .dl{color:var(--muted)} .derived .dv{color:var(--ink);font-weight:600;text-align:right}
+button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
 
 .t-stage .viewbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .seg{display:flex;background:var(--glass-2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:2px}
@@ -250,3 +265,22 @@ input[type=range]{accent-color:var(--blue-br)}
 /* draw attention to the diagnostics button after a run finishes */
 #s-plots.ready{animation:plotpulse 1.4s ease-in-out infinite}
 @keyframes plotpulse{0%,100%{box-shadow:0 0 0 0 rgba(225,252,102,.0)}50%{box-shadow:0 0 0 6px rgba(225,252,102,.35)}}
+
+/* ── experiments: sweeps, history, probes, zoom ── */
+.sweep{margin:6px 0;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--glass-2)}
+.sweep label{display:block;font-size:11px;color:var(--muted);margin:4px 0 3px}
+.sweep select,.sweep input{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 8px;font-size:12px;font-family:var(--font)}
+.sweepgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:8px}
+.sweepcard{background:var(--glass-2);border:1px solid var(--line);border-radius:10px;padding:6px;cursor:pointer}
+.sweepcard:hover,.sweepcard:focus-visible{border-color:var(--blue-br)}
+.sweepcard img{width:100%;border-radius:6px;margin:0 0 4px}
+.sweepcard .sv{font-size:12px;font-weight:700;color:#fff} .sweepcard .sm{font-size:10.5px;color:var(--muted)}
+.history{margin-top:10px;font-size:11px;max-height:200px;overflow-y:auto}
+.history .kicker{font-size:10px;margin-bottom:4px}
+.history .hrow{display:flex;align-items:center;gap:4px;padding:3px 0;border-bottom:1px solid var(--line-2)}
+.history .hrow.cur .hname{color:var(--lime)}
+.history .hname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--read)}
+.zoomctl{display:inline-flex;align-items:center;gap:2px}
+#s-probe.on{background:linear-gradient(180deg,var(--blue-br),var(--blue));color:#fff}
+.screen{overflow:hidden;touch-action:none}
+.plots .linkbtn{margin-bottom:12px}
