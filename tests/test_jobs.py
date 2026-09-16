@@ -105,6 +105,25 @@ def test_run_solver_failure_raises():
         assert e.returncode == 3
 
 
+def test_solver_failure_reports_the_solver_message():
+    """A rejected setup must say what was rejected, not only the exit code: the solvers print
+    "error: ..." and exit 2, and that line is what the user sees."""
+    bad = [sys.executable, "-c", "import sys; print('step 1/4'); sys.stderr.write('error: --tau must be in (0.5, 10]\\n'); sys.exit(2)"]
+    try:
+        engine._run_solver(bad, lambda m: None)
+        raise AssertionError("expected a failure")
+    except subprocess.CalledProcessError as e:
+        assert e.returncode == 2
+        assert "--tau must be in (0.5, 10]" in str(e), str(e)
+        assert "rejected this setup" in str(e), str(e)
+    bad3 = [sys.executable, "-c", "import sys; sys.stderr.write('error: could not write frame 7 (disk full or not writable)\\n'); sys.exit(3)"]
+    try:
+        engine._run_solver(bad3, lambda m: None)
+        raise AssertionError("expected a failure")
+    except subprocess.CalledProcessError as e:
+        assert "could not write" in str(e) and "exit code 3" in str(e), str(e)
+
+
 def test_solve_exhibit_cancel_in_process():
     """In-process solvers stop at their next progress report once the event is set."""
     ev = threading.Event()

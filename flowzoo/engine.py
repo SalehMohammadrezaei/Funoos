@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import queue
 import re
+import collections
 import subprocess
 import sys
 import tempfile
@@ -88,6 +89,7 @@ def _run_solver(args, pr=None, tend=None, cancel=None):
         subprocess.run(args, check=True, env=_ENV); return
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1, env=_ENV)
+    tail = collections.deque(maxlen=40)                 # kept so a failure can quote the solver
     with _LIVE_LOCK:
         _LIVE_PROCS.add(proc)
     lines = queue.Queue()
@@ -111,6 +113,7 @@ def _run_solver(args, pr=None, tend=None, cancel=None):
                 continue
             if line is None:
                 break
+            tail.append(line)
             pct = None
             m = _STEP_RE.search(line)
             if m and int(m.group(2)):
@@ -133,7 +136,25 @@ def _run_solver(args, pr=None, tend=None, cancel=None):
     if cancel is not None and cancel.is_set():
         raise Cancelled()
     if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, args)
+        raise SolverError(proc.returncode, args, output="".join(tail))
+
+
+class SolverError(subprocess.CalledProcessError):
+    """A solver exited non-zero. Its own last words are kept, so the user is told what was
+    rejected ("--tau must be in (0.5, 10]") instead of only "exit status 2"."""
+
+    def reason(self):
+        lines = [x.strip() for x in (self.output or "").splitlines() if x.strip()]
+        for line in reversed(lines):                     # the solvers print "error: <what was wrong>"
+            if line.lower().startswith("error:"):
+                return line.split(":", 1)[1].strip()
+        return lines[-1] if lines else ""
+
+    def __str__(self):
+        what = {2: "the solver rejected this setup", 3: "the solver could not write its output"}.get(
+            self.returncode, "the solver stopped")
+        r = self.reason()
+        return f"{what}: {r} (exit code {self.returncode})" if r else f"{what} (exit code {self.returncode})"
 
 
 def _bin(d, name):
