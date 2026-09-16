@@ -1,6 +1,6 @@
 [project]
 name = "funoos"
-version = "1.2.0"
+version = "1.2.1"
 description = "A desktop laboratory for exploring two-dimensional fluid motion and pattern formation."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"

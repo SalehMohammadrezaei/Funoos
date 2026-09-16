@@ -668,7 +668,12 @@ def _ns_config(mode, p):
 
 def _sph_config(p):
     sc = _SPLASH_SCENE.get(p.get("scene", "Dam break"), "dam"); Lx, Ly = _SPLASH_TANK[sc]
-    a = float(p.get("dropsize", 0.4)) if sc == "drop" else float(p["width"])
+    if sc == "drop":
+        a = float(p.get("dropsize", 0.4))
+    elif sc == "pour":                                          # the glass is 0.13 m wide: the dam-break
+        a = float(np.clip(2.0 * float(p.get("spout", 0.045)) * Lx, 0.01 * Lx, Lx))   # width would not fit
+    else:
+        a = float(p["width"])
     g = float(p["gravity"]); npart = max(500.0, float(p["particles"]))
     if sc == "pour":
         H = Ly; dp = Lx / 44.0; tend = 3.0 * _durv(p)

@@ -274,7 +274,8 @@ def _errtext(e):
     """Human-readable, single-line error text for the UI (never an empty string)."""
     import subprocess
     if isinstance(e, subprocess.CalledProcessError):
-        return f"solver exited with code {e.returncode}"
+        msg = str(e)                                    # SolverError quotes the solver's own line
+        return msg if "exit code" in msg else f"solver exited with code {e.returncode}"
     msg = str(e).strip().splitlines()[0] if str(e).strip() else ""
     return f"{type(e).__name__}: {msg}" if msg else type(e).__name__
 

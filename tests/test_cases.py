@@ -144,6 +144,41 @@ def test_airfoil_lift_changes_sign_with_angle():
     print(f"    airfoil: C_l(+12°)={cl[12]:+.3f}  C_l(−12°)={cl[-12]:+.3f}")
 
 
+def test_every_scene_fits_its_own_solver_limits():
+    """The settings each scene hands to a solver must satisfy the solver's own preconditions.
+    The Pouring scene once failed every run (exit code 2) because the tank became a 0.13 m glass
+    while the width came from the dam-break control (1.0 m), which cannot fit inside it."""
+    bad = []
+    for sc in catalog.SCENES:
+        ex = sc["exhibit"]
+        params = {q["name"]: q["default"] for q in engine.EXHIBITS[ex]["params"]}
+        params.update(sc["preset"])
+        cfg = engine.effective(ex, params)
+        if ex == "The Big Splash":
+            Lx, Ly, a, H, dp = cfg["Lx"], cfg["Ly"], cfg["a"], cfg["H"], cfg["dp"]
+            if not (0 < a <= Lx and 0 < H <= Ly):
+                bad.append(f"{sc['key']}: a={a:.3f} H={H:.3f} do not fit the tank {Lx:.3f}x{Ly:.3f}")
+            if dp <= 0 or (Lx / dp) * (Ly / dp) > 4.0e7:
+                bad.append(f"{sc['key']}: dp={dp} gives too many particle sites")
+        elif ex in ("Wind Tunnel", "Porous Flow"):
+            if not (0.5 < cfg["tau"] <= 10.0):
+                bad.append(f"{sc['key']}: tau={cfg['tau']} outside (0.5, 10]")
+            if abs(cfg.get("U", 0.0)) > 0.5:
+                bad.append(f"{sc['key']}: |U|={abs(cfg['U'])} above the lattice limit")
+    assert not bad, "; ".join(bad)
+
+
+def test_pouring_actually_runs():
+    """A short Pouring run produces frames (it failed with exit code 2 in 1.2.0)."""
+    sc = catalog.scene("sph_pour")
+    params = {q["name"]: q["default"] for q in engine.EXHIBITS[sc["exhibit"]]["params"]}
+    params.update(sc["preset"]); params["duration"] = 0.3
+    res = engine.solve_exhibit(sc["exhibit"], params)
+    assert res.nframes >= 2, res.nframes
+    last = res.raw[-1]
+    assert len(last) > 0, "no particles in the glass"
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

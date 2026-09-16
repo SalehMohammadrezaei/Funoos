@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.1
+
+Pouring never ran: every attempt failed with exit code 2, and the message did not say why.
+
+* **Pouring.** The pour scene fills a real glass 0.13 m wide, but the width of water passed to the
+  solver came from the dam-break width control (default 1 m), which is not shown on the pouring
+  page. The solver rejects water that cannot fit inside its tank, so every pouring run was refused
+  before it started. It now passes the width of the pour stream, from the spout control. Broken
+  since the 1.1 series, when each family moved to one shared configuration.
+* **Failed runs say what was wrong.** The solvers print the reason they refused a setup; the app
+  replaced it with the exit code alone. The reason is now kept and shown, for example "the solver
+  rejected this setup: --tau must be in (0.5, 10] (exit code 2)". Exit code 3 reports that the
+  solver could not write its output.
+* **Checks.** Every scene's settings are compared against the limits its own solver enforces
+  (water and fill height inside the tank, particle spacing, relaxation time, lattice speed), and a
+  short pouring run must produce frames with water in the glass.
+
 ## 1.2.0
 
 A layout review of the real page at eleven window sizes (MacBook Air and Pro defaults, Windows
