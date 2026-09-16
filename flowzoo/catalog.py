@@ -62,6 +62,10 @@ LBM = "Lattice–Boltzmann"; NS = "Incompressible Navier–Stokes"; EU = "Compre
 SPH = "Smoothed-Particle Hydrodynamics"; SP = "Pseudo-spectral"; RD = "Reaction–Diffusion"
 
 # ───────────────────────── scenes ─────────────────────────
+R_BEAR = R["bear"]
+R_TRACER = ("Delgado, J. M. P. Q. (2007). Longitudinal and transverse dispersion in porous media. "
+            "Chemical Engineering Research and Design 85(9), 1245-1252.")
+
 SCENES = [
     # ═════════ wakes & aerodynamics ═════════
     {"method": LBM, "exhibit": "Wind Tunnel", "key": "lbm_cylinder", "name": "Kármán Vortex Street",
@@ -166,6 +170,49 @@ SCENES = [
                "percentage saving is claimed.",
      "refs": [R["kruger"]]},
     # ═════════ porous media ═════════
+    {"method": LBM, "exhibit": "Tracer in Rock", "key": "tracer_pulse", "name": "Tracer Through Rock",
+     "phenomenon": "Porous media", "preset": {"peclet": 20.0, "injection": "Pulse"}, "status": "numerical",
+     "question": "How does a tracer spread as the flow carries it through a grain pack?",
+     "blurb": "A slug of tracer is released across the inlet of the same grain pack the porous experiment uses, "
+              "and the settled pore flow carries it. Wide channels run ahead, narrow ones lag and dead ends hold "
+              "tracer back, so the plume spreads far faster than diffusion alone would manage and the outlet "
+              "curve grows a long tail.",
+     "try": ["Lower the Péclet number to 1 and watch the plume stay symmetric: diffusion takes over.",
+             "Raise it to 200: the front steepens and the tail lengthens, but check the plot's warning about "
+             "numerical diffusion at coarse grids.",
+             "Change the seed only: same porosity, different channels, different arrival time."],
+     "observe": "The breakthrough curve at the outlet and the spreading rate D_eff, both in the diagnostic plots; "
+                "D_eff divided by the molecular value is the dispersion the pore structure produces.",
+     "checks": "Analytical comparison for the transport step: with the flow switched off the plume variance grows "
+               "as 2·D_m·t to four decimal places and tracer mass is conserved to round-off with grains present "
+               "(tests/). The dispersion measurement is only meaningful above the numerical diffusion of the "
+               "upwind scheme (u·dx/2), which is reported beside it.",
+     "refs": [R_BEAR, R_TRACER]},
+    {"method": LBM, "exhibit": "Tracer in Rock", "key": "tracer_diffusive", "name": "Diffusion-Dominated Tracer",
+     "phenomenon": "Porous media", "preset": {"peclet": 1.0, "injection": "Pulse"}, "status": "numerical",
+     "question": "What does transport look like when diffusion wins?",
+     "blurb": "The same sample and the same flow, but the tracer diffuses as fast as the flow carries it "
+              "(Péclet number of 1). The plume stays close to symmetric, the grains only slow it down, and the "
+              "outlet curve has little tail.",
+     "try": ["Compare the spreading rate with the Pe = 20 scene: dispersion grows with the Péclet number.",
+             "Switch the injection to a continuous supply to see a smooth front instead of a slug."],
+     "observe": "The spreading rate relative to the molecular value: near 1 means the grains, not the flow, set "
+                "the spreading.",
+     "checks": "Numerical check: at this Péclet number the measured spreading should be within a small factor of "
+               "the molecular diffusivity, and the plume should stay nearly symmetric.",
+     "refs": [R_BEAR]},
+    {"method": LBM, "exhibit": "Tracer in Rock", "key": "tracer_front", "name": "Advancing Tracer Front",
+     "phenomenon": "Porous media", "preset": {"peclet": 50.0, "injection": "Continuous supply"}, "status": "numerical",
+     "question": "How sharp is the front when tracer is supplied continuously?",
+     "blurb": "The inlet is held at full concentration, so instead of a slug there is a front advancing through "
+              "the pore space. It is never flat: it fingers along the fastest channels and lags in the tight "
+              "throats, and the outlet concentration climbs towards 1.",
+     "try": ["Raise the porosity to 0.8: with wider channels the front is smoother and arrives sooner.",
+             "Drive along y instead of x on the same sample and compare the arrival time."],
+     "observe": "The outlet curve climbing towards 1, and how wide the rise is: a wide rise means a ragged front.",
+     "checks": "Numerical check: with a continuous supply the outlet concentration must approach the inlet value "
+               "and never exceed it; the finite-volume scheme keeps the tracer between 0 and 1.",
+     "refs": [R_BEAR]},
     {"method": LBM, "exhibit": "Porous Flow", "key": "porous_phi60", "name": "Flow Through Porous Rock",
      "phenomenon": "Porous media", "preset": {"porosity": 0.60, "grain": 0.035}, "status": "numerical",
      "question": "How readily does a grain pack transmit fluid, and why?",
@@ -599,6 +646,11 @@ EXPERIMENTS = [
      "representative": "porous_phi60",
      "compare": [("porous_phi60", "porous_connectivity", "Similar porosity, different arrangement: both measured porosities are shown; k differs by connectivity."),
                  ("porous_phi60", "porous_aniso", "Same sample driven along x and along y: k_x versus k_y (force magnitude held).")]},
+    {"id": "tracer_transport", "name": "Tracer through rock", "question": "How does a tracer spread as the flow carries it through a grain pack?",
+     "presets": [("tracer_pulse", "Pulse, Pe 20"), ("tracer_diffusive", "Diffusion dominated, Pe 1"), ("tracer_front", "Steady supply")],
+     "representative": "tracer_pulse",
+     "compare": [("tracer_diffusive", "tracer_pulse", "Diffusion dominated versus carried by the flow: the same rock and flow, Péclet number 1 against 20."),
+                 ("tracer_pulse", "tracer_front", "A slug against a steady supply in the same sample: breakthrough curve versus advancing front.")]},
     {"id": "rising_smoke", "name": "Rising smoke", "question": "How does buoyancy turn a smooth column into a turbulent plume?", "presets": [("ns_smoke", "Smoke plume")], "representative": "ns_smoke"},
     {"id": "rayleigh_taylor", "name": "Rayleigh–Taylor instability", "question": "How does the density contrast set the growth of the instability?",
      "presets": [("ns_rt_single", "Single mode"), ("ns_rt", "Multiple modes")], "representative": "ns_rt"},

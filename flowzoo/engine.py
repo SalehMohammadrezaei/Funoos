@@ -201,11 +201,12 @@ VIEWS = {"lbm": ["Vorticity", "Speed", "Streamlines"],
          "particles": ["Particles", "Foam & spray", "Speed field"],
          "porous": ["Speed", "Streamlines", "Vorticity"],
          "field": ["Pattern"],
-         "quantum": ["Probability |ψ|²", "Phase"]}
+         "quantum": ["Probability |ψ|²", "Phase"],
+         "tracer": ["Concentration", "Speed", "Streamlines"]}
 _VIEW_ALIASES = {"Velocity": "Speed", "Velocity field": "Speed field"}   # pre-1.1 names
 DEFCMAP = {"lbm": "Curl (cyan–amber)", "spectral": "Curl (cyan–amber)",
            "density": "Ember (fire)", "ns": "Ember (fire)", "particles": "Ocean (water)",
-           "porous": "Turbo", "field": "Inferno", "quantum": "Magma"}
+           "porous": "Turbo", "field": "Inferno", "quantum": "Magma", "tracer": "Inferno"}
 # Views whose field is signed: always drawn with a zero-centred (symmetric) colour range.
 SIGNED_VIEWS = {"Vorticity", "Phase"}
 
@@ -303,11 +304,16 @@ class Result:
         return n
 
     def _vel(self):
-        return self.raw if self.kind in ("lbm", "spectral", "porous") else self.hints.get("vel")
+        return self.raw if self.kind in ("lbm", "spectral", "porous") else self.hints.get("vel")   # tracer: steady field in hints
 
     def _derive(self, view):
         N = render.Norm
-        if self.kind in ("lbm", "spectral", "porous", "ns") and view in ("Speed", "Streamlines", "Vorticity"):
+        if self.kind == "tracer" and view == "Concentration":
+            c = self.raw
+            vmax = float(np.percentile(c[0], 99.9)) or 1.0            # the injected level, not a late trace
+            return {"fields": c, "norm": N(0, vmax, gamma=0.6), "label": self.hints.get("label", "tracer c/c₀"),
+                    "mask_color": "#0f1830", "upscale": 1}
+        if self.kind in ("lbm", "spectral", "porous", "ns", "tracer") and view in ("Speed", "Streamlines", "Vorticity"):
             vel = self._vel(); n = len(vel); dx = self.hints.get("dx", 1.0)
             if view == "Vorticity":
                 f = _LazyFields(n, lambda i: render.vorticity(vel[i][0], vel[i][1], dx))
@@ -315,12 +321,12 @@ class Result:
                 return {"fields": f, "norm": N(-v, v), "label": "vorticity ω",
                         "mask_color": render.SOLID, "upscale": 1}
             sp = _LazyFields(n, lambda i: np.sqrt(vel[i][0] * vel[i][0] + vel[i][1] * vel[i][1]))
-            pct = 80.0 if self.kind == "porous" else 99.5          # porous flow is slow/sparse → brighten
+            pct = 80.0 if self.kind in ("porous", "tracer") else 99.5   # pore flow is slow/sparse → brighten
             vmax = float(np.percentile(sp[n - 1], pct)) + 1e-12
             if view == "Streamlines":
                 return {"fields": sp, "vel": vel, "norm": N(0, vmax), "label": "speed |u|"}
-            g = 0.45 if self.kind == "porous" else 1.0
-            mc = "#0f1830" if self.kind == "porous" else render.SOLID
+            g = 0.45 if self.kind in ("porous", "tracer") else 1.0
+            mc = "#0f1830" if self.kind in ("porous", "tracer") else render.SOLID
             return {"fields": sp, "norm": N(0, vmax, gamma=g), "label": "speed |u|",
                     "mask_color": mc, "upscale": 1}
         if self.kind == "ns":                                           # Dye
@@ -659,6 +665,19 @@ def _porous_config(p):
             "steps": steps, "save_every": max(1, steps // 120), "seed": int(p.get("seed", 1))}
 
 
+def _tracer_config(p):
+    """The porous sample, plus what the tracer needs. The molecular diffusivity follows from the
+    Péclet number the user sets: Pe = u_pore · d_grain / D_m, with u_pore the pore-average speed
+    measured by the flow itself (filled in by the runner, which knows it only after the flow has
+    settled; `pe` and the geometry are what this function fixes)."""
+    c = dict(_porous_config(p))
+    c["pe"] = float(p.get("peclet", 20.0))
+    c["injection"] = "continuous" if str(p.get("injection", "Pulse")).lower().startswith("cont") else "pulse"
+    c["pulse_width"] = 0.06
+    c["tracer_frames"] = 110
+    return c
+
+
 def _ns_config(mode, p):
     s = _res(p); steps = int(4800 * _durv(p))
     dims = {"smoke": (280, 440), "rt": (280, 440), "rb": (480, 230), "flame": (190, 360), "wind": (540, 420)}[mode]
@@ -706,6 +725,8 @@ def effective(name, params):
         return _wt_config(p)
     if name == "Porous Flow":
         return _porous_config(p)
+    if name == "Tracer in Rock":
+        return _tracer_config(p)
     if name in _NS_MODES:
         return _ns_config(_NS_MODES[name], p)
     if name == "The Big Splash":
@@ -832,6 +853,51 @@ def _solve_porous(p, pr, tmp):
              "warmup_dropped": {"frames": n // 3, "until_time": all_t[n // 3] if n > n // 3 else None}, "effective": cfg}
     tag = "k" if settled else "k (transient)"
     return Result("porous", raw, f"porous · φ={poro:.2f} · {tag}_{'y' if fdir else 'x'}={perm:.2e}", mask=mask, hints=hints, times=times)
+
+
+def _solve_tracer(p, pr, tmp):
+    """Settle the pore flow, then carry a tracer through it (advection + diffusion).
+
+    The flow is solved exactly as the porous experiment solves it, and the settled velocity field
+    is then held fixed while the tracer crosses: at these pore Reynolds numbers (far below one)
+    the flow does not change over that time, so this is exact rather than a shortcut. Only
+    molecular diffusion enters the transport step; the spreading that the plume shows comes out
+    of the velocity field itself.
+    """
+    from . import transport
+    cfg = _tracer_config(p)
+    flow = _solve_porous(p, pr, tmp)                     # same sample, same driving force
+    ux, uy = flow.raw[-1]                                # the settled field
+    solid = np.asarray(flow.mask, bool)
+    fluid = ~solid
+    speed = np.sqrt(ux * ux + uy * uy)
+    u_pore = float(speed[fluid].mean()) if fluid.any() else 0.0
+    grain = float(cfg["grain"])
+    pe = max(1e-3, float(cfg["pe"]))
+    dm = max(1e-9, u_pore * grain / pe) if u_pore > 0 else 1e-4
+    axis = "y" if cfg["fdir"] else "x"
+    length = (solid.shape[1] if axis == "x" else solid.shape[0])
+    u_adv = float(np.abs(ux if axis == "x" else uy)[fluid].mean()) or u_pore or 1e-6
+    t_cross = length / max(u_adv, 1e-9)                  # one pore-volume crossing
+    dt_est = transport.Transport(ux, uy, solid, dm, axis=axis).dt
+    steps = int(np.clip(t_cross * 1.2 * _durv(p) / dt_est, 200, 60000))
+    pr(f"tracer · Pe={pe:g} · D_m={dm:.2e} · {steps} steps…")
+    frames, times, rec = transport.run(ux, uy, solid, dm, axis=axis, injection=cfg["injection"],
+                                       steps=steps, nframes=cfg["tracer_frames"],
+                                       pulse_width=cfg["pulse_width"],
+                                       progress=lambda f: pr(f"tracer… {int(100 * f)}%"))
+    vel = [(ux, uy)] * len(frames)                       # one steady field, shared by every frame
+    hints = {"label": "tracer c/c₀", "vel": vel, "dx": 1.0, "time_unit": "lattice steps",
+             "peclet": pe, "dm": dm, "u_pore": u_pore, "u_adv": u_adv, "grain": grain,
+             "axis": axis, "injection": cfg["injection"], "length_cells": length,
+             "porosity": flow.hints.get("porosity"), "permeability": flow.hints.get("permeability"),
+             "k_status": flow.hints.get("k_status"), "pore_volume_cells": rec["pore_volume"],
+             "t_cross": t_cross, "effective": cfg, **{k: rec[k] for k in
+             ("breakthrough", "centre_cells", "variance_cells2", "mass", "mass_initial",
+              "dt", "u_max", "numerical_diffusion")}}
+    inj = "steady supply" if cfg["injection"] == "continuous" else "pulse"
+    info = f"tracer · {inj} · Pe={pe:g} · φ={flow.hints.get('porosity', 0):.2f}"
+    return Result("tracer", frames, info, mask=solid, hints=hints, times=times)
 
 
 def _solve_ns(mode, p, pr, tmp):
@@ -1307,6 +1373,36 @@ EXHIBITS = {
                             hard_min=0, hard_max=2 ** 31 - 1, advanced=True), "init", ["Random turbulence"]),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_spectral(p, pr, t)},
+    "Tracer in Rock": {
+        "params": [_f("porosity", "Porosity φ", 0.60, 0.40, 0.85, "Geometry",
+                      "Fraction of the sample that is pore space. The same rock as the porous-flow "
+                      "experiment: with the same porosity, grain size and seed you get the same sample.",
+                      hard_min=0.25, hard_max=0.95),
+                   _f("grain", "Grain size", 0.035, 0.02, 0.07, "Geometry",
+                      "Typical grain radius as a fraction of the sample height. It also sets the length "
+                      "in the Péclet number.", units="× height", hard_min=0.01, hard_max=0.15),
+                   _i("seed", "Sample seed", 1, 0, 9999, "Geometry",
+                      "Which random grain arrangement to pack. Same seed, same rock.", hard_min=0, hard_max=99999),
+                   {"name": "direction", "label": "Driving direction", "type": "choice", "choices": ["x", "y"],
+                    "default": "x", "group": "Physics", "help": "Which way the flow (and the tracer) is driven."},
+                   _f("strength", "Driving strength", 1.0, 0.25, 4.0, "Physics",
+                      "Body force driving the flow, as a multiple of the default. In the Darcy regime it "
+                      "changes the speed but not the permeability; with the Péclet number held, it does not "
+                      "change the spreading either.", hard_min=0.05, hard_max=20,
+                      fixed="Pe is held: the molecular diffusivity is rescaled with the pore speed"),
+                   _f("peclet", "Péclet number", 20.0, 0.1, 400.0, "Physics",
+                      "How strongly the tracer is carried compared with how fast it spreads: "
+                      "Pe = u·d/D_m with u the pore speed and d the grain size. Below 1 diffusion dominates "
+                      "and the plume stays symmetric; above about 10 fast and slow channels stretch it and "
+                      "the breakthrough curve grows a long tail.", hard_min=0.01, hard_max=5000,
+                      fixed="the molecular diffusivity follows from Pe and the measured pore speed"),
+                   {"name": "injection", "label": "Injection", "type": "choice",
+                    "choices": ["Pulse", "Continuous supply"], "default": "Pulse", "group": "Physics",
+                    "help": "A pulse is a slug of tracer released at the inlet: its mass is conserved and it "
+                            "gives a clean breakthrough curve. A continuous supply holds the inlet at full "
+                            "concentration and shows an advancing front."},
+                   P_RES(), P_DUR()],
+        "solve": lambda p, pr, t: _solve_tracer(p, pr, t)},
     "Porous Flow": {
         "params": [_f("porosity", "Porosity  φ", 0.60, 0.40, 0.85, "Geometry",
                       "Fraction of the sample that is open pore space. Lower porosity (denser grain "
@@ -1600,6 +1696,27 @@ META = {
                        "is slightly diffusive, so a little contrast is lost rather than gained), the "
                        "signature of stirring-dominated mixing.",
         "demo": "results/gallery/mix_bands.gif"},
+    "Tracer in Rock": {"method": "Pore-scale Lattice-Boltzmann · advection–dispersion",
+        "blurb": "Release a dye into water moving through rock and it does not travel as a neat block. "
+                 "Wide channels run ahead, narrow ones lag, dead ends hold tracer back, and molecular "
+                 "diffusion smears what is left. The result is a plume that spreads far faster than "
+                 "diffusion alone would manage, and an arrival curve with a long tail. This is how "
+                 "contaminants travel in groundwater and how tracer tests read a reservoir.",
+        "eq": r"$\partial_t c + \nabla\!\cdot(\mathbf{u}c) = \nabla\!\cdot(D_m \nabla c)$",
+        "numerics": "The pore flow is solved first with the same lattice-Boltzmann scheme as the porous "
+                    "experiment and then held fixed (the pore Reynolds number is far below one, so the "
+                    "field does not change while the tracer crosses). The tracer is advanced with a "
+                    "finite-volume scheme on the same grid: upwind advective fluxes, a five-point "
+                    "diffusive flux, and no flux at all through faces touching a grain, so tracer mass is "
+                    "conserved to round-off and none enters the solid. The step obeys both the Courant "
+                    "and the diffusive limits. Only molecular diffusion D_m is prescribed, from the "
+                    "Péclet number; the extra spreading is produced by the velocity field itself.",
+        "validation": "Analytical comparison: with the flow switched off the plume variance grows as 2·D_m·t "
+                      "to four decimal places, and tracer mass is conserved to round-off with grains present "
+                      "(tests/). First-order upwind advection adds a numerical diffusivity of about u·dx/2, "
+                      "which is reported next to the measured spreading; the measured dispersion is only "
+                      "meaningful when it exceeds that number.",
+        "demo": "results/gallery/tracer_pulse.gif"},
     "Porous Flow": {"method": "Pore-scale Lattice-Boltzmann · Darcy",
         "blurb": "Push fluid through a packed bed of grains and it threads a tortuous path "
                  "between them. Averaged over the sample, the flow rate is simply proportional to "

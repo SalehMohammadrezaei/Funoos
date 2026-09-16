@@ -1,5 +1,5 @@
 """Wrap the recorded app walkthrough into a polished promo:
-title card -> walkthrough (tools/record_walkthrough.py) -> tile wall of the 27 experiments
+title card -> walkthrough (tools/record_walkthrough.py) -> tile wall of the 28 experiments
 -> end card.  2560x1440. -> funoos_app_promo.mp4
 """
 from pathlib import Path
@@ -43,7 +43,7 @@ def center(d, y, text, font, fill):
 def title(d):
     center(d, H * 0.35, "FUNOOS", ImageFont.truetype(FB, 200), (126, 155, 255))
     center(d, H * 0.56, "explore fluid motion through simulation", ImageFont.truetype(FR, 56), (226, 233, 247))
-    center(d, H * 0.64, "27 experiments · 48 presets · run it, switch views, recolour, measure", ImageFont.truetype(FR, 32), (132, 147, 173))
+    center(d, H * 0.64, "28 experiments · 51 presets · run it, switch views, recolour, measure", ImageFont.truetype(FR, 32), (132, 147, 173))
 
 
 def endcard(d):
@@ -91,7 +91,7 @@ def build_mosaic(out, dur):
     parts.append("".join(f"[s{i}]" for i in range(n)) + f"xstack=inputs={n}:layout={layout}[wall]")
     post = (f"[wall]drawgrid=w={tw}:h={th}:t=3:color=0x0a1322,"
             f"zoompan=z='min(zoom+0.0003,1.04)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
-            f"drawtext=fontfile={FB}:text='27 experiments · one app':fontcolor=white:fontsize=52:x=(w-text_w)/2:y=64"
+            f"drawtext=fontfile={FB}:text='28 experiments · one app':fontcolor=white:fontsize=52:x=(w-text_w)/2:y=64"
             ":alpha='if(lt(t,0.5),t/0.5,1)':box=1:boxcolor=0x0a1322@0.6:boxborderw=18,"
             "fade=t=in:st=0:d=0.5[v]")
     run([FF, "-y", *inputs, "-filter_complex", ";".join(parts) + ";" + post, "-map", "[v]",

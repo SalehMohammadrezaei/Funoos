@@ -11,8 +11,8 @@ interactive laboratory where you can change a setup, compare experiments and
 inspect results you can trust, with the limits of every model stated.
 
 Five solvers written from scratch (four in C++/OpenMP, one in Python/FFT) plus a
-reaction–diffusion model drive 27 experiments with 48 named presets, organised by
-phenomenon: wakes and aerodynamics, porous media, buoyancy and convection, shocks,
+reaction–diffusion model drive 28 experiments with 51 named presets, organised by
+phenomenon: wakes and aerodynamics, porous media (flow and tracer transport), buoyancy and convection, shocks,
 free surfaces and waves, vortices and mixing, pattern formation
 ([docs/gallery_map.md](docs/gallery_map.md)).
 
@@ -133,7 +133,7 @@ MIT (see `LICENSE`; third-party components in `THIRD_PARTY_NOTICES.md`). Created
 Saleh Mohammadrezaei (salehmrezaee@gmail.com). If Funoos is useful in teaching or
 research, please cite it (`CITATION.cff`):
 
-> Mohammadrezaei, S. (2026). Funoos: fluid simulation laboratory (version 1.2.1)
+> Mohammadrezaei, S. (2026). Funoos: fluid simulation laboratory (version 1.3.0)
 > [Computer software]. https://github.com/SalehMohammadrezaei/Funoos
 
 Readability and keyboard access are documented in [docs/accessibility.md](docs/accessibility.md).

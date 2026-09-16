@@ -587,7 +587,7 @@ def test_readouts_are_measurements_and_cards_have_thumbnails():
     assert all(str(x["v"]).lower() not in ("nan", "inf", "-inf") for x in r["stats"])
     cat = api.catalog()
     exps = [e for g in cat["groups"] for e in g["experiments"]]
-    assert len(exps) == 27
+    assert len(exps) == 28
     missing = [e["id"] for e in exps if not (e.get("thumb") and e.get("thumb_poster")
                                              and (funoos_app.ROOT / e["thumb"]).exists()
                                              and (funoos_app.ROOT / e["thumb_poster"]).exists())]

@@ -183,6 +183,27 @@ def metrics(result):
         if k == "porous":
             m["permeability_cells2"] = float(h.get("permeability", 0.0))
             m["porosity"] = float(h.get("porosity", 0.0))
+        elif k == "tracer":
+            m["peclet"] = float(h.get("peclet", 0.0))
+            m["porosity"] = float(h.get("porosity") or 0.0)
+            bt = np.asarray(h.get("breakthrough", []), float)
+            t = _times(result)
+            if bt.size and t.size == bt.size and bt.max() > 0:
+                half = bt.max() * 0.5
+                i = int(np.argmax(bt >= half))
+                if bt[i] >= half:
+                    m["arrival_time_t50"] = float(t[i])
+            var = np.asarray(h.get("variance_cells2", []), float)
+            if var.size > 4 and t.size == var.size:      # spreading rate: variance grows as 2 D_eff t
+                half = _tracer_window(h, t)
+                sl = np.polyfit(t[half], var[half], 1)[0]
+                m["dispersion_cells2_per_step"] = float(sl / 2.0)
+                dm = float(h.get("dm", 0.0))
+                if dm > 0:
+                    m["dispersion_over_molecular"] = float(sl / 2.0 / dm)
+            mass = np.asarray(h.get("mass", []), float); m0 = float(h.get("mass_initial", 0.0))
+            if mass.size and m0 > 0 and h.get("injection") != "continuous":
+                m["tracer_mass_drift"] = float(abs(mass[-1] - m0) / m0)
         elif k == "lbm":
             obs = h.get("obstacle", "Cylinder")
             t, sig, _src = _wind_series(result)
@@ -256,6 +277,12 @@ def series(result):
             ke, ens = _ke_enstrophy(result)
             if ke is not None:
                 out["kinetic_energy_per_mass"] = ke.tolist(); out["enstrophy"] = ens.tolist()
+        if k == "tracer":
+            for key, name in (("breakthrough", "outlet_concentration"), ("variance_cells2", "plume_variance_cells2"),
+                              ("centre_cells", "plume_centre_cells"), ("mass", "tracer_mass")):
+                v = h.get(key)
+                if v is not None and len(v) == len(t):
+                    out[name] = [float(x) for x in v]
         if k == "lbm":
             cds, *_ = _wake_drag(result); out["cd_wake_approx"] = cds.tolist()
             if "probe_uy" in h:
@@ -724,6 +751,105 @@ def _particles(result):
     return out
 
 
+def _tracer_window(h, t):
+    """Frames to measure spreading over: the sample is periodic, so once the plume has wrapped
+    around and overlapped itself the variance of the profile no longer means anything. Keep the
+    frames up to the first wrap, then use the later half of those."""
+    n = len(t)
+    centre = np.asarray(h.get("centre_cells", []), float)
+    stop = n
+    if centre.size == n and n > 3:
+        back = np.where(np.diff(centre) < -0.25 * float(h.get("length_cells", n) or n))[0]
+        if back.size:
+            stop = int(back[0]) + 1
+    stop = max(4, stop)
+    return slice(stop // 2, stop)
+
+
+def _tracer_profile(result, i):
+    """Pore-averaged concentration along the flow direction for frame i."""
+    c = np.asarray(result.raw[i], float)
+    fluid = ~np.asarray(result.mask, bool) if result.mask is not None else np.ones_like(c, bool)
+    axis = result.hints.get("axis", "x")
+    f = fluid.astype(float)
+    num, den = ((c * f).sum(axis=0), f.sum(axis=0)) if axis == "x" else ((c * f).sum(axis=1), f.sum(axis=1))
+    return np.divide(num, den, out=np.zeros_like(num), where=den > 0)
+
+
+def _tracer(result):
+    h = result.hints; t = _times(result); out = []
+    unit = _tunit(result)
+    bt = np.asarray(h.get("breakthrough", []), float)
+    var = np.asarray(h.get("variance_cells2", []), float)
+    dm = float(h.get("dm", 0.0)); dnum = float(h.get("numerical_diffusion", 0.0))
+    pe = float(h.get("peclet", 0.0)); cont = h.get("injection") == "continuous"
+
+    # ── 1) breakthrough at the outlet ───────────────────────────────────────────────
+    if bt.size == t.size and bt.size > 2:
+        fig, ax, plt = _new_ax(f"time ({unit})", "outlet concentration c/c₀", "Breakthrough at the outlet")
+        ax.plot(t, bt, color=_CYAN, lw=2.0)
+        t50 = None
+        if bt.max() > 0:
+            half = bt.max() * 0.5
+            i = int(np.argmax(bt >= half))
+            if bt[i] >= half:
+                t50 = float(t[i])
+                ax.axvline(t50, color=_AMBER, lw=1.2, ls="--", label=f"half of the peak at t = {t50:.3g}")
+                _legend(ax)
+        tc = float(h.get("t_cross", 0.0))
+        out.append(("Breakthrough at the outlet", _rgb(fig, plt),
+                    ("Mean tracer concentration in a slab at the outlet end of the sample, pore cells only, at each "
+                     "saved frame. " + ("A steady supply is held at the inlet, so this is the arrival of a front and "
+                     "it approaches 1. " if cont else "A slug was released at the inlet, so the curve rises, peaks and "
+                     "decays; its tail is the tracer held back in slow channels and dead ends. ") +
+                     f"One pore-volume crossing at the mean advective speed takes about {tc:.3g} {unit}" +
+                     (f", and half of the peak arrives at {t50:.3g}. " if t50 is not None else ". ") +
+                     "Arrival earlier than the crossing time means the tracer found fast channels.")))
+
+    # ── 2) spreading: variance against time, slope = 2 D_eff ────────────────────────
+    if var.size == t.size and var.size > 6:
+        fig, ax, plt = _new_ax(f"time ({unit})", "plume variance σ² (cells²)", "How fast the plume spreads")
+        ax.plot(t, var, color=_GOOD, lw=2.0, label="measured")
+        half = _tracer_window(h, t)
+        slope = float(np.polyfit(t[half], var[half], 1)[0])
+        deff = slope / 2.0
+        ax.plot(t[half], np.polyval(np.polyfit(t[half], var[half], 1), t[half]), color=_AMBER, lw=1.4, ls="--",
+                label=f"fit while the plume travels: D_eff = {deff:.2e}")
+        if dm > 0:
+            ax.plot(t, var[0] + 2 * dm * (t - t[0]), color=_MUTED, lw=1.2, ls=":",
+                    label=f"molecular diffusion alone: D_m = {dm:.2e}")
+        _legend(ax)
+        ratio = deff / dm if dm > 0 else float("nan")
+        trust = ("The measured spreading is above the numerical diffusion of the advection scheme, so it reflects "
+                 "the pore-scale velocity field." if deff > 3 * dnum else
+                 "Careful: the measured spreading is not far above the numerical diffusion of the advection scheme "
+                 "(u·dx/2), so at this setting the number says more about the grid than about the rock. Raise the "
+                 "resolution or lower the Péclet number.")
+        out.append(("How fast the plume spreads", _rgb(fig, plt),
+                    (f"Variance of the pore-averaged concentration profile along the flow. For pure diffusion it "
+                     f"grows as 2·D_m·t; the slope of the measured curve, fitted while the plume is still "
+                     f"travelling forward (the sample is periodic, so the fit stops before it wraps), gives an "
+                     f"effective spreading coefficient "
+                     f"D_eff = {deff:.2e} cells²/step, which is {ratio:.0f} times the molecular value at Pe = {pe:g}. "
+                     f"That excess is mechanical dispersion: neighbouring channels carry the tracer at different "
+                     f"speeds, so the plume is stretched. Numerical diffusion of the upwind scheme here is about "
+                     f"{dnum:.2e}. " + trust)))
+
+    # ── 3) profiles along the flow at three times ───────────────────────────────────
+    n = result.nframes
+    if n >= 3:
+        fig, ax, plt = _new_ax("distance along the flow (cells)", "concentration c/c₀",
+                               "The plume as it crosses the sample")
+        for i, col in ((0, _MUTED), (n // 2, _CYAN), (n - 1, _AMBER)):
+            ax.plot(_tracer_profile(result, i), color=col, lw=1.8, label=f"t = {t[i]:.3g}")
+        _legend(ax)
+        out.append(("The plume as it crosses the sample", _rgb(fig, plt),
+                    ("Concentration averaged across the sample at each position along the flow, pore cells only, at "
+                     "the start, the middle and the end of the run. A symmetric hump means diffusion dominates; a "
+                     "steep front with a long tail behind it means the velocity field is doing the spreading.")))
+    return out
+
+
 def _porous(result):
     h = result.hints
     phi = h.get("porosity", 0.6); k = h.get("permeability", 0.0); d = 2.0 * h.get("grain", 12)
@@ -803,6 +929,8 @@ def plots(result):
         k = result.kind
         if k == "quantum":
             return _quantum(result)
+        if k == "tracer":
+            return _tracer(result)
         if k == "porous":
             return _porous(result)
         if k == "lbm":

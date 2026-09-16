@@ -4,7 +4,7 @@ Shows what the app does, across DIFFERENT cases:
   • MANY WAYS TO SEE IT — a different view on a different scene
       (cylinder→vorticity, airfoil→streamlines, Bénard→speed, smoke→dye)
   • RECOLOR INSTANTLY — one field (Kelvin–Helmholtz) cycled through palettes
-  • EXPLORE — all 27 experiments as a live tile wall
+  • EXPLORE — all 28 experiments as a live tile wall
 Every shot uses a blurred-fill background so the whole scene shows fully (no
 black bands, nothing cropped).  Footage rendered fresh & high-res via lossless
 PNG sequences.  Clean grade — no bloom/vignette/scope bars.
@@ -171,7 +171,7 @@ def build_mosaic(keys, out, dur):
     parts.append("".join(f"[s{i}]" for i in range(n)) + f"xstack=inputs={n}:layout={layout}[wall]")
     post = (f"[wall]drawgrid=w={tw}:h={th}:t=3:color=0x0a1322,"
             f"zoompan=z='min(zoom+0.00035,1.045)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},"
-            f"drawtext=fontfile={FB}:text='27 EXPERIMENTS · 48 PRESETS':fontcolor=white:fontsize=36:x=96:y=60"
+            f"drawtext=fontfile={FB}:text='28 EXPERIMENTS · 51 PRESETS':fontcolor=white:fontsize=36:x=96:y=60"
             ":alpha='if(lt(t,0.5),t/0.5,1)':shadowcolor=black@0.85:shadowx=0:shadowy=3,"
             f"drawtext=fontfile={FR}:text='six methods · one app · free & open source':fontcolor=0xcdd9f2:fontsize=27"
             f":x=(w-text_w)/2:y={H-64}:alpha='if(lt(t,0.6),t/0.6,1)':shadowcolor=black@0.9:shadowx=0:shadowy=3,"

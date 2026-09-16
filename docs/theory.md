@@ -174,3 +174,30 @@ assumptions and what has been checked. Frequency estimates use the solver's per-
 wake probe, require at least six oscillation cycles and a clear spectral peak, and
 otherwise report "insufficient data". Absolute values are plotted with units; nothing
 is normalised by its own maximum.
+
+## Tracer transport through a pore space (advection and dispersion)
+
+The tracer obeys
+
+    ∂c/∂t + ∇·(u c) = ∇·(D_m ∇c)
+
+on the same grid as the pore flow, with no flux through grain surfaces. The velocity field u is the
+settled pore flow, held fixed: at pore Reynolds numbers far below one it does not change while the
+tracer crosses, so this is exact here rather than a convenience.
+
+Only the molecular diffusivity D_m appears. It is set from the Péclet number the user chooses,
+Pe = u·d/D_m, with u the pore-average speed measured once the flow has settled and d the grain
+size. Everything beyond molecular diffusion that the plume shows, the stretching, the early
+arrival, the long tail, is produced by the velocity field itself: neighbouring channels carry the
+tracer at different speeds. That is mechanical dispersion, and the experiment measures it rather
+than assuming it.
+
+The scheme is finite volume: what leaves one cell through a face enters the next, so tracer mass is
+conserved to round-off, and faces touching a grain carry nothing at all. Advection uses first-order
+upwind fluxes, which add a numerical diffusivity of about u·dx/2. That number is reported next to
+the measured spreading, and the diagnostic plot says when the two are too close for the measurement
+to mean anything: raise the resolution or lower the Péclet number.
+
+Checks: with the flow switched off the plume variance grows as 2·D_m·t to four decimal places; mass
+is conserved with grains present; a plume in the pore flow spreads faster than molecular diffusion
+alone (tests/test_cases.py).

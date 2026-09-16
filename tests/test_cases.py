@@ -50,7 +50,7 @@ def test_registry_complete():
         assert [x["id"] for x in L] == ["question", "see", "try", "observe", "physics", "model", "setup", "numerics", "refs"]
         assert L[6]["ic"] and L[6]["bc"], (s["key"], "initial and boundary conditions must be stated")
     c = catalog.counts()
-    assert c["presets"] == len(catalog.SCENES) and c["methods"] == 6 and c["experiments"] == len(catalog.EXPERIMENTS) == 27
+    assert c["presets"] == len(catalog.SCENES) and c["methods"] == 6 and c["experiments"] == len(catalog.EXPERIMENTS) == 28
     assert catalog.check_experiments() == [], catalog.check_experiments()
     assert sum(len(e["presets"]) for e in catalog.EXPERIMENTS) == len(catalog.SCENES), "every scene is in exactly one experiment"
     ex = catalog.experiments()
@@ -177,6 +177,89 @@ def test_pouring_actually_runs():
     assert res.nframes >= 2, res.nframes
     last = res.raw[-1]
     assert len(last) > 0, "no particles in the glass"
+
+
+def test_tracer_pure_diffusion_matches_theory():
+    """With the flow switched off, the plume variance must grow as 2·D_m·t (the analytic result),
+    and tracer mass must be conserved."""
+    from flowzoo import transport
+    ny, nx = 48, 320
+    solid = np.zeros((ny, nx), bool)
+    u = np.zeros((ny, nx)); v = np.zeros((ny, nx))
+    dm = 0.02
+    tr = transport.Transport(u, v, solid, dm, axis="x")
+    tr.c[:] = 0.0; tr.c[:, nx // 2] = 1.0
+    m0 = tr.mass()
+    for _ in range(3000):
+        tr.step()
+    _, var = tr.moments()
+    expected = 2.0 * dm * tr.t
+    assert abs(var / expected - 1.0) < 1e-3, (var, expected)
+    assert abs(tr.mass() - m0) / m0 < 1e-12, tr.mass() - m0
+
+
+def test_tracer_conserves_mass_and_stays_out_of_the_grains():
+    """A pulse carried through a grain pack keeps its mass (no flux through grain surfaces) and
+    never puts tracer inside a grain."""
+    from flowzoo import transport
+    ny, nx = 64, 200
+    rng = np.random.default_rng(3)
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    solid = np.zeros((ny, nx), bool)
+    for _ in range(90):
+        cx, cy, r = rng.integers(0, nx), rng.integers(0, ny), rng.uniform(3, 6)
+        solid |= ((xx - cx) ** 2 + (yy - cy) ** 2) <= r * r
+    u = np.where(solid, 0.0, 0.01 * (1.0 + 0.5 * np.sin(2 * np.pi * yy / ny)))
+    v = np.zeros_like(u)
+    frames, times, rec = transport.run(u, v, solid, 1e-3, axis="x", injection="pulse", steps=2000, nframes=10)
+    drift = abs(rec["mass"][-1] - rec["mass_initial"]) / rec["mass_initial"]
+    assert drift < 1e-12, drift
+    assert max(float(f[solid].max()) for f in frames) == 0.0
+    assert len(frames) == len(times)
+
+
+def test_tracer_disperses_more_than_molecular_diffusion():
+    """Carried through the pore space, a plume must spread faster than molecular diffusion alone:
+    that excess is the mechanical dispersion the velocity field produces."""
+    from flowzoo import transport
+    ny, nx = 64, 240
+    rng = np.random.default_rng(5)
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    solid = np.zeros((ny, nx), bool)
+    for _ in range(80):
+        cx, cy, r = rng.integers(0, nx), rng.integers(0, ny), rng.uniform(3, 6)
+        solid |= ((xx - cx) ** 2 + (yy - cy) ** 2) <= r * r
+    u = np.where(solid, 0.0, 0.02 * (1.0 + 0.8 * np.sin(2 * np.pi * yy / ny)))   # fast and slow channels
+    v = np.zeros_like(u)
+    dm = 2e-3
+    # the sample is periodic: stop while the plume is still travelling forward, before it wraps
+    # around and overlaps itself (after that the variance of the profile stops meaning anything)
+    probe = transport.Transport(u, v, solid, dm, axis="x")
+    u_mean = float(np.abs(u[~solid]).mean())
+    steps = int(0.35 * nx / (u_mean * probe.dt))
+    _f, times, rec = transport.run(u, v, solid, dm, axis="x", injection="pulse", steps=steps, nframes=40)
+    t = np.asarray(times); var = np.asarray(rec["variance_cells2"])
+    half = slice(len(t) // 2, None)
+    d_eff = float(np.polyfit(t[half], var[half], 1)[0]) / 2.0
+    assert d_eff > 2.0 * dm, (d_eff, dm)
+    assert d_eff > rec["numerical_diffusion"], (d_eff, rec["numerical_diffusion"])
+
+
+def test_tracer_scene_runs_and_measures():
+    """A short run of the shipped tracer scene produces frames, a breakthrough curve and a
+    dispersion measurement."""
+    from flowzoo import postproc
+    sc = catalog.scene("tracer_pulse")
+    params = {q["name"]: q["default"] for q in engine.EXHIBITS[sc["exhibit"]]["params"]}
+    params.update(sc["preset"]); params["resolution"] = "Low (fast)"; params["duration"] = 0.3
+    res = engine.solve_exhibit(sc["exhibit"], params)
+    assert res.kind == "tracer" and res.nframes >= 5
+    assert res.mask is not None and float(max(f[res.mask].max() for f in res.raw)) == 0.0
+    m = postproc.metrics(res)
+    assert m["peclet"] == params["peclet"]
+    assert m.get("dispersion_cells2_per_step", 0) > 0, m
+    assert m.get("tracer_mass_drift", 1.0) < 1e-9, m
+    assert len(postproc.plots(res)) >= 2
 
 
 if __name__ == "__main__":

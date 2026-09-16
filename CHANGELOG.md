@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.3.0
+
+A new experiment: **Tracer through rock**, the advection and dispersion of a tracer carried by the
+flow in the same grain pack the porous experiment uses.
+
+* **What it does.** The pore flow is settled first with the existing lattice-Boltzmann solver, then
+  held fixed while a tracer crosses (the pore Reynolds number is far below one, so the field does
+  not change meanwhile). Only molecular diffusion is prescribed, from the Péclet number; the
+  spreading the plume actually shows comes out of the pore-scale velocities.
+* **Controls.** The same rock as porous flow (porosity, grain size, seed, direction, driving
+  strength), plus the Péclet number and whether the tracer arrives as a pulse or a steady supply.
+  Same porosity, grain size and seed give the same sample, so the two experiments can be compared
+  directly.
+* **Measurements.** Breakthrough curve at the outlet, arrival time, the spreading coefficient
+  fitted from the plume variance, and how many times molecular diffusion that is. The numerical
+  diffusion of the advection scheme is reported beside it, and the plot says plainly when the
+  measurement is too close to it to mean anything.
+* **Three presets.** A pulse at Péclet 20, a diffusion-dominated pulse at Péclet 1, and a steady
+  supply at Péclet 50, with guided comparisons between them.
+* **Transport scheme.** Finite volume on the flow's own grid: upwind advective fluxes, a five-point
+  diffusive flux, and no flux at all through faces touching a grain, so tracer mass is conserved to
+  round-off and none enters the solid. The step obeys the Courant and diffusive limits.
+* **Checks.** With the flow switched off the plume variance grows as 2·D_m·t to four decimal places;
+  tracer mass is conserved to round-off with grains present; a plume carried by the pore flow
+  spreads faster than molecular diffusion and faster than the scheme's own numerical diffusion; the
+  shipped scene runs and measures (tests/).
+
+The gallery now holds 28 experiments with 51 presets.
+
 ## 1.2.1
 
 Pouring never ran: every attempt failed with exit code 2, and the message did not say why.

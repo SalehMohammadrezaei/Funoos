@@ -92,7 +92,7 @@ const api = {
 
   const cards = $$("#gallery-grid .gcard");
   const exps = fixtures.catalog.groups.flatMap(g => g.experiments);
-  await t("27 experiment cards rendered", async () => { assert.strictEqual(cards.length, exps.length); assert.strictEqual(cards.length, 27); });
+  await t("28 experiment cards rendered", async () => { assert.strictEqual(cards.length, exps.length); assert.strictEqual(cards.length, 28); });
   await t("gallery: start row, phenomenon chips, one metadata line and poster-first cards", async () => {
     $('.railbtn[data-view="gallery"]').click(); await sleep(20);
     assert.ok($$("#gallery-start .gcard").length >= 4, "start row cards");
@@ -106,7 +106,7 @@ const api = {
     assert.strictEqual($("#gallery-start").children.length, 0, "no start row while filtered");
     assert.strictEqual($$("#g-phen .chipbtn").find(c => c.textContent.startsWith(g1.phenomenon)).getAttribute("aria-pressed"), "true");
     $$("#g-phen .chipbtn")[0].click();
-    assert.strictEqual($$("#gallery-grid .gcard").length, 27, "All shows every experiment again");
+    assert.strictEqual($$("#gallery-grid .gcard").length, exps.length, "All shows every experiment again");
   });
 
   await t("every card opens its detail page by click, with layers and related experiments", async () => {

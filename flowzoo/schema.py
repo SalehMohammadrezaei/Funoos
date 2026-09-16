@@ -186,6 +186,14 @@ def _derived(exhibit, params):
             "increase the duration to keep the same physical interval")
         if tau < 0.505:
             add("⚠ τ", "very close to 0.5", "", "the BGK scheme becomes inaccurate/unstable")
+    elif exhibit == "Tracer in Rock":
+        c = engine.effective(exhibit, p)
+        add("grid", f"{c['nx']} × {c['ny']}", "cells"); add("grain radius", f"{c['grain']}", "cells")
+        add("Péclet number", f"{c['pe']:g}", "", "Pe = u·d/D_m; the molecular diffusivity is set from the "
+            "pore speed measured once the flow has settled")
+        add("injection", "steady supply" if c["injection"] == "continuous" else "pulse")
+        add("driving direction", c["fdir"] and "y" or "x")
+        add("flow time steps", f"{c['steps']}", "lattice steps", "the flow is settled first, then held fixed")
     elif exhibit == "Porous Flow":
         c = engine.effective(exhibit, p)
         add("grid", f"{c['nx']} × {c['ny']}", "cells"); add("grain radius", f"{c['grain']}", "cells")

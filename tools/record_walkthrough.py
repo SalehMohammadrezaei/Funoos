@@ -117,7 +117,7 @@ def main():
 
         hl("Explore fluid motion through simulation"); dwell(3400)
 
-        hl("27 experiments, 48 presets, six numerical methods")
+        hl("28 experiments, 51 presets, six numerical methods")
         pg.click('.railbtn[data-view="gallery"]'); dwell(2200)
         pg.hover('#gallery-start .gcard >> nth=1'); dwell(1600)
         pg.click('#g-phen .chipbtn >> nth=5'); dwell(1700)

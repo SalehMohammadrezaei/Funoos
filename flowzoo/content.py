@@ -300,6 +300,32 @@ DETAIL = {
 "• κ∇²c — molecular diffusion, small, smoothing only the very finest filaments\n"
 "• ∇·u = 0 — the stirring flow is incompressible (area-preserving)"),
 },
+"Tracer in Rock": {
+"physics": (
+"Pour a dye into water moving through sand and it does not travel as a neat block. "
+"The pore space is a maze of channels of every width: the wide ones carry fluid "
+"quickly, the tight throats hold it back, and pockets behind grains barely move at "
+"all. A patch of tracer is therefore pulled apart as it goes, some of it arriving "
+"long before the average and some long after. Molecular diffusion, meanwhile, keeps "
+"smearing the sharp edges that stretching creates.\n\n"
+"Together these produce spreading far stronger than diffusion alone, and the effect "
+"has a name: mechanical dispersion. It is why a contaminant plume in groundwater "
+"arrives earlier and lasts longer than a simple estimate suggests, why tracer tests "
+"in oil reservoirs can read the channels between wells, and why a chromatography "
+"column separates what you put through it.\n\n"
+"The Péclet number says which effect leads. It compares how fast the flow carries "
+"the tracer across one grain with how fast diffusion spreads it over the same "
+"distance. Below 1 diffusion smooths everything and the plume stays symmetric. "
+"Above roughly 10 the velocity field takes over, the front steepens and a long tail "
+"appears behind it."),
+"terms": (
+"∂c/∂t — how the tracer concentration changes with time at a point.\n"
+"∇·(u c) — transport by the flow: the tracer rides the pore velocities u.\n"
+"∇·(D_m ∇c) — molecular diffusion, the only spreading put in by hand.\n"
+"c is a fraction of the injected concentration, so it runs from 0 to 1.\n"
+"Dispersion is not a term in this equation: it is what the pore-scale velocities do "
+"to the plume, and it is measured from the result rather than assumed."),
+},
 "Porous Flow": {
 "physics": (
 "Soils, rocks, filters, catalyst beds, even bone — all are porous: solid matrices "
@@ -429,6 +455,12 @@ SETUP = {
   "ic": "Two opposing shear layers with a seeded perturbation (Kelvin–Helmholtz), or a "
         "random divergence-free field (decaying turbulence).",
   "bc": "Periodic in both directions — the natural setting for the pseudo-spectral (FFT) solver."},
+"Tracer in Rock": {
+  "ic": "The pore flow settled first (fluid from rest, driven by the body force), then either a slab of "
+        "tracer across the inlet end of the pore space (pulse) or clean pore space with the inlet held at "
+        "full concentration (steady supply). Grains hold no tracer.",
+  "bc": "Periodic in both directions, as for the flow; no tracer flux through any grain surface "
+        "(∂c/∂n = 0). The velocity field is held fixed while the tracer crosses."},
 "Porous Flow": {
   "ic": "Fluid at rest inside a random grain pack (equilibrium populations at zero velocity), "
         "then accelerated by the body force; the permeability is read from the final state.",
