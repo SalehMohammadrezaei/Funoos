@@ -199,8 +199,8 @@ def test_tracer_pure_diffusion_matches_theory():
 
 
 def test_tracer_conserves_mass_and_stays_out_of_the_grains():
-    """A pulse carried through a grain pack keeps its mass (no flux through grain surfaces) and
-    never puts tracer inside a grain."""
+    """A pulse carried through a grain pack is accounted for exactly (injected = left + still
+    inside) and never puts tracer inside a grain."""
     from flowzoo import transport
     ny, nx = 64, 200
     rng = np.random.default_rng(3)
@@ -212,8 +212,7 @@ def test_tracer_conserves_mass_and_stays_out_of_the_grains():
     u = np.where(solid, 0.0, 0.01 * (1.0 + 0.5 * np.sin(2 * np.pi * yy / ny)))
     v = np.zeros_like(u)
     frames, times, rec = transport.run(u, v, solid, 1e-3, axis="x", injection="pulse", steps=2000, nframes=10)
-    drift = abs(rec["mass"][-1] - rec["mass_initial"]) / rec["mass_initial"]
-    assert drift < 1e-12, drift
+    assert abs(rec["balance"][-1]) / rec["mass_in"][-1] < 1e-12, rec["balance"][-1]
     assert max(float(f[solid].max()) for f in frames) == 0.0
     assert len(frames) == len(times)
 
@@ -245,6 +244,39 @@ def test_tracer_disperses_more_than_molecular_diffusion():
     assert d_eff > rec["numerical_diffusion"], (d_eff, rec["numerical_diffusion"])
 
 
+def test_tracer_outlet_is_open_and_nothing_re_enters():
+    """The sample has a real outlet: a pulse leaves and does not reappear upstream, a steady supply
+    settles at the injected concentration without exceeding it, and the tracer is accounted for
+    exactly in both cases."""
+    from flowzoo import transport
+    ny, nx = 48, 200
+    rng = np.random.default_rng(11)
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    solid = np.zeros((ny, nx), bool)
+    for _ in range(60):
+        cx, cy, r = rng.integers(0, nx), rng.integers(0, ny), rng.uniform(3, 6)
+        solid |= ((xx - cx) ** 2 + (yy - cy) ** 2) <= r * r
+    u = np.where(solid, 0.0, 0.02 * (1.0 + 0.6 * np.sin(2 * np.pi * yy / ny)))
+    v = np.zeros_like(u)
+    tr = transport.Transport(u, v, solid, 1e-3, axis="x").pulse(0.06)
+    steps = int(2.5 * nx / (0.02 * tr.dt))
+    for _ in range(steps):
+        tr.step()
+    assert tr.mass_out > 0.6 * tr.mass_in, (tr.mass_out, tr.mass_in)   # most of the slug has left
+    early = float(tr.c[:, :nx // 10].sum())                            # the inlet end runs clean again
+    assert early < 1e-3 * tr.mass_in, early
+    assert abs(tr.balance()) / tr.mass_in < 1e-12, tr.balance()
+    tr2 = transport.Transport(u, v, solid, 1e-3, axis="x").set_inlet(1.0)
+    for _ in range(steps):
+        tr2.step()
+    assert 0.6 < tr2.outlet_concentration() <= 1.0 + 1e-9, tr2.outlet_concentration()
+    # Nothing can exceed the injected concentration. The bound is the projection's residual
+    # divergence, not round-off: whatever is left of ∇·u acts as dc/dt = −c ∇·u and compounds over
+    # thousands of steps, so an iterative projection buys digits rather than an exact bound.
+    assert float(tr2.c.max()) <= 1.0 + 1e-9, float(tr2.c.max()) - 1.0
+    assert abs(tr2.balance()) / tr2.mass_in < 1e-10, tr2.balance()
+
+
 def test_tracer_scene_runs_and_measures():
     """A short run of the shipped tracer scene produces frames, a breakthrough curve and a
     dispersion measurement."""
@@ -258,7 +290,7 @@ def test_tracer_scene_runs_and_measures():
     m = postproc.metrics(res)
     assert m["peclet"] == params["peclet"]
     assert m.get("dispersion_cells2_per_step", 0) > 0, m
-    assert m.get("tracer_mass_drift", 1.0) < 1e-9, m
+    assert m.get("tracer_mass_balance", 1.0) < 1e-9, m
     assert len(postproc.plots(res)) >= 2
 
 

@@ -198,6 +198,42 @@ upwind fluxes, which add a numerical diffusivity of about u·dx/2. That number i
 the measured spreading, and the diagnostic plot says when the two are too close for the measurement
 to mean anything: raise the resolution or lower the Péclet number.
 
+The sample has an inlet and an outlet. The flow is periodic, and the tracer keeps that periodicity
+across the flow, but along the flow the periodic face is cut: the water still crosses it, the tracer
+does not come round with it. At the outlet the tracer leaves with the water, carrying the interior
+concentration, with no diffusive flux through the boundary, and it never returns. At the inlet the
+arriving water carries a prescribed concentration: zero once a pulse has passed, so nothing
+re-enters, or the injected value for a steady supply. Without that cut the sample has no outlet at
+all: what leaves downstream re-enters upstream, a breakthrough curve reads its own recycled tracer,
+and a steady supply merely fills the box.
+
+Averaging the flow solver's cell-centred velocities onto the faces of this grid leaves a field that
+is only almost divergence-free, and on a grid cut by grains the error is large enough to matter: a
+conservative scheme cannot tell it from a real source of tracer. So the face field is projected
+first. A potential is solved on the pore space by conjugate gradients, with gradients taken only
+across open faces, and its gradient subtracted; in the shipped sample this takes the largest
+discrete divergence from 3.6e-2 to 9.7e-15, in under two tenths of a second. Only then is the
+tracer advanced, and what is left is reported next to the result.
+
+The tolerance is set tight on purpose. Whatever divergence survives acts on the tracer as
+dc/dt = −c ∇·u, which a conservative scheme cannot distinguish from a real source, and it compounds
+over the thousands of steps a crossing takes: at a loose tolerance a steady supply creeps a few
+parts per million above the concentration being injected. Tightened, it holds the injected value to
+twelve digits, so the bound on concentration is the projection's residual rather than round-off.
+
+The breakthrough curve is the flux-averaged concentration over the outlet face, Σuc/Σu: the
+concentration of the water actually leaving, which is what a sampler at the end of a column
+measures. A plain pore average over a slab at the outlet end is reported beside it, but that is not
+what a breakthrough curve means.
+
+Everything crossing the boundary is counted, so
+
+    tracer inside  =  tracer injected  −  tracer that has left
+
+closes to round-off, and that balance is reported as a measurement rather than assumed.
+
 Checks: with the flow switched off the plume variance grows as 2·D_m·t to four decimal places; mass
 is conserved with grains present; a plume in the pore flow spreads faster than molecular diffusion
-alone (tests/test_cases.py).
+alone; a uniform concentration stays exactly uniform, a pulse leaves once and the inlet end runs
+clean again, and a steady supply settles at the injected concentration without exceeding it
+(tests/test_cases.py).

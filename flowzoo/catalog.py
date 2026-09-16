@@ -181,12 +181,14 @@ SCENES = [
              "Raise it to 200: the front steepens and the tail lengthens, but check the plot's warning about "
              "numerical diffusion at coarse grids.",
              "Change the seed only: same porosity, different channels, different arrival time."],
-     "observe": "The breakthrough curve at the outlet and the spreading rate D_eff, both in the diagnostic plots; "
-                "D_eff divided by the molecular value is the dispersion the pore structure produces.",
+     "observe": "The breakthrough curve at the outlet (the flux-averaged concentration of the water leaving) and "
+                "the spreading rate D_eff, both in the diagnostic plots; D_eff divided by the molecular value is the "
+                "dispersion the pore structure produces.",
      "checks": "Analytical comparison for the transport step: with the flow switched off the plume variance grows "
-               "as 2·D_m·t to four decimal places and tracer mass is conserved to round-off with grains present "
-               "(tests/). The dispersion measurement is only meaningful above the numerical diffusion of the "
-               "upwind scheme (u·dx/2), which is reported beside it.",
+               "as 2·D_m·t to four decimal places. The tracer is accounted for exactly (injected = left + still "
+               "inside, to round-off) with grains present and an open outlet, and none enters a grain (tests/). "
+               "The dispersion measurement is only meaningful above the numerical diffusion of the upwind scheme "
+               "(u·dx/2), which is reported beside it.",
      "refs": [R_BEAR, R_TRACER]},
     {"method": LBM, "exhibit": "Tracer in Rock", "key": "tracer_diffusive", "name": "Diffusion-Dominated Tracer",
      "phenomenon": "Porous media", "preset": {"peclet": 1.0, "injection": "Pulse"}, "status": "numerical",
@@ -210,8 +212,9 @@ SCENES = [
      "try": ["Raise the porosity to 0.8: with wider channels the front is smoother and arrives sooner.",
              "Drive along y instead of x on the same sample and compare the arrival time."],
      "observe": "The outlet curve climbing towards 1, and how wide the rise is: a wide rise means a ragged front.",
-     "checks": "Numerical check: with a continuous supply the outlet concentration must approach the inlet value "
-               "and never exceed it; the finite-volume scheme keeps the tracer between 0 and 1.",
+     "checks": "Numerical check: with a steady supply the flux-averaged outlet concentration approaches the inlet "
+               "value and never exceeds it (tests/); the finite-volume scheme keeps the tracer between 0 and 1, and "
+               "the open outlet lets the front leave instead of filling the sample.",
      "refs": [R_BEAR]},
     {"method": LBM, "exhibit": "Porous Flow", "key": "porous_phi60", "name": "Flow Through Porous Rock",
      "phenomenon": "Porous media", "preset": {"porosity": 0.60, "grain": 0.035}, "status": "numerical",

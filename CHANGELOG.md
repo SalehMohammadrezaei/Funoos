@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.1
+
+Boundary conditions for the tracer experiment, reported from use: a steady supply was awkward to
+set up, and the outlet did not behave like an outlet.
+
+* **The sample now has a real outlet.** The flow is periodic and the tracer used to travel round
+  with it, so what left downstream re-entered upstream and a breakthrough curve read its own
+  recycled tracer. The periodic face along the flow is now cut: tracer leaves with the water and
+  does not come back, and the water arriving at the inlet carries a prescribed concentration, clean
+  after a pulse or the injected value for a steady supply. Both flow directions are handled at the
+  cut, so the few faces that run backward drain their cell instead of feeding it.
+* **Breakthrough is measured the way a breakthrough curve is defined.** The curve is now the
+  flux-averaged concentration over the outlet face, Σuc/Σu, the concentration of the water actually
+  leaving. The previous curve was a plain pore average over a slab at the outlet end, which is a
+  different quantity; it is still reported beside it.
+* **The velocity field is made divergence-free before the tracer moves.** Face velocities averaged
+  from the flow solver are only almost divergence-free, and a conservative scheme cannot tell that
+  residue from a real source of tracer. A potential is now solved on the pore space by conjugate
+  gradients and its gradient subtracted, taking the largest discrete divergence from 3.6e-2 to
+  9.7e-15 in the shipped sample, in under two tenths of a second. What is left is reported. The
+  tolerance is tight on purpose: the surviving divergence acts as dc/dt = −c ∇·u and compounds over
+  a crossing, and at a looser setting a steady supply crept a few parts per million above the
+  injected concentration. It now holds that value to twelve digits.
+* **A steady supply is now the default.** "Continuous supply" is the default injection, so the
+  common setup needs no extra step; the pulse is still one click away.
+* **Mass balance is a reported measurement.** Injected minus left minus what is still inside, which
+  closes to round-off, with the fraction that has left the sample beside it. These replace the
+  earlier drift estimate. The dispersion fit now stops once a fifth of the tracer has left, so the
+  fit never runs past the point where the plume is leaving the sample.
+
 ## 1.3.0
 
 A new experiment: **Tracer through rock**, the advection and dispersion of a tracer carried by the

@@ -459,8 +459,11 @@ SETUP = {
   "ic": "The pore flow settled first (fluid from rest, driven by the body force), then either a slab of "
         "tracer across the inlet end of the pore space (pulse) or clean pore space with the inlet held at "
         "full concentration (steady supply). Grains hold no tracer.",
-  "bc": "Periodic in both directions, as for the flow; no tracer flux through any grain surface "
-        "(∂c/∂n = 0). The velocity field is held fixed while the tracer crosses."},
+  "bc": "Across the flow the sample is periodic, as the flow solver is. Along the flow the periodic link is "
+        "cut so the sample has a real inlet and outlet: tracer leaves with the water at the outlet (advective "
+        "flux only, no diffusive flux through the boundary) and never re-enters, and nothing enters from "
+        "outside the inlet. No tracer flux through any grain surface (∂c/∂n = 0). The velocity field is held "
+        "fixed while the tracer crosses."},
 "Porous Flow": {
   "ic": "Fluid at rest inside a random grain pack (equilibrium populations at zero velocity), "
         "then accelerated by the body force; the permeability is read from the final state.",

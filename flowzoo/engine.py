@@ -672,7 +672,7 @@ def _tracer_config(p):
     settled; `pe` and the geometry are what this function fixes)."""
     c = dict(_porous_config(p))
     c["pe"] = float(p.get("peclet", 20.0))
-    c["injection"] = "continuous" if str(p.get("injection", "Pulse")).lower().startswith("cont") else "pulse"
+    c["injection"] = "pulse" if str(p.get("injection", "Continuous supply")).lower().startswith("pul") else "continuous"
     c["pulse_width"] = 0.06
     c["tracer_frames"] = 110
     return c
@@ -893,9 +893,9 @@ def _solve_tracer(p, pr, tmp):
              "porosity": flow.hints.get("porosity"), "permeability": flow.hints.get("permeability"),
              "k_status": flow.hints.get("k_status"), "pore_volume_cells": rec["pore_volume"],
              "t_cross": t_cross, "effective": cfg, **{k: rec[k] for k in
-             ("breakthrough", "centre_cells", "variance_cells2", "mass", "mass_initial",
-              "dt", "u_max", "numerical_diffusion")}}
-    inj = "steady supply" if cfg["injection"] == "continuous" else "pulse"
+             ("breakthrough", "outlet_slab_mean", "centre_cells", "variance_cells2", "mass",
+              "mass_out", "mass_in", "balance", "mass_initial", "dt", "u_max", "numerical_diffusion")}}
+    inj = "steady supply" if cfg["injection"] == "continuous" else "pulse"   # open outlet: tracer leaves
     info = f"tracer · {inj} · Pe={pe:g} · φ={flow.hints.get('porosity', 0):.2f}"
     return Result("tracer", frames, info, mask=solid, hints=hints, times=times)
 
@@ -1397,10 +1397,10 @@ EXHIBITS = {
                       "the breakthrough curve grows a long tail.", hard_min=0.01, hard_max=5000,
                       fixed="the molecular diffusivity follows from Pe and the measured pore speed"),
                    {"name": "injection", "label": "Injection", "type": "choice",
-                    "choices": ["Pulse", "Continuous supply"], "default": "Pulse", "group": "Physics",
-                    "help": "A pulse is a slug of tracer released at the inlet: its mass is conserved and it "
-                            "gives a clean breakthrough curve. A continuous supply holds the inlet at full "
-                            "concentration and shows an advancing front."},
+                    "choices": ["Continuous supply", "Pulse"], "default": "Continuous supply", "group": "Physics",
+                    "help": "A continuous supply holds the inlet at full concentration and sends a front "
+                            "through the sample; the outlet curve climbs towards 1. A pulse releases one slug "
+                            "instead, which passes and leaves, giving a curve that rises, peaks and decays."},
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_tracer(p, pr, t)},
     "Porous Flow": {
@@ -1707,13 +1707,16 @@ META = {
                     "experiment and then held fixed (the pore Reynolds number is far below one, so the "
                     "field does not change while the tracer crosses). The tracer is advanced with a "
                     "finite-volume scheme on the same grid: upwind advective fluxes, a five-point "
-                    "diffusive flux, and no flux at all through faces touching a grain, so tracer mass is "
-                    "conserved to round-off and none enters the solid. The step obeys both the Courant "
-                    "and the diffusive limits. Only molecular diffusion D_m is prescribed, from the "
-                    "Péclet number; the extra spreading is produced by the velocity field itself.",
+                    "diffusive flux, and no flux at all through faces touching a grain, so none enters the "
+                    "solid. Along the flow the periodic link of the flow solver is cut: the outlet is open, so "
+                    "tracer leaves with the water and never re-enters, and the tracer is accounted for exactly "
+                    "as injected = left + still inside. The breakthrough curve is the flux-averaged "
+                    "concentration at the outlet face. The step obeys both the Courant and the diffusive "
+                    "limits. Only molecular diffusion D_m is prescribed, from the Péclet number; the extra "
+                    "spreading is produced by the velocity field itself.",
         "validation": "Analytical comparison: with the flow switched off the plume variance grows as 2·D_m·t "
-                      "to four decimal places, and tracer mass is conserved to round-off with grains present "
-                      "(tests/). First-order upwind advection adds a numerical diffusivity of about u·dx/2, "
+                      "to four decimal places, and the tracer balance (injected = left + still inside) closes to "
+                      "round-off with grains present and an open outlet (tests/). First-order upwind advection adds a numerical diffusivity of about u·dx/2, "
                       "which is reported next to the measured spreading; the measured dispersion is only "
                       "meaningful when it exceeds that number.",
         "demo": "results/gallery/tracer_pulse.gif"},

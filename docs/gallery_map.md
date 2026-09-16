@@ -1,6 +1,6 @@
 # Gallery mapping: scenes → experiments
 
-Version 1.3.0 organises the gallery as **27 experiment cards** holding all **48
+Version 1.3.1 organises the gallery as **28 experiment cards** holding all **51
 presets**. Scene keys (the stable identifiers used by saved setups, favourites,
 recent items, clips and tests) are unchanged; each now belongs to exactly one
 experiment (`flowzoo/catalog.py: EXPERIMENTS`, checked by `catalog.check_experiments()`

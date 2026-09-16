@@ -201,9 +201,13 @@ def metrics(result):
                 dm = float(h.get("dm", 0.0))
                 if dm > 0:
                     m["dispersion_over_molecular"] = float(sl / 2.0 / dm)
-            mass = np.asarray(h.get("mass", []), float); m0 = float(h.get("mass_initial", 0.0))
-            if mass.size and m0 > 0 and h.get("injection") != "continuous":
-                m["tracer_mass_drift"] = float(abs(mass[-1] - m0) / m0)
+            inj = np.asarray(h.get("mass_in", []), float)
+            bal = np.asarray(h.get("balance", []), float)
+            if inj.size and bal.size and inj[-1] > 0:      # injected − left − still inside, relative
+                m["tracer_mass_balance"] = float(abs(bal[-1]) / inj[-1])
+            out = np.asarray(h.get("mass_out", []), float)
+            if out.size and inj.size and inj[-1] > 0:
+                m["fraction_left_the_sample"] = float(out[-1] / inj[-1])
         elif k == "lbm":
             obs = h.get("obstacle", "Cylinder")
             t, sig, _src = _wind_series(result)
@@ -752,17 +756,18 @@ def _particles(result):
 
 
 def _tracer_window(h, t):
-    """Frames to measure spreading over: the sample is periodic, so once the plume has wrapped
-    around and overlapped itself the variance of the profile no longer means anything. Keep the
-    frames up to the first wrap, then use the later half of those."""
+    """Frames to measure spreading over. The outlet is open, so once a good part of the plume has
+    left the sample the variance of what remains is no longer the variance of the plume. Keep the
+    frames until a fifth has left, then use the later half of those."""
     n = len(t)
-    centre = np.asarray(h.get("centre_cells", []), float)
     stop = n
-    if centre.size == n and n > 3:
-        back = np.where(np.diff(centre) < -0.25 * float(h.get("length_cells", n) or n))[0]
-        if back.size:
-            stop = int(back[0]) + 1
-    stop = max(4, stop)
+    out = np.asarray(h.get("mass_out", []), float)
+    inj = np.asarray(h.get("mass_in", []), float)
+    if out.size == n and inj.size == n and inj[-1] > 0:     # stop once a fifth has left the sample
+        gone = np.where(out > 0.2 * inj)[0]
+        if gone.size:
+            stop = int(gone[0])
+    stop = max(4, min(stop, n))
     return slice(stop // 2, stop)
 
 
@@ -788,6 +793,7 @@ def _tracer(result):
     if bt.size == t.size and bt.size > 2:
         fig, ax, plt = _new_ax(f"time ({unit})", "outlet concentration c/c₀", "Breakthrough at the outlet")
         ax.plot(t, bt, color=_CYAN, lw=2.0)
+        ax.set_ylim(0, max(1.02, float(bt.max()) * 1.1))
         t50 = None
         if bt.max() > 0:
             half = bt.max() * 0.5
@@ -798,10 +804,12 @@ def _tracer(result):
                 _legend(ax)
         tc = float(h.get("t_cross", 0.0))
         out.append(("Breakthrough at the outlet", _rgb(fig, plt),
-                    ("Mean tracer concentration in a slab at the outlet end of the sample, pore cells only, at each "
-                     "saved frame. " + ("A steady supply is held at the inlet, so this is the arrival of a front and "
-                     "it approaches 1. " if cont else "A slug was released at the inlet, so the curve rises, peaks and "
-                     "decays; its tail is the tracer held back in slow channels and dead ends. ") +
+                    ("Flux-averaged concentration of the water leaving the sample, Σuc/Σu over the outlet face: "
+                     "what a sampler at the end of a column measures, not a plain average over the last cells. The "
+                     "outlet is open, so tracer leaves and never returns. " +
+                     ("A steady supply is held at the inlet, so this is a front arriving and the curve climbs towards "
+                      "1. " if cont else "A slug was released at the inlet, so the curve rises, peaks and decays; its "
+                      "tail is the tracer held back in slow channels and dead ends. ") +
                      f"One pore-volume crossing at the mean advective speed takes about {tc:.3g} {unit}" +
                      (f", and half of the peak arrives at {t50:.3g}. " if t50 is not None else ". ") +
                      "Arrival earlier than the crossing time means the tracer found fast channels.")))
@@ -828,7 +836,7 @@ def _tracer(result):
         out.append(("How fast the plume spreads", _rgb(fig, plt),
                     (f"Variance of the pore-averaged concentration profile along the flow. For pure diffusion it "
                      f"grows as 2·D_m·t; the slope of the measured curve, fitted while the plume is still "
-                     f"travelling forward (the sample is periodic, so the fit stops before it wraps), gives an "
+                     f"inside the sample (the fit stops once a fifth has left through the open outlet), gives an "
                      f"effective spreading coefficient "
                      f"D_eff = {deff:.2e} cells²/step, which is {ratio:.0f} times the molecular value at Pe = {pe:g}. "
                      f"That excess is mechanical dispersion: neighbouring channels carry the tracer at different "
