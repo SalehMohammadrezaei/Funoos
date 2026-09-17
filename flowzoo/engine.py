@@ -151,7 +151,8 @@ class SolverError(subprocess.CalledProcessError):
         return lines[-1] if lines else ""
 
     def __str__(self):
-        what = {2: "the solver rejected this setup", 3: "the solver could not write its output"}.get(
+        what = {2: "the solver rejected this setup", 3: "the solver could not write its output",
+                4: "the calculation went unstable"}.get(
             self.returncode, "the solver stopped")
         r = self.reason()
         return f"{what}: {r} (exit code {self.returncode})" if r else f"{what} (exit code {self.returncode})"

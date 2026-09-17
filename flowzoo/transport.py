@@ -26,7 +26,10 @@ the water still crosses the periodic face, but the tracer does not follow it rou
 the sample's inlet and outlet.
 
 * **Outlet**: open. Tracer leaves with the water (advective flux only; no diffusive flux through
-  the boundary, the usual outflow condition) and never comes back.
+  the boundary, the usual outflow condition) and never comes back. A few outlet faces can run
+  backwards; the water they draw in comes from the sample's own effluent region, which is clean
+  (`c_out`, zero here). Feeding those faces the injected concentration would put tracer into the
+  downstream end of the sample ahead of the front, which is not an outlet at all.
 * **Inlet**: the arriving water carries a prescribed concentration: zero for a pulse, so nothing
   re-enters once the slug has gone, or the injected value for a steady supply.
 
@@ -61,6 +64,11 @@ here, not an approximation for convenience.
 import numpy as np
 
 __all__ = ["Transport", "numerical_diffusion", "project"]
+
+
+# Below this, a negative concentration is round-off in a monotone update; above it, something is
+# actually wrong. Concentrations here are order 1 (the injected value), so this is an absolute bound.
+_NEGATIVE_TOLERANCE = 1e-10
 
 
 def numerical_diffusion(u_max, dx):
@@ -145,8 +153,14 @@ class Transport:
         self.c = np.zeros((self.ny, self.nx), dtype=np.float64)
         self.t = 0.0
         self.c_in = 0.0                     # concentration of the water arriving at the inlet
-        self.mass_in = 0.0                  # tracer injected (the slug, plus what the inflow brings)
-        self.mass_out = 0.0                 # tracer that has left through the outlet
+        self.c_out = 0.0                    # concentration outside the outlet (the effluent region)
+        self.mass_initial = 0.0             # tracer placed in the sample at t = 0 (a slug)
+        # Every crossing is counted at the end it crosses and in the direction it goes, so a
+        # breakthrough and a loss back out of the inlet are never added into the same number.
+        self.inlet_in = 0.0                 # arrived through the inlet
+        self.inlet_out = 0.0                # left backwards through the inlet
+        self.outlet_out = 0.0               # left through the outlet (the breakthrough)
+        self.outlet_in = 0.0                # drawn back in through a reversed outlet face
         # a face is open where both neighbouring cells are pore space
         self.open_x = self.fluid & np.roll(self.fluid, -1, axis=1)      # face between (i) and (i+1) in x
         self.open_y = self.fluid & np.roll(self.fluid, -1, axis=0)
@@ -160,11 +174,36 @@ class Transport:
         else:
             self.div_u_max = self.div_u_before
         self.u_max = float(max(np.abs(self.uf_x).max(initial=0.0), np.abs(self.uf_y).max(initial=0.0)))
-        adv = self.dx / self.u_max if self.u_max > 0 else np.inf
-        dif = self.dx * self.dx / (4.0 * self.dm) if self.dm > 0 else np.inf
-        self.dt = float(safety * min(adv, dif))
+        # The step has to keep the update monotone, and that is one condition on the whole update,
+        # not two conditions met separately: a cell can satisfy the Courant limit and the diffusive
+        # limit on their own and still be emptied past zero by advection and diffusion acting
+        # together. So the limit is assembled per cell, from everything that drains it.
+        #
+        #   lambda = (advection out through each face)/dx  +  D_m (open faces)/dx^2
+        #   dt     = safety / max(lambda)
+        #
+        # Advection only drains a cell through a face whose velocity points out of it, and upwind
+        # takes that at the cell's own concentration, so the outgoing part is what counts.
+        ux_r, uy_u = self.uf_x, self.uf_y                       # the cell's right and upper face
+        ux_l = np.roll(self.uf_x, 1, axis=1)                    # its left face is the previous one
+        uy_d = np.roll(self.uf_y, 1, axis=0)
+        out_rate = (np.maximum(ux_r, 0.0) + np.maximum(-ux_l, 0.0)
+                    + np.maximum(uy_u, 0.0) + np.maximum(-uy_d, 0.0)) / self.dx
+        # Diffusion crosses open faces only, and never the cut: step() overwrites that face with
+        # the boundary flux, so it carries no diffusive term and must not be counted here.
+        dif_x, dif_y = self.open_x.copy(), self.open_y.copy()
+        if self.axis == "x":
+            dif_x[:, -1] = False
+        else:
+            dif_y[-1, :] = False
+        faces = (dif_x.astype(np.float64) + np.roll(dif_x, 1, axis=1)
+                 + dif_y.astype(np.float64) + np.roll(dif_y, 1, axis=0))
+        lam = out_rate + self.dm * faces / (self.dx * self.dx)
+        lam_max = float(lam[self.fluid].max(initial=0.0))
+        self.dt = float(safety / lam_max) if lam_max > 0 else float("inf")
         if not np.isfinite(self.dt) or self.dt <= 0:
             raise ValueError("tracer step is not positive: the velocity field and diffusivity are both zero")
+        self.clipped_mass = 0.0      # tracer removed by round-off clipping, reported, never hidden
         # the face where the tracer's domain is cut: the sample's inlet and outlet
         self.uf_boundary = (self.uf_x[:, -1] if self.axis == "x" else self.uf_y[-1, :]).copy()
         self.pore_volume = float(self.fluid.sum())
@@ -181,7 +220,7 @@ class Transport:
             self.c[:w, :] = amplitude
         self.c[self.solid] = 0.0
         self.c_in = 0.0
-        self.mass_in = float(self.c.sum())
+        self.mass_initial = float(self.c.sum())
         return self
 
     def set_inlet(self, value=1.0):
@@ -200,37 +239,67 @@ class Transport:
             fx -= np.where(self.open_x, self.dm * (cxp - c) / self.dx, 0.0)
             fy -= np.where(self.open_y, self.dm * (cyp - c) / self.dx, 0.0)
         ub = self.uf_boundary
-        c_last = c[:, -1] if self.axis == "x" else c[-1, :]                   # last cell before the cut
-        c_first = c[:, 0] if self.axis == "x" else c[0, :]
-        # At the cut the water keeps flowing, but the tracer does not come round with it: what
-        # leaves carries the interior concentration, what arrives carries c_in, and no diffusion
-        # crosses the boundary.
-        # Whichever side of the cut is upstream loses tracer; the downstream side receives the
-        # arriving concentration. Most faces run outward, but a few can run backward, and those
-        # must drain their cell rather than feed it.
+        c_last = c[:, -1] if self.axis == "x" else c[-1, :]                   # last cell, at the outlet
+        c_first = c[:, 0] if self.axis == "x" else c[0, :]                    # first cell, at the inlet
+        # The cut is two separate boundaries that happen to share one face velocity: the outlet at
+        # the downstream edge of the sample and the inlet at the upstream edge. What crosses each
+        # depends on which way that face runs, and the four cases carry different concentrations:
+        #
+        #   outlet, ub >= 0 : water leaves, carrying the interior concentration
+        #   outlet, ub <  0 : water is drawn in from the effluent region, which is clean (c_out)
+        #   inlet,  ub >= 0 : water arrives, carrying the feed (c_in)
+        #   inlet,  ub <  0 : water leaves backwards, carrying the interior concentration
+        #
+        # The outlet's reversed case is the one that matters: handing it c_in would inject tracer
+        # into the downstream end of the sample before anything had travelled there.
         out_side = ub >= 0.0
-        f_last = np.where(out_side, ub * c_last, ub * self.c_in)      # the face as the last cell sees it
-        f_first = np.where(out_side, ub * self.c_in, ub * c_first)    # the face as the first cell sees it
+        f_out = np.where(out_side, ub * c_last, ub * self.c_out)      # flux through the outlet face
+        f_in = np.where(out_side, ub * self.c_in, ub * c_first)       # flux through the inlet face
         if self.axis == "x":
-            fx[:, -1] = f_last
+            fx[:, -1] = f_out
         else:
-            fy[-1, :] = f_last
+            fy[-1, :] = f_out
         div = _divergence(fx, fy, self.dx)
         if self.axis == "x":
-            div[:, 0] += (f_last - f_first) / self.dx
+            div[:, 0] += (f_out - f_in) / self.dx
         else:
-            div[0, :] += (f_last - f_first) / self.dx
+            div[0, :] += (f_out - f_in) / self.dx
         c -= self.dt * div
         c[self.solid] = 0.0
-        np.clip(c, 0.0, None, out=c)
-        leaving = np.clip(f_last, 0.0, None) + np.clip(-f_first, 0.0, None)
-        arriving = np.clip(f_first, 0.0, None) + np.clip(-f_last, 0.0, None)
-        self.mass_out += float(self.dt * leaving.sum() / self.dx)
-        self.mass_in += float(self.dt * arriving.sum() / self.dx)
+        # With the step above the update is monotone, so a negative concentration here is either
+        # round-off or a real defect. Round-off is clipped and its mass recorded; anything larger
+        # is raised, because clipping it away would turn a broken calculation into a plausible
+        # picture and silently create tracer (the clip adds back exactly what it removes).
+        low = float(c.min())
+        if low < 0.0:
+            if low < -_NEGATIVE_TOLERANCE:
+                raise ValueError(
+                    f"tracer concentration went to {low:.3e}: the transport step is not monotone "
+                    f"(dt={self.dt:.6g}); this is a solver defect, not a setting to adjust")
+            self.clipped_mass += float(-c[c < 0.0].sum())
+            np.clip(c, 0.0, None, out=c)
+        d = self.dt / self.dx                                          # positive flux runs downstream
+        self.outlet_out += float(d * np.clip(f_out, 0.0, None).sum())
+        self.outlet_in += float(d * np.clip(-f_out, 0.0, None).sum())
+        self.inlet_in += float(d * np.clip(f_in, 0.0, None).sum())
+        self.inlet_out += float(d * np.clip(-f_in, 0.0, None).sum())
         self.t += self.dt
         return self
 
     # ---------------------------------------------------------------- measurements
+    @property
+    def mass_in(self):
+        """Everything that has entered: the slug placed at t = 0, plus what has crossed inwards at
+        either end. With a clean effluent region `outlet_in` is zero, and it is kept separate so
+        that a sample which does draw water back in cannot hide it inside the inlet total."""
+        return self.mass_initial + self.inlet_in + self.outlet_in
+
+    @property
+    def mass_out(self):
+        """Everything that has left, through the outlet (the breakthrough) or backwards out of the
+        inlet. `outlet_out` alone is the breakthrough."""
+        return self.outlet_out + self.inlet_out
+
     def mass(self):
         return float(self.c.sum())
 
@@ -265,14 +334,21 @@ class Transport:
         return np.divide(num, den, out=np.zeros_like(num), where=den > 0)
 
     def moments(self):
-        """(centre of mass, variance) of the plume along the flow direction, in cells."""
-        p = self.profile()
-        s = float(p.sum())
+        """(centre of mass, variance) of the plume along the flow direction, in cells.
+
+        Weighted by the tracer each slice actually holds, not by its pore-averaged concentration.
+        The two differ wherever the pore space does: a slice with one pore cell and a slice with
+        twenty hold very different amounts at the same concentration, and averaging first would
+        give them equal say in where the plume is and how wide it has become.
+        """
+        fl = self.fluid.astype(np.float64)
+        m = (self.c * fl).sum(axis=0) if self.axis == "x" else (self.c * fl).sum(axis=1)
+        s = float(m.sum())
         if s <= 0:
             return 0.0, 0.0
-        x = np.arange(p.size, dtype=np.float64)
-        mean = float((p * x).sum() / s)
-        var = float((p * (x - mean) ** 2).sum() / s)
+        x = np.arange(m.size, dtype=np.float64)
+        mean = float((m * x).sum() / s)
+        var = float((m * (x - mean) ** 2).sum() / s)
         return mean, var
 
 
@@ -283,6 +359,10 @@ def run(ux, uy, solid, dm, axis="x", injection="continuous", steps=4000, nframes
     Returns (frames, times, record); the record holds the breakthrough curve (flux-averaged at the
     open outlet), the plume moments, and the injected/left/remaining masses at every frame.
     """
+    if injection not in ("continuous", "pulse"):
+        # Anything else used to fall through to a pulse, so a caller asking for "steady" quietly
+        # got the opposite experiment and a plausible-looking result.
+        raise ValueError(f"injection must be 'continuous' or 'pulse', not {injection!r}")
     tr = Transport(ux, uy, solid, dm, axis=axis, safety=safety)
     if injection == "continuous":
         tr.set_inlet(1.0)
@@ -310,6 +390,8 @@ def run(ux, uy, solid, dm, axis="x", injection="continuous", steps=4000, nframes
            "breakthrough": bt, "outlet_slab_mean": slab, "centre_cells": centre,
            "variance_cells2": var, "mass": mass, "mass_out": out, "mass_in": inj,
            "balance": bal, "mass_initial": inj[0] if inj else 0.0,
-           "dt": tr.dt, "u_max": tr.u_max, "dm": tr.dm,
+           "dt": tr.dt, "u_max": tr.u_max, "dm": tr.dm, "injection": injection,
+           # what round-off clipping removed, reported rather than absorbed silently
+           "clipped_mass": tr.clipped_mass,
            "numerical_diffusion": numerical_diffusion(tr.u_max, tr.dx), "pore_volume": tr.pore_volume}
     return frames, times, rec

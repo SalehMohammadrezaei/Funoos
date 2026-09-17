@@ -139,12 +139,29 @@ int main(int argc, char** argv) {
     auto save_frame = [&](int step) {
             if (a.periodic) permh << step << "," << perm_now() << "\n";
             std::vector<float> buf(2*N);
-            #pragma omp parallel for schedule(static)
+            int bad = 0;                     // set by any thread that meets a state that is not one
+            #pragma omp parallel for schedule(static) reduction(|:bad)
             for (int j=0;j<ny;j++) for (int i=0;i<nx;i++) {
                 int s=j*nx+i; double rho=0,ux=0,uy=0;
                 for (int k=0;k<NQ;k++){ rho+=f[k*N+s]; ux+=cx[k]*f[k*N+s]; uy+=cy[k]*f[k*N+s]; }
-                buf[s]   = (float)((ux+0.5*(a.fdir?0.0:a.force))/rho);   // same velocity definition as collision
-                buf[N+s] = (float)((uy+0.5*(a.fdir?a.force:0.0))/rho);
+                double vx=(ux+0.5*(a.fdir?0.0:a.force))/rho;   // same velocity definition as collision
+                double vy=(uy+0.5*(a.fdir?a.force:0.0))/rho;
+                // A result is only a result if the state behind it is admissible: density finite and
+                // positive, velocity finite, and speed below the lattice sound speed 1/sqrt(3). That
+                // is the scheme's own limit, not a tuned margin: past it D2Q9 has stopped modelling
+                // anything. Without this the run completes, writes NaN frames, and the app renders
+                // them as a video.
+                if (!solid[s] && (!std::isfinite(rho) || rho<=0.0
+                                  || !std::isfinite(vx) || !std::isfinite(vy)
+                                  || vx*vx+vy*vy > (1.0/3.0))) bad = 1;
+                buf[s]   = (float)vx;
+                buf[N+s] = (float)vy;
+            }
+            if (bad) {
+                fprintf(stderr,"error: the calculation went unstable at step %d "
+                        "(density or speed left the range the lattice can represent, tau=%.5f, U=%.4f); "
+                        "no usable result was produced\n", step, a.tau, a.U);
+                exit(4);
             }
             char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nframes);
             std::ofstream of(fn,std::ios::binary);

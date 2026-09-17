@@ -194,7 +194,12 @@ def metrics(result):
                 if bt[i] >= half:
                     m["arrival_time_t50"] = float(t[i])
             var = np.asarray(h.get("variance_cells2", []), float)
-            if var.size > 4 and t.size == var.size:      # spreading rate: variance grows as 2 D_eff t
+            # A pulse has a plume, and the growth of its variance is a dispersion measurement. A
+            # steady supply does not: the tracer fills a growing part of the sample, so this number
+            # rises even when there is nothing to disperse it. Uniform flow through a sample with no
+            # grains at all, where mechanical dispersion is exactly zero, reports thousands of times
+            # the molecular value. There is no coefficient to report in that case, so none is.
+            if var.size > 4 and t.size == var.size and h.get("injection") != "continuous":
                 half = _tracer_window(h, t)
                 sl = np.polyfit(t[half], var[half], 1)[0]
                 m["dispersion_cells2_per_step"] = float(sl / 2.0)
@@ -815,7 +820,7 @@ def _tracer(result):
                      "Arrival earlier than the crossing time means the tracer found fast channels.")))
 
     # ── 2) spreading: variance against time, slope = 2 D_eff ────────────────────────
-    if var.size == t.size and var.size > 6:
+    if var.size == t.size and var.size > 6 and not cont:
         fig, ax, plt = _new_ax(f"time ({unit})", "plume variance σ² (cells²)", "How fast the plume spreads")
         ax.plot(t, var, color=_GOOD, lw=2.0, label="measured")
         half = _tracer_window(h, t)
@@ -839,9 +844,22 @@ def _tracer(result):
                      f"inside the sample (the fit stops once a fifth has left through the open outlet), gives an "
                      f"effective spreading coefficient "
                      f"D_eff = {deff:.2e} cells²/step, which is {ratio:.0f} times the molecular value at Pe = {pe:g}. "
-                     f"That excess is mechanical dispersion: neighbouring channels carry the tracer at different "
-                     f"speeds, so the plume is stretched. Numerical diffusion of the upwind scheme here is about "
-                     f"{dnum:.2e}. " + trust)))
+                     f"Spreading beyond the molecular value is mechanical dispersion, neighbouring channels "
+                     f"carrying the tracer at different speeds, so long as it also stands clear of the scheme's "
+                     f"own numerical diffusion, which here is about {dnum:.2e}. " + trust)))
+
+    elif var.size == t.size and var.size > 6:
+        fig, ax, plt = _new_ax(f"time ({unit})", "spread of the tracer σ² (cells²)",
+                               "How far the tracer has spread")
+        ax.plot(t, var, color=_GOOD, lw=2.0)
+        out.append(("How far the tracer has spread", _rgb(fig, plt),
+                    ("Second moment of the tracer along the flow, weighted by the tracer each slice holds. "
+                     "With a steady supply this is not a dispersion measurement, and none is reported: the "
+                     "tracer fills a growing part of the sample, so this curve rises even when there is "
+                     "nothing to disperse it. A uniform flow through a sample with no grains at all, where "
+                     "mechanical dispersion is exactly zero, still produces a rising curve here. To measure "
+                     "dispersion, release a pulse instead and read the spreading plot there; what this "
+                     "experiment measures is the breakthrough curve above.")))
 
     # ── 3) profiles along the flow at three times ───────────────────────────────────
     n = result.nframes

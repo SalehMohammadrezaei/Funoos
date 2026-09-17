@@ -128,7 +128,39 @@ def validate(exhibit, params, allow_outside=False):
             else:
                 v.errors.append(msg + " — enable advanced mode to explore beyond it")
         v.params[name] = val
+    _native_limits(exhibit, v)
     return v
+
+
+def _native_limits(exhibit, v):
+    """Constraints the solver itself enforces, checked on the combination rather than on any one
+    control.
+
+    Some limits cannot be expressed per control because the solver's own quantity is built from
+    several of them: the lattice relaxation time is τ = ½ + 3·U·D/Re, so speed, body size and
+    Reynolds number are each perfectly reasonable on their own and still land outside what the
+    solver can integrate. These are errors in every mode. Advanced mode widens the range worth
+    exploring; it does not change what the solver can do, and letting a run start that the solver
+    will refuse costs the user the run and reports it as though they had mis-set a control.
+    """
+    if v.errors:                 # a control is already wrong; resolve those before the combination
+        return
+    from . import engine
+    try:
+        if exhibit == "Wind Tunnel":
+            c = engine._wt_config(v.params)
+            tau, U = c["tau"], c["U"]
+            if not 0.5 < tau <= 10.0:
+                v.errors.append(
+                    f"relaxation time τ = {tau:.3f} is outside the solver's range (0.5, 10]. "
+                    f"τ = ½ + 3·U·D/Re, so this combination of inflow speed, body size and Reynolds "
+                    f"number cannot be integrated: raise the Reynolds number, lower the speed, or "
+                    f"use a smaller body.")
+            if abs(U) > 0.5:
+                v.errors.append(
+                    f"inflow speed |U| = {abs(U):.3f} is above the solver's limit of 0.5 lattice units")
+    except Exception:            # noqa: BLE001 - never let this check invalidate an otherwise valid run
+        return
 
 
 def _u(q):

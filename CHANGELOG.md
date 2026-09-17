@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+Fixes from an external numerical audit of 1.3.1. Each was reproduced first, and each now has a
+test that fails without the fix.
+
+* **The tracer outlet no longer feeds the sample.** A few outlet faces run backwards, and the water
+  they drew in was given the *injected* concentration, so a steady supply put tracer into the
+  downstream end of the sample before any had travelled there. Backflow now draws from the effluent
+  region, which is clean. The mass balance could not catch this: the tracer arrived through a
+  counted boundary, so the books closed while the result was wrong. Each end is now counted in each
+  direction separately, so a breakthrough and a loss back out of the inlet are never the same number.
+* **The transport step keeps the update monotone.** The step came from the Courant limit and the
+  diffusive limit checked separately, which together can still drain a cell past zero; the negative
+  was then clipped away, which creates tracer, since the clip adds back exactly what it removes. One
+  combined per-cell limit now sets the step. Round-off clipping is reported (`clipped_mass`);
+  anything larger stops the run instead of being hidden.
+* **Plume moments weigh tracer, not concentration.** Moments were taken over the pore-averaged
+  profile, so a slice holding one pore cell counted as much as a slice holding twenty. On a sample
+  with uneven porosity this put the plume in the wrong place: a test case whose centre of mass is at
+  3.0 was reported at 2.0.
+* **No dispersion coefficient is claimed for a steady supply.** The spreading fit assumes a plume,
+  and a steady supply has a growing filled region instead, whose second moment rises with nothing
+  dispersing it. Uniform flow through a sample with *no grains*, where mechanical dispersion is
+  exactly zero, reported 74,805 times the molecular value, and 15 times the scheme's own numerical
+  diffusion, so the plot's own trustworthiness check vouched for it. The steady-supply plot now
+  reports the spread without claiming a coefficient, and the pulse text no longer asserts that
+  spreading above molecular *is* mechanical dispersion without the numerical-diffusion caveat.
+* **An unstable calculation stops instead of returning a video.** Ordinary accepted wind-tunnel
+  settings (Low, Re 1200, speed 0.15, size 0.30) produced 87 non-finite frames out of 98 while the
+  solver exited successfully and the app rendered them. Every saved state is now checked for a
+  finite positive density and a speed below the lattice sound speed, and a run that leaves that
+  range stops with exit code 4 and says so, rather than completing.
+* **The solver's combined limits are checked before launch.** The relaxation time is built from
+  speed, body size and Reynolds number together, so no single control can be bounded to keep it in
+  range. Advanced mode accepted settings giving tau 16.7 against a solver limit of 10, which cost
+  the user the run. That combination is now refused in both modes, with the reason.
+* **An unknown injection is refused.** `transport.run(injection="steady")` silently ran a pulse and
+  returned a plausible result for the wrong experiment.
+
 ## 1.3.1
 
 Boundary conditions for the tracer experiment, reported from use: a steady supply was awkward to

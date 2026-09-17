@@ -294,6 +294,70 @@ def test_tracer_scene_runs_and_measures():
     assert len(postproc.plots(res)) >= 2
 
 
+def test_tracer_outlet_draws_clean_water_not_the_feed():
+    """A reversed outlet face draws water in from outside the sample, and outside is clean. Handing
+    it the injected concentration puts tracer into the downstream end before any has travelled
+    there, which is precisely what having an outlet is meant to prevent. A mass balance cannot
+    catch this on its own: the tracer arrives through a counted boundary, so the books still close."""
+    from flowzoo import transport
+    u = np.full((16, 128), 0.02)
+    u[0, :] = -0.002                                   # one lane runs backwards through the outlet
+    tr = transport.Transport(u, np.zeros_like(u), np.zeros_like(u, bool), 1e-3)
+    assert int((tr.uf_boundary < 0).sum()) > 0, "this test needs a reversed outlet face to mean anything"
+    tr.set_inlet(1.0).step()
+    assert float(tr.c[:, -1].max()) == 0.0, float(tr.c[:, -1].max())
+    assert tr.outlet_in == 0.0, tr.outlet_in
+
+
+def test_tracer_step_is_monotone_when_advection_and_diffusion_act_together():
+    """Satisfying the Courant limit and the diffusive limit separately is not enough: acting
+    together they can drain a cell past zero in one step. Clipping the result back to zero would
+    hide that and create tracer, since the clip adds back exactly what it removes."""
+    from flowzoo import transport
+    u = np.ones((16, 16))
+    tr = transport.Transport(u, u, np.zeros_like(u, bool), 0.25)
+    tr.c[8, 8] = 1.0
+    tr.mass_initial = 1.0
+    tr.step()
+    assert float(tr.c.min()) >= 0.0, float(tr.c.min())
+    assert abs(tr.mass() - 1.0) < 1e-12, tr.mass()
+    assert tr.clipped_mass == 0.0, tr.clipped_mass
+
+
+def test_plume_moments_weigh_tracer_not_pore_averaged_concentration():
+    """Slices of the sample hold different amounts of pore space. Averaging concentration within a
+    slice before taking moments gives a slice with one pore cell the same say as a slice with
+    twenty, and puts the plume in the wrong place."""
+    from flowzoo import transport
+    ny, nx = 4, 8
+    solid = np.ones((ny, nx), bool)
+    solid[0, 0] = False                                # one pore cell at x = 0
+    solid[0:3, 4] = False                              # three pore cells at x = 4
+    z = np.zeros((ny, nx))
+    tr = transport.Transport(z, z, solid, 1e-3, axis="x", project_field=False)
+    tr.c[~solid] = 1.0
+    centre, _ = tr.moments()
+    assert abs(centre - 3.0) < 1e-12, centre           # (1 cell at 0 + 3 cells at 4) / 4 cells
+
+
+def test_unstable_wind_tunnel_stops_instead_of_returning_non_finite_frames():
+    """A setting the validator accepts can still go unstable. When it does the run has to stop and
+    say so: returning frames full of non-finite values lets the app render a video of a calculation
+    that never happened, and reports it as a completed experiment."""
+    from flowzoo import schema
+    v = schema.validate("Wind Tunnel", dict(resolution="Low (fast)", duration=0.2,
+                                            reynolds=1200, speed=0.15, size=0.3))
+    assert v.ok, v.errors
+    try:
+        res = engine.solve_exhibit("Wind Tunnel", v.params)
+    except engine.SolverError as e:
+        assert e.returncode == 4, e.returncode
+        assert "unstable" in str(e).lower(), str(e)
+    else:
+        bad = [i for i, f in enumerate(res.raw) if not np.isfinite(np.asarray(f)).all()]
+        assert not bad, f"{len(bad)} of {len(res.raw)} frames were non-finite yet returned as a result"
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
