@@ -213,6 +213,12 @@ def metrics(result):
             out = np.asarray(h.get("mass_out", []), float)
             if out.size and inj.size and inj[-1] > 0:
                 m["fraction_left_the_sample"] = float(out[-1] / inj[-1])
+            # How well the frozen-flow approximation holds, and how much of the requested
+            # experiment actually ran. Both are measurements, so both are reported.
+            if h.get("pore_reynolds") is not None:
+                m["pore_reynolds"] = float(h["pore_reynolds"])
+            if h.get("crossings_run") is not None:
+                m["pore_volume_crossings"] = float(h["crossings_run"])
         elif k == "lbm":
             obs = h.get("obstacle", "Cylinder")
             t, sig, _src = _wind_series(result)
@@ -793,6 +799,17 @@ def _tracer(result):
     var = np.asarray(h.get("variance_cells2", []), float)
     dm = float(h.get("dm", 0.0)); dnum = float(h.get("numerical_diffusion", 0.0))
     pe = float(h.get("peclet", 0.0)); cont = h.get("injection") == "continuous"
+    # Conditions under which these numbers are not the experiment they appear to be.
+    _notes = []
+    if h.get("flow_settled") is False:
+        _notes.append("the flow had not settled when it was frozen")
+    if float(h.get("pore_reynolds", 0.0)) > 1.0:
+        _notes.append(f"the pore Reynolds number is {float(h['pore_reynolds']):.3g}, so this is not the "
+                      f"creeping flow that holding the field fixed assumes")
+    if h.get("truncated"):
+        _notes.append(f"the step budget stopped the run after {float(h.get('crossings_run', 0.0)):.3g} of the "
+                      f"{float(h.get('crossings_requested', 0.0)):.3g} pore-volume crossings asked for")
+    _caveat = (" Treat this as qualitative: " + "; ".join(_notes) + ".") if _notes else ""
 
     # ── 1) breakthrough at the outlet ───────────────────────────────────────────────
     if bt.size == t.size and bt.size > 2:
@@ -817,7 +834,7 @@ def _tracer(result):
                       "tail is the tracer held back in slow channels and dead ends. ") +
                      f"One pore-volume crossing at the mean advective speed takes about {tc:.3g} {unit}" +
                      (f", and half of the peak arrives at {t50:.3g}. " if t50 is not None else ". ") +
-                     "Arrival earlier than the crossing time means the tracer found fast channels.")))
+                     "Arrival earlier than the crossing time means the tracer found fast channels." + _caveat)))
 
     # ── 2) spreading: variance against time, slope = 2 D_eff ────────────────────────
     if var.size == t.size and var.size > 6 and not cont:

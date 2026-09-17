@@ -182,21 +182,35 @@ The tracer obeys
     ∂c/∂t + ∇·(u c) = ∇·(D_m ∇c)
 
 on the same grid as the pore flow, with no flux through grain surfaces. The velocity field u is the
-settled pore flow, held fixed: at pore Reynolds numbers far below one it does not change while the
-tracer crosses, so this is exact here rather than a convenience.
+pore flow, held fixed while the tracer crosses. That is an approximation, and how well it holds is
+measured rather than asserted: the pore Reynolds number is computed from the field that is actually
+frozen, and the run records whether the permeability had stopped moving. It holds when the flow is
+slow and settled, and it does not always hold at settings the app accepts. A driving force of 4 with
+grain 0.07 and porosity 0.85, every one of them inside the recommended range, reaches a pore
+Reynolds number near 11 with the flow still transient. The run then says so on its diagnostics, and
+its numbers are qualitative.
 
 Only the molecular diffusivity D_m appears. It is set from the Péclet number the user chooses,
-Pe = u·d/D_m, with u the pore-average speed measured once the flow has settled and d the grain
-size. Everything beyond molecular diffusion that the plume shows, the stretching, the early
-arrival, the long tail, is produced by the velocity field itself: neighbouring channels carry the
-tracer at different speeds. That is mechanical dispersion, and the experiment measures it rather
-than assuming it.
+Pe = u·r/D_m, with u the pore-average speed measured from the flow and r the grain **radius** in
+cells. Péclet numbers for packed beds are more often quoted on the grain diameter, so a Péclet
+number here is twice the diameter-based one; the convention is kept because the presets and the
+shipped clips were made with it. Everything beyond molecular diffusion that the plume shows, the
+stretching, the early arrival, the long tail, is produced by the velocity field itself:
+neighbouring channels carry the tracer at different speeds. That is mechanical dispersion, and a
+pulse measures it rather than assuming it. A steady supply does not: the tracer fills a growing
+part of the sample, so its second moment climbs with nothing dispersing it, and no dispersion
+coefficient is reported for that case.
 
 The scheme is finite volume: what leaves one cell through a face enters the next, so tracer mass is
 conserved to round-off, and faces touching a grain carry nothing at all. Advection uses first-order
 upwind fluxes, which add a numerical diffusivity of about u·dx/2. That number is reported next to
 the measured spreading, and the diagnostic plot says when the two are too close for the measurement
 to mean anything: raise the resolution or lower the Péclet number.
+
+The step count is capped. At low Péclet the diffusive limit makes the step small, so the cap can
+bind long before the tracer has crossed the sample. The run then reports how much of a pore-volume
+crossing it actually covered, rather than presenting a fraction of the experiment as the whole of
+it: comparing Péclet numbers is only meaningful between runs that covered the same ground.
 
 The sample has an inlet and an outlet. The flow is periodic, and the tracer keeps that periodicity
 across the flow, but along the flow the periodic face is cut: the water still crosses it, the tracer

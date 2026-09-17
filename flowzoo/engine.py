@@ -668,9 +668,12 @@ def _porous_config(p):
 
 def _tracer_config(p):
     """The porous sample, plus what the tracer needs. The molecular diffusivity follows from the
-    Péclet number the user sets: Pe = u_pore · d_grain / D_m, with u_pore the pore-average speed
-    measured by the flow itself (filled in by the runner, which knows it only after the flow has
-    settled; `pe` and the geometry are what this function fixes)."""
+    Péclet number the user sets: Pe = u_pore · r_grain / D_m, with u_pore the pore-average speed
+    measured by the flow itself and r_grain the grain **radius** in cells, which is the length the
+    rest of the code calls `grain`. Péclet numbers are more often quoted on the grain diameter, so
+    a Pe here is twice the diameter-based value; the convention is kept because the presets and the
+    shipped clips were made with it (filled in by the runner, which knows u_pore only after the
+    flow has settled; `pe` and the geometry are what this function fixes)."""
     c = dict(_porous_config(p))
     c["pe"] = float(p.get("peclet", 20.0))
     c["injection"] = "pulse" if str(p.get("injection", "Continuous supply")).lower().startswith("pul") else "continuous"
@@ -859,11 +862,18 @@ def _solve_porous(p, pr, tmp):
 def _solve_tracer(p, pr, tmp):
     """Settle the pore flow, then carry a tracer through it (advection + diffusion).
 
-    The flow is solved exactly as the porous experiment solves it, and the settled velocity field
-    is then held fixed while the tracer crosses: at these pore Reynolds numbers (far below one)
-    the flow does not change over that time, so this is exact rather than a shortcut. Only
-    molecular diffusion enters the transport step; the spreading that the plume shows comes out
-    of the velocity field itself.
+    The flow is solved exactly as the porous experiment solves it, and the last velocity field is
+    then held fixed while the tracer crosses. Freezing it is an approximation, and whether it holds
+    is measured rather than asserted: `pore_reynolds` is computed from the field that is actually
+    frozen, and `flow_settled` says whether the permeability had stopped moving. Driving forces
+    well inside the recommended range reach pore Reynolds numbers of order ten with the flow still
+    transient, and there the frozen field is a snapshot of a flow that is still changing, so the
+    transport through it is qualitative. Only molecular diffusion enters the transport step; the
+    spreading the plume shows comes out of the velocity field itself.
+
+    The step budget is capped. When the cap binds, the run covers less of a pore-volume crossing
+    than was asked for, and says so (`truncated`, `crossings_run`) instead of reporting as the
+    experiment that was requested.
     """
     from . import transport
     cfg = _tracer_config(p)
@@ -881,8 +891,21 @@ def _solve_tracer(p, pr, tmp):
     u_adv = float(np.abs(ux if axis == "x" else uy)[fluid].mean()) or u_pore or 1e-6
     t_cross = length / max(u_adv, 1e-9)                  # one pore-volume crossing
     dt_est = transport.Transport(ux, uy, solid, dm, axis=axis).dt
-    steps = int(np.clip(t_cross * 1.2 * _durv(p) / dt_est, 200, 60000))
-    pr(f"tracer · Pe={pe:g} · D_m={dm:.2e} · {steps} steps…")
+    # How good the frozen-flow approximation is, measured on the field that is actually frozen.
+    nu_flow = (float(cfg.get("tau", 0.8)) - 0.5) / 3.0
+    pore_re = (u_pore * grain / nu_flow) if nu_flow > 0 else float("inf")
+    flow_settled = flow.hints.get("k_status") != "transient"
+    # What was asked for, what the budget allows, and what that actually covers. At low Péclet the
+    # diffusive limit makes the step small, so the cap binds and the run covers a fraction of a
+    # crossing; reporting that as the requested experiment makes Péclet comparisons meaningless.
+    crossings_asked = 1.2 * _durv(p)
+    steps_wanted = int(max(1, round(t_cross * crossings_asked / dt_est)))
+    steps = int(np.clip(steps_wanted, 200, 60000))
+    truncated = steps < steps_wanted
+    crossings_run = (steps * dt_est / t_cross) if t_cross > 0 else 0.0
+    pr(f"tracer · Pe={pe:g} · D_m={dm:.2e} · {steps} steps"
+       + (f" (the step budget allows {crossings_run:.3g} of the {crossings_asked:.3g} crossings asked)"
+          if truncated else "") + "…")
     frames, times, rec = transport.run(ux, uy, solid, dm, axis=axis, injection=cfg["injection"],
                                        steps=steps, nframes=cfg["tracer_frames"],
                                        pulse_width=cfg["pulse_width"],
@@ -893,7 +916,12 @@ def _solve_tracer(p, pr, tmp):
              "axis": axis, "injection": cfg["injection"], "length_cells": length,
              "porosity": flow.hints.get("porosity"), "permeability": flow.hints.get("permeability"),
              "k_status": flow.hints.get("k_status"), "pore_volume_cells": rec["pore_volume"],
-             "t_cross": t_cross, "effective": cfg, **{k: rec[k] for k in
+             "t_cross": t_cross, "effective": cfg,
+             "pore_reynolds": pore_re, "flow_settled": flow_settled, "nu_flow": nu_flow,
+             "peclet_length_cells": grain,          # the grain RADIUS in cells, not the diameter
+             "steps_requested": steps_wanted, "steps_run": steps, "truncated": truncated,
+             "crossings_requested": crossings_asked, "crossings_run": crossings_run,
+             **{k: rec[k] for k in
              ("breakthrough", "outlet_slab_mean", "centre_cells", "variance_cells2", "mass",
               "mass_out", "mass_in", "balance", "mass_initial", "dt", "u_max", "numerical_diffusion")}}
     inj = "steady supply" if cfg["injection"] == "continuous" else "pulse"   # open outlet: tracer leaves
