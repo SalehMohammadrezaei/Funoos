@@ -99,6 +99,14 @@ test that fails without the fix.
   diffusion whose result nothing ever read. The breakthrough curve, the mass balance and the final
   dye field are all read from that last state. This is the same defect already corrected in the
   water frames, the pattern solver and the compressible extrema: four places, one habit.
+* **A run says how far it can be read.** A run can finish, return finite fields and still not be the
+  experiment that was asked for: the step budget can stop it short, or it can leave the regime its
+  readings assume. Every result now carries a level and the reasons for it, each built from a
+  measurement the run already made rather than estimated. `quantitative` when nothing the run
+  measured argues against reading its numbers as they stand; `qualitative` when the flow had not
+  settled, the pore Reynolds number is above one, the packing missed its porosity target, or the
+  speed limiter rescaled the motion; `incomplete` when the budget stopped the run before the
+  interval it was asked for. It travels in the result metadata, so a saved experiment carries it too.
 * **The rock reports the sample it built and whether the flow through it is creeping.** Two claims
   were made without being checked. The porosity control is a target the packing can miss, because
   the sample is built from whole grains: with every control inside its recommended range, asking for

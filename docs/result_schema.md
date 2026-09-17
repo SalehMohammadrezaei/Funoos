@@ -42,7 +42,24 @@ Common: `time_unit` (str), `dx` (grid spacing in solver units), `steps`, `nu` wh
  "hints": {"U": 0.08, "D": 23.4, "tau": 0.5056, ...}}
 ```
 
-Only scalar/str hints are included.
+Only scalar/str hints are included, plus `quality` and `quality_notes`.
+
+### `quality`
+
+A run can finish, return finite fields and still not be the experiment that was asked
+for. `Result.quality` returns `(level, notes)` and both appear in `meta()`:
+
+| level | meaning |
+|---|---|
+| `quantitative` | nothing the run measured argues against reading its numbers as they stand |
+| `qualitative` | the run left a regime its readings assume: the flow had not settled, the pore Reynolds number is above one, the packing missed its porosity target, or the speed limiter rescaled the motion |
+| `incomplete` | the step budget stopped the run before the interval it was asked for |
+
+Every note is built from a measurement the run already reported (`truncated`,
+`crossings_run`, `flow_settled`, `k_status`, `pore_reynolds`, `porosity_requested`
+against `porosity`, `clamp_events`), so the classification states what happened rather
+than estimating it. `incomplete` takes precedence over `qualitative` when both apply,
+and the notes list every reason regardless.
 
 ## Saved experiment (`*.funoos.json`)
 

@@ -561,6 +561,36 @@ class Result:
         return moved
 
     # ----- metadata -----
+    @property
+    def quality(self):
+        """How far this run can be read quantitatively, and why, from what the run already measured.
+
+        Every reason below is a number the solver reported, not a guess: a run can finish, return
+        finite fields and still not be the experiment that was asked for, either because the budget
+        stopped it short or because it left the regime its readings assume. Returns
+        (level, notes) with level one of "quantitative", "qualitative" or "incomplete".
+        """
+        h = self.hints
+        notes = []
+        if h.get("truncated"):
+            notes.append(f"the step budget stopped this run after {float(h.get('crossings_run', 0)):.3g} "
+                         f"of the {float(h.get('crossings_requested', 0)):.3g} pore-volume crossings asked for")
+        if h.get("flow_settled") is False or h.get("k_status") == "transient":
+            notes.append("the flow had not settled: the permeability was still changing when the run ended")
+        re_pore = float(h.get("pore_reynolds") or h.get("re_pore") or 0.0)
+        if re_pore > 1.0:
+            notes.append(f"the pore Reynolds number is {re_pore:.3g}, not the creeping flow that Darcy's law "
+                         f"and a frozen velocity field assume")
+        want, got = h.get("porosity_requested"), h.get("porosity")
+        if want is not None and got is not None and abs(float(want) - float(got)) > 0.01:
+            notes.append(f"the sample was asked for a porosity of {float(want):.2f} and packed to {float(got):.3f}")
+        if float(h.get("clamp_events") or 0.0) > 0:
+            notes.append(f"the speed limiter rescaled motion {int(float(h['clamp_events']))} times, the fastest "
+                         f"being {float(h.get('clamp_worst_speed', 0)):.3g} against a ceiling of "
+                         f"{float(h.get('speed_ceiling', 0)):.3g}")
+        level = "incomplete" if h.get("truncated") else ("qualitative" if notes else "quantitative")
+        return level, notes
+
     def meta(self):
         """JSON-safe description of this result (see docs/result_schema.md)."""
         h = self.hints
@@ -571,7 +601,9 @@ class Result:
             shape = list(getattr(arr, "shape", []))
         def scal(v):
             return float(v) if isinstance(v, (np.floating, np.integer)) else v
+        _level, _notes = self.quality
         return {"kind": self.kind, "info": self.info, "views": list(self.views), "frames": self.nframes,
+                "quality": _level, "quality_notes": _notes,
                 "shape": shape, "times": [float(t) for t in self.times],
                 "time_unit": h.get("time_unit", "solver units"),
                 "warmup_dropped": h.get("warmup_dropped"),

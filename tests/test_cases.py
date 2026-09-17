@@ -573,6 +573,37 @@ def test_porous_reports_the_sample_it_built_and_whether_it_is_creeping():
     assert "whole grains" in text2, text2[-260:]
 
 
+def test_a_run_says_how_far_it_can_be_read():
+    """A run can finish, return finite fields, and still not be the experiment that was asked for:
+    the budget can stop it short, or it can leave the regime its readings assume. Each reason is a
+    number the run already measured, so the classification is reported rather than guessed."""
+    from flowzoo import schema
+    def run(name, over):
+        p = {q["name"]: q["default"] for q in engine.EXHIBITS[name]["params"]}
+        p.update({"resolution": "Low (fast)"}); p.update(over)
+        return engine.solve_exhibit(name, schema.validate(name, p).params)
+
+    clean = run("Porous Flow", {"porosity": 0.60, "grain": 0.03, "strength": 1.0,
+                                "seed": 1, "duration": 0.2})
+    level, notes = clean.quality
+    assert level == "quantitative", (level, notes)
+    assert notes == [], notes
+
+    strained = run("Porous Flow", {"porosity": 0.85, "grain": 0.07, "strength": 4.0,
+                                   "seed": 1, "duration": 0.2})
+    level, notes = strained.quality
+    assert level == "qualitative", (level, notes)
+    assert any("Reynolds" in n for n in notes), notes
+
+    short = run("Tracer in Rock", {"peclet": 0.1, "duration": 0.3})
+    level, notes = short.quality
+    assert level == "incomplete", (level, notes)
+    assert any("crossings" in n for n in notes), notes
+
+    m = strained.meta()                                  # and it reaches the app through meta
+    assert m["quality"] == "qualitative" and m["quality_notes"], m.get("quality_notes")
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
