@@ -1008,6 +1008,13 @@ def _solve_ns(mode, p, pr, tmp):
     hints["ns_mode"] = mode                                  # so diagnostics can pick the right plot
     hints.update({"time_unit": "solver steps (dt = 1)", "steps": steps, "dx": 1.0, "nu": float(p["viscosity"]),
                   "effective": cfg})
+    # What the last projection was handed and what it left behind. A converged pressure solve does
+    # not imply a divergence-free field when the divergence, the gradient and the Laplacian between
+    # them are not the same operator, so the residual is reported rather than assumed.
+    _ns_meta = fio.read_meta(tmp)
+    for _k in ("div_pre", "div_post"):
+        if _k in _ns_meta:
+            hints[_k] = float(_ns_meta[_k])
     mask = None
     if mode == "wind":                                       # draw the solid chimney stack
         stack_h = int(0.32 * ny); sxx = nx // 4

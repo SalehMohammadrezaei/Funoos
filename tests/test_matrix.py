@@ -59,7 +59,11 @@ def test_incompressible_divergence_free():
     ux, uy = r.hints["vel"][-1]
     div = np.gradient(ux, axis=1) + np.gradient(uy, axis=0)
     rel = float(np.abs(div[2:-2, 2:-2]).mean() / (np.abs(ux).mean() + np.abs(uy).mean() + 1e-12))
-    assert rel < 0.05, rel
+    # This measures the SAVED frame, which is taken after the next step's buoyancy, source and
+    # confinement have injected fresh divergence, so it can never reach round-off even with a
+    # perfect projection. It reads about 0.003 today; a failed projection change read 0.017 and
+    # still passed the old 0.05 threshold, which is why that threshold was worth nothing.
+    assert rel < 0.01, rel
     print(f"    incompressible: mean |div u| / mean |u| = {rel:.3f}")
 
 

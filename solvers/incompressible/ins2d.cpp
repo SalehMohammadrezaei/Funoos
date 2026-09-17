@@ -113,7 +113,20 @@ int main(int argc,char**argv){
             else         q[IX(i,ny-1)] = (kind==2)?0.0:q[IX(i,ny-2)]; // closed top (RT/RB)
         }
     };
+    // RMS of the divergence the velocity operator actually measures, over the interior.
+    // Reported so a projection can never again be assumed to have done its job: a converged
+    // pressure solve does not imply a divergence-free field when the operators disagree.
+    double diag_div_pre=0.0, diag_div_post=0.0;
+    auto div_rms=[&](){
+        double acc=0.0; long cnt=0;
+        for(int j=2;j<ny-2;j++)for(int i=2;i<nx-2;i++){
+            double d=0.5*((u[IX(i+1,j)]-u[IX(i-1,j)])+(v[IX(i,j+1)]-v[IX(i,j-1)]));
+            acc+=d*d; cnt++;
+        }
+        return cnt? sqrt(acc/(double)cnt) : 0.0;
+    };
     auto project=[&](){
+        diag_div_pre = div_rms();
         #pragma omp parallel for schedule(static)
         for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
             div[IX(i,j)]=-0.5*((u[IX(i+1,j)]-u[IX(i-1,j)])+(v[IX(i,j+1)]-v[IX(i,j-1)]));
@@ -138,6 +151,7 @@ int main(int argc,char**argv){
             v[IX(i,j)]-=0.5*(p[IX(i,j+1)]-p[IX(i,j-1)]);
         }
         set_bc(u,1); set_bc(v,2);
+        diag_div_post = div_rms();
     };
 
     // --- initial condition ---
@@ -282,6 +296,8 @@ int main(int argc,char**argv){
     if(last_saved!=a.steps) save_frame(a.steps);       // final state (the run length need not divide the interval)
     std::ofstream meta(a.out+"/meta.txt");
     meta<<"nx "<<nx<<"\nny "<<ny<<"\nmode_smoke "<<(smoke?1:0)<<"\nnframes "<<nf<<"\n";
+    // the last projection of the run: what it was handed, and what it left behind
+    meta<<"div_pre "<<diag_div_pre<<"\ndiv_post "<<diag_div_post<<"\n";
     printf("done: %d frames -> %s\n",nf,a.out.c_str());
     return 0;
 }

@@ -604,6 +604,27 @@ def test_a_run_says_how_far_it_can_be_read():
     assert m["quality"] == "qualitative" and m["quality_notes"], m.get("quality_notes")
 
 
+def test_projection_actually_removes_the_divergence_it_measures():
+    """A converged pressure solve does not imply a divergence-free field. The divergence and the
+    pressure gradient are centred differences spanning three cells, while the Laplacian solved
+    between them is the compact five-point stencil spanning one, so the two do not compose and the
+    pressure has no way to cancel what the velocity operator sees. The solver reports the residual
+    of its own last projection, measured before any force is applied, and almost all of the
+    divergence it was handed should be gone.
+
+    Measured against the real solver, not a harness: a standalone reproduction of these operators
+    can be made exact while the solver itself removes almost nothing, because the solver also has
+    solid faces, boundary conditions applied after the correction, and advection every step."""
+    for name in ("Rising Smoke", "Rayleigh-Benard"):
+        r = engine.solve_exhibit(name, {"resolution": "Low (fast)", "duration": 0.08})
+        pre, post = r.hints.get("div_pre"), r.hints.get("div_post")
+        assert pre is not None and post is not None, f"{name}: the projection reports no residual"
+        assert float(pre) > 0.0, (name, pre)
+        left = float(post) / float(pre)
+        assert left < 1e-6, (f"{name}: the projection left {100 * left:.1f}% of the divergence it "
+                             f"measured (pre {float(pre):.3e}, post {float(post):.3e})")
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
