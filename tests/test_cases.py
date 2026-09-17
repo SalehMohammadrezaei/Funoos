@@ -498,6 +498,50 @@ def test_sph_speed_limiter_reports_what_it_suppressed():
     assert m2["speed_limiter_events"] == 0, m2
 
 
+def test_tracer_run_keeps_the_state_it_finished_in():
+    """The frame interval rarely divides the step count, and when it does not the last state
+    recorded was the last interval, not the end of the run: 235 steps with 110 frames stopped at
+    step 234. The breakthrough curve and the mass balance are read from the final state, so
+    dropping it means the reported result is not the result of the run that was asked for."""
+    from flowzoo import transport
+    u = np.full((8, 60), 0.01); v = np.zeros_like(u); solid = np.zeros((8, 60), bool)
+    for steps, nframes in ((235, 110), (100, 7), (240, 120)):
+        frames, times, rec = transport.run(u, v, solid, 1e-4, injection="pulse",
+                                           steps=steps, nframes=nframes)
+        assert len(frames) == len(times), (len(frames), len(times))
+        reached = round(float(times[-1]) / rec["dt"])
+        assert reached == steps, (steps, nframes, reached)
+        assert all(b > a for a, b in zip(times, times[1:])), "frame times must strictly increase"
+
+
+def test_mixing_records_the_state_it_finished_in():
+    """Ink in Motion reports the end time it was asked for. Recording only on the frame interval
+    dropped the final state whenever the interval did not divide the step count (311 steps with an
+    interval of 3 stopped at step 309), and the loop then ran one more advection and diffusion whose
+    result nothing ever read."""
+    r = engine.solve_exhibit("Ink in Motion", {"resolution": "Low (fast)", "duration": 0.2})
+    t = np.asarray(r.times, float)
+    assert t[0] == 0.0, t[0]
+    assert abs(float(t[-1]) - float(r.hints["T_end"])) < 1e-9, (t[-1], r.hints["T_end"])
+    assert all(b > a for a, b in zip(t, t[1:])), "frame times must strictly increase"
+    assert len(r.raw) == len(t), (len(r.raw), len(t))
+
+
+def test_wind_tunnel_warns_before_a_setting_measured_to_go_unstable():
+    """A setting can pass every limit and still go unstable partway through. The warning is fitted
+    to 48 measured runs and never flags a setting that completed, so it informs without blocking,
+    and the runtime check remains what actually stops a bad run."""
+    from flowzoo import schema
+    seen_unstable = dict(resolution="Low (fast)", duration=0.2, reynolds=1200, speed=0.15, size=0.3)
+    v = schema.validate("Wind Tunnel", seen_unstable)
+    assert v.ok, v.errors                                  # a warning, not a refusal
+    assert any("unstable" in w.lower() for w in v.warnings), v.warnings
+    measured_fine = dict(resolution="Low (fast)", duration=0.2, reynolds=1200, speed=0.08, size=0.13)
+    v2 = schema.validate("Wind Tunnel", measured_fine)
+    assert v2.ok, v2.errors
+    assert not [w for w in v2.warnings if "unstable" in w.lower()], v2.warnings
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

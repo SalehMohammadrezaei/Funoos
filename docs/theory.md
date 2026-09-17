@@ -85,9 +85,27 @@ control and defaulting to 0 where a measurement matters.
   the source, a temperature proxy T(Z) peaking at Z = Z_st, and buoyancy
   proportional to T. No chemistry or heat release is computed.
 
-**Checks.** Divergence-free to the solver tolerance; RB conduction baseline and
-diffusion test; RT mixing width consistent across resolutions; Nusselt number from
-the conductive + convective flux budget.
+**Checks.** RB conduction baseline and diffusion test; RT mixing width consistent
+across resolutions; Nusselt number from the conductive + convective flux budget.
+
+**Known limitation: the projection does not remove all the divergence it measures.**
+The divergence and the pressure gradient are centred differences spanning i-1..i+1,
+while the pressure equation solved between them is the compact five-point Laplacian.
+Those operators do not compose, so converging the pressure cannot cancel the
+divergence the velocity operator sees. On a manufactured field the pressure residual
+falls to 8e-15, a genuinely converged solve, and 49% of the divergence is still there.
+Measured on the shipped scenes, immediately after the projection and before any force
+is applied, it removes 59% of what it is handed in the smoke plume, 53% in
+Rayleigh-Taylor, 51% in the chimney and 16% in Rayleigh-Benard. This text used to say
+the field was divergence-free to the solver tolerance. It is not, so it no longer says so.
+
+Correcting the velocities on faces with the compact difference, which is the operator
+the solved Laplacian actually inverts, was tried and rejected on measurement: it made
+the manufactured case exact but removed only 11% in the smoke plume against the 59%
+the present scheme manages, shifted the exhibits' kinetic energy by 10 to 15% and
+their enstrophy by up to 4.3 times, and ran slower. A correct fix is a staggered
+arrangement in which the face field is the state rather than something reconstructed
+every step; that changes all five convection exhibits and is not a contained change.
 
 ## 3. Compressible Euler (finite volume, HLLC) — `solvers/compressible`
 

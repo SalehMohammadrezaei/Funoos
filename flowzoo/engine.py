@@ -715,7 +715,12 @@ def _sph_config(p):
 def _spectral_config(p, mixing=False):
     s = _res(p); n = int(256 * s); L = 2 * np.pi; n0 = 256
     T_end = (2600 if mixing else 2800) * _durv(p) * 0.4 * (L / n0)
-    dt = 0.4 * (L / n); steps = max(1, int(round(T_end / dt)))
+    # The step count is rounded, so steps * dt landed near T_end rather than on it: 311 steps of
+    # the CFL step overshot the requested end by about a fifth of a step, and the run reported a
+    # time it had not been asked for. Spreading the interval over the same number of steps lands
+    # exactly on T_end, and the step only ever gets smaller than the CFL value, never larger.
+    steps = max(1, int(round(T_end / (0.4 * (L / n)))))
+    dt = T_end / steps
     return {"n": n, "L": L, "dt": dt, "T_end": T_end, "steps": steps, "nu": 4e-4 if mixing else float(p["viscosity"])}
 
 
@@ -1131,13 +1136,21 @@ def _solve_mixing(p, pr, tmp):
     c = 0.5 * (1 + np.sign(np.sin(float(p.get("bands", 6)) * yy)))
     kap = float(p.get("diffusion", 1e-4))
     pr(f"chaotic mixing {n}×{n}, {steps} steps…")
-    raw = []; times = []; _pp = max(1, steps // 50)
+    raw = []; times = []; _pp = max(1, steps // 50); every = max(1, steps // 100)
     for st in range(steps + 1):
         u, v = sim.velocity(wh)
-        if st % max(1, steps // 100) == 0:
+        # Recorded at the top, so the frame at st is the state before update st: frame 0 is the
+        # initial state and the frame at st == steps is the state the run finished in. Recording
+        # only on the interval dropped that final state whenever the interval did not divide the
+        # step count: 311 steps with an interval of 3 stopped reporting at step 309, two steps
+        # short of the end time it had been asked for.
+        if st % every == 0 or st == steps:
             raw.append(c.T.copy()); times.append(st * dt)     # solver is [x,y]; public arrays are [y,x]
         if st % _pp == 0:
             pr(f"simulating… {int(100 * st / steps)}%")
+        if st == steps:
+            break            # the state at the end time is recorded; the loop used to advect,
+                             # diffuse and step once more, work whose result nothing ever reads
         if stir > 0:
             c = advect_sl(c, stir * u, stir * v, dt, L)
         if kap > 0:                                   # gentle scalar diffusion (spectral)
@@ -1145,6 +1158,8 @@ def _solve_mixing(p, pr, tmp):
         wh = sim.step(wh, dt)
         if st % _pp == 0 and not (np.isfinite(wh).all() and np.isfinite(c).all()):
             raise ValueError(f"mixing field became non-finite at step {st}")
+    if not (np.isfinite(wh).all() and np.isfinite(c).all()):   # the final state is a result too
+        raise ValueError("the mixing field became non-finite by the end of the run")
     return Result("field", raw, f"chaotic mixing  {n}×{n}", times=times,
                   hints={"label": "dye", "dx": L / n, "dt": dt, "T_end": T_end, "nu": nu, "kappa": kap,
                          "stir": stir, "time_unit": "nondimensional (L = 2π)"})

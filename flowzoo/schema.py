@@ -159,6 +159,23 @@ def _native_limits(exhibit, v):
             if abs(U) > 0.5:
                 v.errors.append(
                     f"inflow speed |U| = {abs(U):.3f} is above the solver's limit of 0.5 lattice units")
+            # Settings that pass every limit above can still go unstable partway through a run, and
+            # no single quantity predicts it: at lattice Mach 0.191 a slim body survives at Re 1200
+            # and 1600 while a body blocking 30% of the tunnel fails at Re 1600, and tau orders the
+            # cases no better (a run at tau 0.5029 completes, one at tau 0.5088 does not).
+            #
+            # So this is a measured envelope, not a criterion derived from the scheme. 48 settings
+            # were run to a fixed duration; 21 went unstable. This boundary was fitted to those
+            # points and scored against all of them: it flags 16 of the 21 and flags nothing that
+            # ran. The remaining 5 are caught while running, where the solver now stops and says so
+            # rather than returning frames of non-finite values. Widen it only against new data.
+            rec = (c["Re"] / c["D"]) if c["D"] > 0 else 0.0     # cells per reference length
+            if c["mach"] > 0.20 or (c["mach"] > 0.10 and rec > 80):
+                v.warnings.append(
+                    f"lattice Mach {c['mach']:.3f} with Re/D {rec:.0f}: settings in this region have "
+                    f"been measured going unstable partway through a run. The run is allowed and will "
+                    f"stop with a clear message if it does. A lower inflow speed is the usual fix, and "
+                    f"a larger body or a lower Reynolds number both help.")
         elif exhibit == "The Big Splash":
             import math
             c = engine._sph_config(v.params)

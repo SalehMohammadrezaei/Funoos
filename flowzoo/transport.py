@@ -382,7 +382,11 @@ def run(ux, uy, solid, dm, axis="x", injection="continuous", steps=4000, nframes
     record()
     for i in range(1, steps + 1):
         tr.step()
-        if i % every == 0:
+        # The frame interval rarely divides the step count, and when it does not the last frame
+        # recorded was the last interval rather than the end of the run: 235 steps with 110 frames
+        # stopped at step 234. The breakthrough curve and the mass balance are read from the state
+        # the run actually finished in, so that state is always recorded.
+        if i % every == 0 or i == steps:
             record()
             if progress is not None:
                 progress(i / steps)

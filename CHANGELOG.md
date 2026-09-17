@@ -92,6 +92,29 @@ test that fails without the fix.
 * **The obstacle position control is offered only where it does something.** The vehicles and the
   text set their own streamwise position and overwrite it, so for four of the seven bodies the
   control sat there taking input and changing nothing.
+* **Every run reports the state it finished in.** Several loops recorded "every N steps" without
+  asking what happens when N does not divide the total. A tracer run of 235 steps with 110 frames
+  stopped reporting at step 234, and Ink in Motion with 311 steps and an interval of 3 stopped at
+  step 309, two steps short of the end it was asked for, and then performed one more advection and
+  diffusion whose result nothing ever read. The breakthrough curve, the mass balance and the final
+  dye field are all read from that last state. This is the same defect already corrected in the
+  water frames, the pattern solver and the compressible extrema: four places, one habit.
+* **Recorded, not fixed: the projection leaves much of the divergence it measures.** The divergence
+  and the pressure gradient are centred differences spanning three cells, while the pressure
+  equation solved between them is the compact five-point Laplacian, so converging the pressure
+  cannot cancel what the velocity operator sees. Measured immediately after the projection, before
+  any force is applied, it removes 59% of the divergence it is handed in the smoke plume, 53% in
+  Rayleigh-Taylor, 51% in the chimney and 16% in Rayleigh-Benard. A contained fix correcting the
+  velocities on faces was tried and rejected on measurement: it removed only 11% in the smoke plume,
+  shifted the exhibits' energy by 10 to 15% and their enstrophy by up to 4.3 times, and ran slower.
+  A correct fix needs a staggered arrangement where the face field is the state, which changes all
+  five convection exhibits. The documentation no longer claims the field is divergence-free to the
+  solver tolerance, because it is not.
+* **Spectral runs land on the end time they were asked for.** The step count was rounded while the
+  step itself was fixed, so steps times dt landed near the requested end rather than on it: a mixing
+  run overshot by about a fifth of a step and reported a time nobody had asked for. The interval is
+  now spread across the same number of steps, which lands exactly and only ever makes the step
+  smaller than the stability limit, never larger.
 
 ## 1.3.1
 
