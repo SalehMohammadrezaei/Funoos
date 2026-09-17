@@ -358,6 +358,39 @@ def test_unstable_wind_tunnel_stops_instead_of_returning_non_finite_frames():
         assert not bad, f"{len(bad)} of {len(res.raw)} frames were non-finite yet returned as a result"
 
 
+def test_sph_frames_hold_one_state_per_time():
+    """Each saved state belongs to one time. The solver saved once before the update and once after
+    it, labelling both with the time before, so half of every run's frames were a second state
+    stamped with a time already written, and the loop ran one update more than it was asked for."""
+    from collections import Counter
+    from flowzoo import schema
+    p = {q["name"]: q["default"] for q in engine.EXHIBITS["The Big Splash"]["params"]}
+    p.update({"scene": "Dam break", "particles": 600, "duration": 0.05})
+    res = engine.solve_exhibit("The Big Splash", schema.validate("The Big Splash", p).params)
+    t = list(res.times)
+    repeats = [x for x, c in Counter(t).items() if c > 1]
+    assert not repeats, f"{len(repeats)} timestamps carry more than one state"
+    assert all(b > a for a, b in zip(t, t[1:])), "frame times must strictly increase"
+    assert t[0] == 0.0, t[0]
+
+
+def test_gray_scott_first_frame_is_the_initial_state():
+    """The frame labelled t = 0 is the state before anything is done to it. It used to be one
+    update old, so a blob interior seeded at 0.25 was returned as 0.25625, and the final state was
+    kept only when the step count happened to land on the frame interval."""
+    from flowzoo.reaction import gray_scott
+    frames, times = gray_scott(n=64, F=0.035, k=0.065, steps=0, nframes=1, seed=5,
+                               nseeds=1, noise=0.0)
+    assert len(frames) == 1 and times == [0.0], (len(frames), times)
+    first = float(np.asarray(frames[0]).max())
+    assert abs(first - 0.25) < 1e-12, first
+    frames, times = gray_scott(n=48, F=0.035, k=0.065, steps=7, nframes=3, seed=1,
+                               nseeds=1, noise=0.0)
+    assert len(frames) == len(times), (len(frames), len(times))
+    assert times[0] == 0.0 and times[-1] == 7.0, times        # the final state is always kept
+    assert all(b > a for a, b in zip(times, times[1:])), times
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

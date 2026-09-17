@@ -38,6 +38,16 @@ test that fails without the fix.
   the user the run. That combination is now refused in both modes, with the reason.
 * **An unknown injection is refused.** `transport.run(injection="steady")` silently ran a pulse and
   returned a plausible result for the wrong experiment.
+* **Every water frame belongs to one time.** The SPH solver saved a frame before the update and
+  another after it, labelling both with the time before, so a dam break returned 55 frames of which
+  27 timestamps carried two different states, and the loop ran one update more than asked. The
+  initial state is now saved once, each later state is saved at the time it actually reached, and
+  the final state is always included.
+* **The Gray-Scott frame at time zero is the initial state.** It had already been advanced one step,
+  so a blob interior seeded at 0.25 was returned as 0.25625, the run performed one update more than
+  requested, and the final state survived only when the step count happened to land on the frame
+  interval. The pattern solver now returns frames with the step each was reached at, rather than
+  times inferred afterwards from an assumed interval.
 
 ## 1.3.1
 

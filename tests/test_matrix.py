@@ -87,9 +87,9 @@ def test_sph_particle_accounting():
 
 def test_reaction_uniform_state_and_bounds():
     from flowzoo.reaction import gray_scott
-    fr = gray_scott(n=48, F=0.035, k=0.065, steps=200, nframes=4, seed=0, nseeds=0, noise=0.0)
+    fr, _ = gray_scott(n=48, F=0.035, k=0.065, steps=200, nframes=4, seed=0, nseeds=0, noise=0.0)
     assert np.allclose(fr[-1], 0.0), "without seeds V stays zero (uniform state is a fixed point)"
-    fr2 = gray_scott(n=48, F=0.035, k=0.065, steps=300, nframes=4, seed=1)
+    fr2, _ = gray_scott(n=48, F=0.035, k=0.065, steps=300, nframes=4, seed=1)
     assert fr2[-1].min() >= 0 and fr2[-1].max() <= 1, "V within [0, 1] (enforced by clipping)"
     print("    reaction: uniform state stays uniform; bounds enforced")
 
@@ -131,9 +131,9 @@ def test_random_initial_condition_is_resolution_independent():
     w128 = np.real(np.fft.ifft2(random_field(128, seed=4)))
     assert np.abs(w128 - w128_from_256).max() < 1e-9, "the coarse grid is the low-pass of the reference field"
     from flowzoo.reaction import gray_scott
-    a = gray_scott(n=110, F=0.035, k=0.065, steps=0, nframes=1, seed=5, noise=0.0)[0]
-    b = gray_scott(n=220, F=0.035, k=0.065, steps=0, nframes=1, seed=5, noise=0.0)[0]
-    # blob interiors (V ≈ 0.25 after one step; the one-cell diffusion halo is grid-scale and excluded by the threshold)
+    a = gray_scott(n=110, F=0.035, k=0.065, steps=0, nframes=1, seed=5, noise=0.0)[0][0]
+    b = gray_scott(n=220, F=0.035, k=0.065, steps=0, nframes=1, seed=5, noise=0.0)[0][0]
+    # blob interiors (V = 0.25 in the initial state, which is what steps=0 now returns)
     assert np.mean(a > 0.2) > 0 and abs(np.mean(a > 0.2) - np.mean(b > 0.2)) < 0.01, "Gray–Scott seeds placed at the same fractions of the box"
     print("    initial conditions: seed-consistent across resolutions (spectral exact; Gray–Scott blob fractions)")
 

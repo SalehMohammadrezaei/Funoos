@@ -1121,10 +1121,9 @@ def _solve_reaction(p, pr, tmp):
     Du, Dv = float(p.get("Du", 0.16)), float(p.get("Dv", 0.08))
     steps = int(9000 * _durv(p))
     pr(f"Gray–Scott {n}×{n}, {pat} (F={F:.4f}, k={k:.4f}), {steps} steps…")
-    frames = gray_scott(n=n, F=F, k=k, Du=Du, Dv=Dv, steps=steps, nframes=110, seed=int(p.get("seed", 1)),
-                        progress=lambda f: pr(f"simulating… {int(100 * f)}%"))
-    every = max(1, steps // 110)
-    times = [float(i * every) for i in range(len(frames))]
+    frames, times = gray_scott(n=n, F=F, k=k, Du=Du, Dv=Dv, steps=steps, nframes=110,
+                               seed=int(p.get("seed", 1)),
+                               progress=lambda f: pr(f"simulating… {int(100 * f)}%"))
     return Result("field", frames, f"{pat}  {n}×{n}", times=times,
                   hints={"label": "V concentration", "F": F, "k": k, "Du": Du, "Dv": Dv,
                          "time_unit": "steps (dt = 1)", "steps": steps})

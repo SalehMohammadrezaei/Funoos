@@ -151,7 +151,8 @@ int main(int argc,char**argv){
     const double Ts=A.sloshT, sloshA=A.sloshA*g;
     const int Ncap=22000;
 
-    // frame i holds the state at the START of step i (time = i*dt); frame 0 is the initial state
+    // One state per time: the initial state at t = 0, then the state reached after every
+    // save_every updates, labelled with the time it was actually reached, and the final state.
     auto save_frame=[&](double tt, int step){
         int N=x.size();
         std::vector<float> buf; buf.reserve(3*Nfluid+3);
@@ -173,9 +174,9 @@ int main(int argc,char**argv){
         front<<tt<<","<<xf<<"\n"; nf++;
         if(step%(A.save_every*3)==0) printf("step %d/%d (%d frames, %d fluid)\n",step,steps,nf,Nw);
     };
-    for(int step=0; step<=steps; step++){
+    for(int step=0; step<steps; step++){          // exactly `steps` updates, not one more
         double t=step*dt;
-        if(step%A.save_every==0) save_frame(t, step);
+        if(step==0) save_frame(t, step);          // the initial state, saved once
         double ramp=std::min(1.0, t/0.40), gt=g*ramp;     // ease gravity in
         // continuous emission for the pour scene
         if(sc=="pour" && (int)x.size()<Ncap && step%std::max(1,(int)(0.012/dt))==0){
@@ -281,7 +282,10 @@ int main(int argc,char**argv){
             if(y[i]<0){y[i]=0; if(vy[i]<0)vy[i]=0;} if(y[i]>A.Ly){y[i]=A.Ly; if(vy[i]>0)vy[i]=0;}
         }
 
-        if(step%A.save_every==0) save_frame(t, step);
+        // Saved after the update, at the time the update reached. Saving here as well as at the
+        // top of the body wrote two different states under one timestamp, because t is the time
+        // before the update: half of every run's frames were duplicates of a time already written.
+        if((step+1)%A.save_every==0) save_frame((step+1)*dt, step+1);
     }
     if(steps%A.save_every!=0) save_frame(steps*dt, steps);   // final state, at the end time
     double dev2=0; long nfl=0; for(int i=0;i<(int)x.size();i++) if(!bnd[i]){ double d=rho[i]/rho0-1.0; dev2+=d*d; nfl++; }

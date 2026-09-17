@@ -55,7 +55,7 @@ def test_quantum_unitarity():
 def test_reaction_bounded():
     """Gray–Scott concentrations stay in [0,1] and form structure."""
     from flowzoo.reaction import gray_scott
-    fr = gray_scott(n=96, F=0.035, k=0.065, steps=3000, nframes=10, seed=2)
+    fr, _ = gray_scott(n=96, F=0.035, k=0.065, steps=3000, nframes=10, seed=2)
     v = fr[-1]
     assert v.min() >= -1e-6 and v.max() <= 1.0 + 1e-6, "Gray–Scott out of [0,1]"
     assert v.std() > 1e-3, "Gray–Scott formed no structure"

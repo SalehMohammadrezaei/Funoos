@@ -37,7 +37,11 @@ def gray_scott(n=256, F=0.035, k=0.065, Du=0.16, Dv=0.08, steps=10000,
     """Gray–Scott on an n×n periodic grid. `nseeds` blobs of V (default: 8–15, from the
     seed) plus Gaussian `noise` start the pattern; nseeds=0 and noise=0 give the uniform
     state (U=1, V=0), which is a fixed point. U and V are clipped to [0, 1] every step —
-    a numerical intervention, reported in the scene notes."""
+    a numerical intervention, reported in the scene notes.
+
+    Returns (frames, times): the state at t = 0 before anything is done to it, then the state
+    after every `steps // nframes` updates and at the final step, each with the step it was
+    reached at."""
     rng = np.random.default_rng(seed)
     U = np.ones((n, n)); V = np.zeros((n, n))
     nb = int(rng.integers(8, 16)) if nseeds is None else int(nseeds)
@@ -53,14 +57,18 @@ def gray_scott(n=256, F=0.035, k=0.065, Du=0.16, Dv=0.08, steps=10000,
         U += noise * rng.standard_normal((n, n)); V += noise * rng.standard_normal((n, n))
     U = np.clip(U, 0, 1); V = np.clip(V, 0, 1)
     every = max(1, steps // nframes); pevery = max(1, steps // 50)
-    frames = []
-    for s in range(steps + 1):
+    # The initial state is a state: it is recorded before anything is done to it, and every later
+    # frame is recorded after the update that produced it, at the step it reached. Updating before
+    # the first save made the frame labelled t = 0 already one step old, the loop ran one update
+    # more than asked, and the final state was kept only when it happened to land on the interval.
+    frames = [V.copy()]; times = [0.0]
+    for s in range(1, steps + 1):
         uvv = U * V * V
         U += Du * _lap(U) - uvv + F * (1.0 - U)
         V += Dv * _lap(V) + uvv - (F + k) * V
         np.clip(U, 0, 1, out=U); np.clip(V, 0, 1, out=V)
-        if s % every == 0:
-            frames.append(V.copy())
+        if s % every == 0 or s == steps:
+            frames.append(V.copy()); times.append(float(s))
         if progress and s % pevery == 0:
             progress(s / steps)
-    return frames
+    return frames, times
