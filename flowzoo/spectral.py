@@ -31,7 +31,15 @@ class Spectral2D:
         return u, v
 
     def nonlinear(self, wh):
-        """−(u·∇)ω in spectral space, dealiased (the advection term only)."""
+        """−(u·∇)ω in spectral space, dealiased (the advection term only).
+
+        The state is truncated to the retained band before any product is formed. Masking only
+        the result does not dealias: modes above the cutoff still multiply each other and land
+        inside the retained band, where the mask cannot tell them from real interactions. With
+        the inputs truncated, products of retained modes can only alias above the cutoff, which
+        is exactly what the mask on the way out removes.
+        """
+        wh = wh * self.mask
         u, v = self.velocity(wh)
         wx = np.real(np.fft.ifft2(1j * self.kx * wh))
         wy = np.real(np.fft.ifft2(1j * self.ky * wh))
@@ -51,7 +59,8 @@ class Spectral2D:
         b = self.nonlinear(E * (wh + 0.5 * dt * a))
         c = self.nonlinear(E * wh + 0.5 * dt * b)
         d = self.nonlinear(E2 * wh + dt * E * c)
-        return E2 * wh + (dt / 6.0) * (E2 * a + 2.0 * E * (b + c) + d)
+        # the state stays inside the retained band, so the scheme is a Galerkin truncation
+        return (E2 * wh + (dt / 6.0) * (E2 * a + 2.0 * E * (b + c) + d)) * self.mask
 
     def energy(self, wh):
         u, v = self.velocity(wh)

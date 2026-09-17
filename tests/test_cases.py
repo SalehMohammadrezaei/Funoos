@@ -391,6 +391,50 @@ def test_gray_scott_first_frame_is_the_initial_state():
     assert all(b > a for a, b in zip(times, times[1:])), times
 
 
+def test_tracer_reports_when_the_frozen_flow_is_not_creeping():
+    """Holding the flow fixed is exact only for slow, settled flow. Settings well inside the
+    recommended ranges reach pore Reynolds numbers of order ten with the permeability still moving,
+    and the run has to say so rather than presenting its numbers as the creeping-flow experiment."""
+    from flowzoo import schema, postproc
+    p = {q["name"]: q["default"] for q in engine.EXHIBITS["Tracer in Rock"]["params"]}
+    p.update({"resolution": "Low (fast)", "porosity": 0.85, "grain": 0.07, "strength": 4,
+              "seed": 1, "duration": 0.2})
+    v = schema.validate("Tracer in Rock", p)
+    assert v.ok and not v.warnings, (v.errors, v.warnings)   # nothing warns the user beforehand
+    res = engine.solve_exhibit("Tracer in Rock", v.params)
+    assert res.hints["pore_reynolds"] > 1.0, res.hints["pore_reynolds"]
+    assert res.hints["flow_settled"] is False, res.hints["k_status"]
+    text = [t for t in postproc.plots(res) if t[0].startswith("Breakthrough")][0][2]
+    assert "qualitative" in text, text[-240:]
+
+
+def test_tracer_says_how_much_of_the_crossing_it_covered():
+    """At low Péclet the diffusive limit makes the step small and the step budget binds, so the run
+    covers a fraction of a pore-volume crossing. Reporting that as the requested experiment is what
+    makes a Péclet comparison meaningless, since the runs cover different ground."""
+    from flowzoo import schema
+    p = {q["name"]: q["default"] for q in engine.EXHIBITS["Tracer in Rock"]["params"]}
+    p.update({"resolution": "Low (fast)", "peclet": 0.1, "duration": 0.3})
+    res = engine.solve_exhibit("Tracer in Rock", schema.validate("Tracer in Rock", p).params)
+    h = res.hints
+    assert h["truncated"] is True, (h["steps_requested"], h["steps_run"])
+    assert h["crossings_run"] < h["crossings_requested"], (h["crossings_run"], h["crossings_requested"])
+
+
+def test_spectral_products_do_not_alias_into_the_retained_band():
+    """The 2/3 rule only dealiases if the state is truncated before products are formed. Masking
+    the result instead lets modes above the cutoff multiply each other down into the retained band,
+    where the mask cannot tell that energy from a real interaction between resolved modes."""
+    from flowzoo.spectral import Spectral2D
+    n = 64
+    sp = Spectral2D(n=n, nu=0.0)
+    x = np.arange(n) * 2 * np.pi / n
+    X, Y = np.meshgrid(x, x, indexing="xy")
+    wh = np.fft.fft2(np.sin(25 * X) + np.sin(25 * X + Y))      # energy only above the cutoff
+    kept = np.abs(sp.nonlinear(wh)) * sp.mask / (n * n)
+    assert float(kept.max()) < 1e-20, float(kept.max())
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
