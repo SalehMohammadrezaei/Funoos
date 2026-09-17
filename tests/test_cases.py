@@ -542,6 +542,37 @@ def test_wind_tunnel_warns_before_a_setting_measured_to_go_unstable():
     assert not [w for w in v2.warnings if "unstable" in w.lower()], v2.warnings
 
 
+def test_porous_reports_the_sample_it_built_and_whether_it_is_creeping():
+    """Two claims the rock made without checking, both reachable with every control inside its
+    recommended range. The porosity control is a target the packing can miss, because the sample is
+    built from whole grains: asking for 0.40 with the coarsest recommended grain builds 0.382. And
+    reading the permeability as a Darcy value assumes creeping flow, while porosity 0.85 with that
+    same grain and the strongest recommended drive reaches a pore Reynolds number near 10."""
+    from flowzoo import schema, postproc
+    base = {q["name"]: q["default"] for q in engine.EXHIBITS["Porous Flow"]["params"]}
+    # porosity 0.40-0.85, grain 0.02-0.07, strength 0.25-4.0: all of these sit inside those ranges
+    fast = dict(base, resolution="Low (fast)", porosity=0.85, grain=0.07, strength=4.0,
+                seed=1, duration=0.2)
+    v = schema.validate("Porous Flow", fast)
+    assert v.ok and not v.warnings, (v.errors, v.warnings)      # nothing flags it beforehand
+    r = engine.solve_exhibit("Porous Flow", v.params)
+    m = postproc.metrics(r)
+    assert m["pore_reynolds"] > 1.0, m["pore_reynolds"]
+    text = [x for x in postproc.plots(r) if x[0].startswith("Permeability")][0][2]
+    assert "creeping" in text, text[-260:]
+
+    loose = dict(base, resolution="Low (fast)", porosity=0.40, grain=0.07, strength=4.0,
+                 seed=1, duration=0.2)
+    v2 = schema.validate("Porous Flow", loose)
+    assert v2.ok and not v2.warnings, (v2.errors, v2.warnings)
+    r2 = engine.solve_exhibit("Porous Flow", v2.params)
+    m2 = postproc.metrics(r2)
+    assert abs(m2["porosity_requested"] - 0.40) < 1e-9, m2.get("porosity_requested")
+    assert m2["porosity_requested"] - m2["porosity"] > 0.01, (m2["porosity_requested"], m2["porosity"])
+    text2 = [x for x in postproc.plots(r2) if x[0].startswith("Permeability")][0][2]
+    assert "whole grains" in text2, text2[-260:]
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

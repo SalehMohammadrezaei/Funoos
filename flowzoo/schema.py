@@ -268,7 +268,10 @@ def _derived(exhibit, params):
         c = engine.effective(exhibit, p)
         add("grid", f"{c['nx']} × {c['ny']}", "cells"); add("grain radius", f"{c['grain']}", "cells")
         add("viscosity ν", f"{c['nu']:.3f}", "lattice")
-        add("body force per unit mass g", f"{c['force']:.2e}", "lattice", f"= 1.2e-5 × strength {float(p.get('strength', 1.0)):g}; Stokes regime")
+        add("body force per unit mass g", f"{c['force']:.2e}", "lattice",
+            f"= 1.2e-5 × strength {float(p.get('strength', 1.0)):g}. Reading k as a Darcy permeability "
+            f"needs creeping flow, which holds while the pore Reynolds number stays below one; coarse "
+            f"grains and a strong drive can leave that regime, and the run reports the value it reached")
         add("driving direction", c["fdir"] and "y" or "x")
         add("time steps", f"{c['steps']}", "lattice steps", "k is reported as 'transient' unless the last 10 % of the run changed it by < 1 %")
     elif exhibit in ("Rising Smoke", "Candle Flame", "Mushroom Clouds", "Rayleigh-Benard", "Chimney Plume"):

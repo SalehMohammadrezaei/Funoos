@@ -99,6 +99,16 @@ test that fails without the fix.
   diffusion whose result nothing ever read. The breakthrough curve, the mass balance and the final
   dye field are all read from that last state. This is the same defect already corrected in the
   water frames, the pattern solver and the compressible extrema: four places, one habit.
+* **The rock reports the sample it built and whether the flow through it is creeping.** Two claims
+  were made without being checked. The porosity control is a target the packing can miss, because
+  the sample is built from whole grains: with every control inside its recommended range, asking for
+  0.40 with the coarsest recommended grain builds 0.382. And reading the permeability as a Darcy
+  value assumes creeping flow, while porosity 0.85 with that same grain and the strongest
+  recommended drive reaches a pore Reynolds number of 10. Beyond those ranges it is worse: in
+  advanced mode a grain of 0.15 turns a request for 0.85 into 0.758 and reaches a pore Reynolds
+  number of 29. The readouts no longer state "Stokes regime" as a fact, the requested and achieved
+  porosity and the measured pore Reynolds number are both reported, and the permeability plot says
+  plainly when the sample is not the one that was asked for or the flow is not creeping.
 * **Recorded, not fixed: the projection leaves much of the divergence it measures.** The divergence
   and the pressure gradient are centred differences spanning three cells, while the pressure
   equation solved between them is the compact five-point Laplacian, so converging the pressure

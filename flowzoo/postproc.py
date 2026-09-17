@@ -183,6 +183,13 @@ def metrics(result):
         if k == "porous":
             m["permeability_cells2"] = float(h.get("permeability", 0.0))
             m["porosity"] = float(h.get("porosity", 0.0))
+            # The sample is packed from whole grains, so the porosity asked for is a target it can
+            # miss, and a strong drive through coarse grains leaves the creeping regime that reading
+            # k as a Darcy permeability assumes. Both are measurements, so both are reported.
+            if h.get("porosity_requested") is not None:
+                m["porosity_requested"] = float(h["porosity_requested"])
+            if h.get("re_pore") is not None:
+                m["pore_reynolds"] = float(h["re_pore"])
         elif k == "tracer":
             m["peclet"] = float(h.get("peclet", 0.0))
             m["porosity"] = float(h.get("porosity") or 0.0)
@@ -908,6 +915,19 @@ def _tracer(result):
 def _porous(result):
     h = result.hints
     phi = h.get("porosity", 0.6); k = h.get("permeability", 0.0); d = 2.0 * h.get("grain", 12)
+    # Conditions under which k is not the Darcy permeability of the sample the controls describe.
+    _notes = []
+    _want = h.get("porosity_requested")
+    if _want is not None and abs(float(_want) - float(phi)) > 0.01:
+        _notes.append(f"the sample was asked for a porosity of {float(_want):.2f} and packed to "
+                      f"{float(phi):.3f}, because it is built from whole grains")
+    _re = float(h.get("re_pore") or 0.0)
+    if _re > 1.0:
+        _notes.append(f"the pore Reynolds number is {_re:.3g}, so this is not the creeping flow that "
+                      f"Darcy's law and the Stokes reading of k assume")
+    if h.get("k_status") == "transient":
+        _notes.append("the permeability had not stopped changing when the run ended")
+    _caveat = (" Treat this as qualitative: " + "; ".join(_notes) + ".") if _notes else ""
     P = np.linspace(0.35, 0.9, 120); kc = P ** 3 * d * d / (180.0 * (1.0 - P) ** 2)
     fig, ax, plt = _new_ax("porosity φ", "permeability k (lattice cells²)", "Permeability of this sample")
     ax.plot(P, kc, color=_MUTED, lw=1.6, ls="--", label="Kozeny–Carman (empirical, 3-D packed beds; orientation only)")
@@ -921,7 +941,7 @@ def _porous(result):
              "empirical curve does not establish agreement: the Kozeny–Carman line is for 3-D packed beds and is "
              "drawn for orientation. To check Darcy behaviour, sweep the porosity or the seed (same φ, different "
              "connectivity) with the sweep tool; the run reports k from the final state and should be run long "
-             "enough for the readout to have settled (increase Duration and compare).")]
+             "enough for the readout to have settled (increase Duration and compare)." + _caveat)]
 
 
 def _field(result):
