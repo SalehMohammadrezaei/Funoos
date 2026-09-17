@@ -1061,8 +1061,14 @@ def _solve_dam(p, pr, tmp):
         vmax = 1.3 * max(float(p.get("pourv", 1.4)), float(np.sqrt(2 * g * Ly)))
     else:
         vmax = 1.2 * float(np.sqrt(2 * g * max(H, Ly * 0.5)))
+    # What the speed limiter suppressed. A run with clamp_events > 0 did not carry out the motion
+    # that was asked for: particles faster than 1.5*c0 were rescaled, and c0 follows from gravity
+    # and fill depth alone, so an imposed pour or paddle speed never widened that ceiling.
     hints = {"Lx": Lx, "Ly": Ly, "dp": dp, "vmax": vmax, "scene": sc, "g": g, "H": H, "tend": tend, "a": a,
              "c0": cfg["c0"], "rho_rms_dev": meta_s.get("rho_rms_dev"), "effective": cfg,
+             "clamp_events": meta_s.get("clamp_events"),
+             "clamp_worst_speed": meta_s.get("clamp_worst_speed"),
+             "speed_ceiling": meta_s.get("speed_ceiling"),
              "time_unit": "s" if len(all_t) >= n else "frame"}
     if sc == "ship":
         hints["hull"] = [np.fromfile(Path(tmp) / f"hull_{i:05d}.bin", dtype=np.float32).reshape(-1, 2)

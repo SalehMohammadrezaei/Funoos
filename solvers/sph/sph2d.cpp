@@ -174,6 +174,7 @@ int main(int argc,char**argv){
         front<<tt<<","<<xf<<"\n"; nf++;
         if(step%(A.save_every*3)==0) printf("step %d/%d (%d frames, %d fluid)\n",step,steps,nf,Nw);
     };
+    long clamp_events=0; double clamp_worst=0.0;   // how often the limiter fired, and how hard
     for(int step=0; step<steps; step++){          // exactly `steps` updates, not one more
         double t=step*dt;
         if(step==0) save_frame(t, step);          // the initial state, saved once
@@ -264,7 +265,12 @@ int main(int argc,char**argv){
         double wallL = mover? paddle*0.5*(1-cos(2*M_PI*tp/Tw)) : 0.0;
         double wallV = (mover&&tp>0)? paddle*0.5*(2*M_PI/Tw)*sin(2*M_PI*tp/Tw) : 0.0;
 
-        #pragma omp parallel for
+        // The speed limiter below is not a routine correction: it silently replaces the motion the
+        // user asked for. c0 = 10*sqrt(g*Href) knows nothing about an imposed pour or paddle speed,
+        // so a pour requested at 10 m/s is clamped to 1.5*c0 = 2.12 m/s and the run still reports as
+        // the requested experiment. Count what it suppresses and how far, so the run can say so.
+        long clamped_now=0; double want_now=0.0;
+        #pragma omp parallel for reduction(+:clamped_now) reduction(max:want_now)
         for(int i=0;i<N;i++){
             rho[i]+=dt*drho[i];
             if(bnd[i]){                                  // fixed wall particle
@@ -275,12 +281,14 @@ int main(int argc,char**argv){
             if(rho[i]<rho0*0.5) rho[i]=rho0*0.5;
             vx[i]+=dt*ax[i]; vy[i]+=dt*ay[i];
             double spd=sqrt(vx[i]*vx[i]+vy[i]*vy[i]);
-            if(spd>vmax){ vx[i]*=vmax/spd; vy[i]*=vmax/spd; }
+            if(spd>vmax){ clamped_now++; if(spd>want_now) want_now=spd;
+                          vx[i]*=vmax/spd; vy[i]*=vmax/spd; }
             x[i]+=dt*(vx[i]+epsX*cvx[i]); y[i]+=dt*(vy[i]+epsX*cvy[i]);
             // safety backstop only (the boundary particles do the real confinement)
             if(x[i]<0){x[i]=0; if(vx[i]<0)vx[i]=0;} if(x[i]>A.Lx){x[i]=A.Lx; if(vx[i]>0)vx[i]=0;}
             if(y[i]<0){y[i]=0; if(vy[i]<0)vy[i]=0;} if(y[i]>A.Ly){y[i]=A.Ly; if(vy[i]>0)vy[i]=0;}
         }
+        clamp_events+=clamped_now; if(want_now>clamp_worst) clamp_worst=want_now;
 
         // Saved after the update, at the time the update reached. Saving here as well as at the
         // top of the body wrote two different states under one timestamp, because t is the time
@@ -291,6 +299,10 @@ int main(int argc,char**argv){
     double dev2=0; long nfl=0; for(int i=0;i<(int)x.size();i++) if(!bnd[i]){ double d=rho[i]/rho0-1.0; dev2+=d*d; nfl++; }
     std::ofstream meta(A.out+"/meta.txt");
     meta<<"rho_rms_dev "<<(nfl? sqrt(dev2/nfl):0.0)<<"\n";      // rms relative density deviation of the fluid at the end
+    // what the speed limiter suppressed: how many particle-steps it clamped, the fastest motion it
+    // removed, and the ceiling it clamped to. A run with clamp_events > 0 is not the motion asked for.
+    meta<<"clamp_events "<<clamp_events<<"\nclamp_worst_speed "<<clamp_worst
+        <<"\nspeed_ceiling "<<vmax<<"\nc0 "<<c0<<"\n";
     meta<<"N "<<Nfluid<<"\nLx "<<A.Lx<<"\nLy "<<A.Ly<<"\ng "<<g
         <<"\nscene_"<<sc<<" 1\nnframes "<<nf<<"\n";
     printf("done: %d frames -> %s\n",nf,A.out.c_str());

@@ -159,6 +159,27 @@ def _native_limits(exhibit, v):
             if abs(U) > 0.5:
                 v.errors.append(
                     f"inflow speed |U| = {abs(U):.3f} is above the solver's limit of 0.5 lattice units")
+        elif exhibit == "The Big Splash":
+            import math
+            c = engine._sph_config(v.params)
+            ceiling = 1.5 * c["c0"]            # the solver rescales any particle faster than this
+            if c["scene"] == "pour":
+                want, what = float(v.params.get("pourv", 0.0)), "pour speed"
+            elif c["scene"] in ("waves", "ship"):
+                T = float(v.params.get("waveT", 1.0)) or 1.0
+                want = math.pi * float(v.params.get("waveA", 0.0)) / T
+                what = "wavemaker peak speed"
+            else:
+                want, what = 0.0, ""
+            if want > ceiling:
+                # A warning, not an error: the run is still a sensible simulation, it is simply not
+                # the motion that was asked for. The numerical sound speed follows from gravity and
+                # fill depth alone, so lowering gravity lowers the fastest motion the water can carry.
+                v.warnings.append(
+                    f"{what} {want:.3g} m/s is above the {ceiling:.3g} m/s this water can carry "
+                    f"(the solver rescales anything faster), because the numerical sound speed is set "
+                    f"by gravity and depth. Raise the gravity or ask for less speed; the run will "
+                    f"report how much motion was suppressed.")
     except Exception:            # noqa: BLE001 - never let this check invalidate an otherwise valid run
         return
 

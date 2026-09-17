@@ -48,6 +48,34 @@ test that fails without the fix.
   requested, and the final state survived only when the step count happened to land on the frame
   interval. The pattern solver now returns frames with the step each was reached at, rather than
   times inferred afterwards from an assumed interval.
+* **The tracer no longer claims a settled creeping flow it does not have.** The runner measures the
+  pore Reynolds number on the field it actually freezes and records whether the permeability had
+  stopped moving. At a driving force of 4 with grain 0.07 and porosity 0.85, every one of them
+  inside the recommended range, that is Re 10.8 with the flow still transient, where the docs said
+  "far below one" and called freezing it exact. The step budget is reported too: at low Péclet the
+  diffusive limit makes the step small and the cap binds, so a run covering 0.28 of the 0.36
+  pore-volume crossings asked for now says so rather than presenting a fraction of the experiment
+  as the whole of it. Both appear as measurements and as a plain caveat on the breakthrough panel.
+* **The spectral solver is actually dealiased now.** The 2/3 mask was applied only to the result of
+  the nonlinear term, so modes above the cutoff still multiplied each other and landed inside the
+  retained band, where the mask cannot tell that energy from a real interaction between resolved
+  modes: a state carrying only |kx| = 25 produced a spurious retained mode at (-14, 1) with
+  normalised amplitude 1.6e-05. The state is truncated before any product is formed and stays
+  inside the retained band through the step. The same case now leaves 2e-29 there.
+* **Held blocks in the compressible solver are walls again.** A face between fluid and a held block
+  was solved as an ordinary Riemann problem between two fluids, so mass and energy crossed into the
+  block and the reset applied after each stage absorbed the difference without trace: resting fluid
+  against a block passed 0.0394 of mass and 0.2705 of energy per unit face. The fluid state is now
+  mirrored across such a face, which is the stationary-wall condition and carries no mass and no
+  energy, only the pressure the wall pushes back with. Reported minima now cover every step of the
+  run and the separately saved final state, where before they scanned only the steps that happened
+  to produce a frame and could claim a higher minimum than the final field contains.
+* **A pour or a wavemaker faster than the water can carry says so.** The solver rescales any
+  particle faster than 1.5·c0, and c0 = 10·√(g·Href) follows from gravity and fill depth alone, so
+  an imposed speed never widened that ceiling: a pour asked to run at 3 m/s under low gravity was
+  quietly held to 2.12 m/s and still reported as the requested experiment. The setup now warns
+  before the run, and the run reports how many times the limiter fired and the fastest motion it
+  removed.
 
 ## 1.3.1
 

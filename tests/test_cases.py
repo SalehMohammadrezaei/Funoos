@@ -479,6 +479,25 @@ def test_euler_reported_extrema_cover_the_whole_run():
     assert float(meta["rhomin"]) <= float(fin.min()) + 1e-6, (meta["rhomin"], float(fin.min()))
 
 
+def test_sph_speed_limiter_reports_what_it_suppressed():
+    """The solver rescales any particle faster than 1.5*c0, and c0 = 10*sqrt(g*Href) follows from
+    gravity and fill depth alone, so an imposed pour speed never widens that ceiling. A pour asked
+    to run faster than the water can carry quietly became a slower pour and still reported as the
+    experiment that was requested."""
+    from flowzoo import schema, postproc
+    base = {q["name"]: q["default"] for q in engine.EXHIBITS["The Big Splash"]["params"]}
+    over = dict(base, scene="Pour into a glass", gravity=0.1, pourv=3.0, duration=0.05)
+    v = schema.validate("The Big Splash", over, allow_outside=True)
+    assert any("can carry" in w for w in v.warnings), v.warnings      # said before the run starts
+    m = postproc.metrics(engine.solve_exhibit("The Big Splash", v.params))
+    assert m["speed_limiter_events"] > 0, m
+    assert m["fastest_motion_requested"] > m["speed_limiter_suppressed_to"], m
+    inrange = dict(base, scene="Pour into a glass", pourv=3.0, duration=0.05)   # default gravity
+    m2 = postproc.metrics(engine.solve_exhibit(
+        "The Big Splash", schema.validate("The Big Splash", inrange).params))
+    assert m2["speed_limiter_events"] == 0, m2
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

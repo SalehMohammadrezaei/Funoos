@@ -219,6 +219,16 @@ def metrics(result):
                 m["pore_reynolds"] = float(h["pore_reynolds"])
             if h.get("crossings_run") is not None:
                 m["pore_volume_crossings"] = float(h["crossings_run"])
+        if result.kind == "particles":
+            # The speed limiter rescales any particle faster than 1.5*c0, and c0 follows from
+            # gravity and fill depth alone. If it fired, the water did not move the way it was asked
+            # to, so the count belongs beside the results rather than inside the solver.
+            ce = h.get("clamp_events")
+            if ce is not None:
+                m["speed_limiter_events"] = float(ce)
+                if float(ce) > 0 and h.get("clamp_worst_speed") is not None:
+                    m["speed_limiter_suppressed_to"] = float(h.get("speed_ceiling") or 0.0)
+                    m["fastest_motion_requested"] = float(h["clamp_worst_speed"])
         elif k == "lbm":
             obs = h.get("obstacle", "Cylinder")
             t, sig, _src = _wind_series(result)
