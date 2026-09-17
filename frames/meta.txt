@@ -1,0 +1,7 @@
+nx 400
+ny 200
+nframes 2
+time 0.2
+mode_sod 1
+pmin 0.1
+rhomin 0.125

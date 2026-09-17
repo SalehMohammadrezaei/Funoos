@@ -168,8 +168,15 @@ int main(int argc,char**argv){
             Rr.r=cR.r-0.5*minmod(cR.r-cL.r,cRR.r-cR.r); Rr.u=cR.u-0.5*minmod(cR.u-cL.u,cRR.u-cR.u);
             Rr.v=cR.v-0.5*minmod(cR.v-cL.v,cRR.v-cR.v); Rr.p=cR.p-0.5*minmod(cR.p-cL.p,cRR.p-cR.p);
             if(L.p<1e-6||L.r<1e-6){L=cL;} if(Rr.p<1e-6||Rr.r<1e-6){Rr=cR;}
+            // A face against a held block is a wall. Solving it as a Riemann problem between two
+            // fluids let mass and energy cross into the block, and resetting the block afterwards
+            // swallowed the difference. Mirroring the fluid state across the face (normal velocity
+            // reversed) is the stationary-wall condition: no mass, no energy, pressure only.
+            double* f=&FX[((size_t)j*(nx-1)+i)*4];
+            if(solid[sL]&&solid[sR]){ f[0]=f[1]=f[2]=f[3]=0.0; continue; }
+            if(solid[sR]){ Rr=L; Rr.u=-L.u; } else if(solid[sL]){ L=Rr; L.u=-Rr.u; }
             double F[4]; hllc_x(L,Rr,F);
-            double* f=&FX[((size_t)j*(nx-1)+i)*4]; f[0]=F[0]; f[1]=F[1]; f[2]=F[2]; f[3]=F[3];
+            f[0]=F[0]; f[1]=F[1]; f[2]=F[2]; f[3]=F[3];
         }
         // y-direction faces (rotate: normal=y -> swap u,v into hllc_x); face (i,j) between (i,j) and (i,j+1)
         #pragma omp parallel for schedule(static)
@@ -186,8 +193,12 @@ int main(int argc,char**argv){
             Rr2.r=Rr.r-0.5*minmod(Rr.r-L.r,RR.r-Rr.r); Rr2.u=Rr.u-0.5*minmod(Rr.u-L.u,RR.u-Rr.u);
             Rr2.v=Rr.v-0.5*minmod(Rr.v-L.v,RR.v-Rr.v); Rr2.p=Rr.p-0.5*minmod(Rr.p-L.p,RR.p-Rr.p);
             if(Lr.p<1e-6||Lr.r<1e-6)Lr=L; if(Rr2.p<1e-6||Rr2.r<1e-6)Rr2=Rr;
+            // same wall condition across a y face; after roty the normal component is u
+            double* f=&FY[((size_t)j*nx+i)*4];
+            if(solid[sL]&&solid[sR]){ f[0]=f[1]=f[2]=f[3]=0.0; continue; }
+            if(solid[sR]){ Rr2=Lr; Rr2.u=-Lr.u; } else if(solid[sL]){ Lr=Rr2; Lr.u=-Rr2.u; }
             double F[4]; hllc_x(Lr,Rr2,F);  // F[1]=normal(y)-mom, F[2]=tangential(x)-mom
-            double* f=&FY[((size_t)j*nx+i)*4]; f[0]=F[0]; f[1]=F[2]; f[2]=F[1]; f[3]=F[3];   // stored as [rho, x-mom, y-mom, E]
+            f[0]=F[0]; f[1]=F[2]; f[2]=F[1]; f[3]=F[3];   // stored as [rho, x-mom, y-mom, E]
         }
         // cell accumulation: interior faces, plus transmissive boundary faces (zero-gradient
         // ghost = boundary cell, so the boundary-face flux is the physical flux there)
@@ -230,9 +241,12 @@ int main(int argc,char**argv){
         ftimes<<t<<"\n"; nf++; };
     double t_last_saved=-1.0, pmin_run=1e300, rmin_run=1e300;
     for(int step=0; step<a.steps && t<a.tend; step++){
+        // Every step, not only the ones that produced a frame: an extremum reached between saves
+        // is still an extremum the run reached, and reporting the minimum over saved frames as the
+        // minimum of the run understates exactly the excursions worth knowing about.
+        for(int s=0;s<N;s++){ St q=getprim(r,mx,my,E,s); double praw=(G-1)*(E[s]-0.5*r[s]*(q.u*q.u+q.v*q.v));
+            if(praw<pmin_run) pmin_run=praw; if(r[s]<rmin_run) rmin_run=r[s]; }
         if(step%a.save_every==0){ save_frame(); t_last_saved=t;
-            for(int s=0;s<N;s++){ St q=getprim(r,mx,my,E,s); double praw=(G-1)*(E[s]-0.5*r[s]*(q.u*q.u+q.v*q.v));
-                if(praw<pmin_run) pmin_run=praw; if(r[s]<rmin_run) rmin_run=r[s]; }
             if(step%(a.save_every*3)==0)printf("step %d t=%.4f (%d frames)\n",step,t,nf); }
         double dt=a.cfl/maxspeed(); if(t+dt>a.tend)dt=a.tend-t;
         // stage 1
@@ -273,6 +287,9 @@ int main(int argc,char**argv){
         }
     }
     if(t!=t_last_saved) save_frame();            // final state, at the actual end time
+    // the final state counts too: it is saved separately, so the loop above never scanned it
+    for(int s=0;s<N;s++){ St q=getprim(r,mx,my,E,s); double praw=(G-1)*(E[s]-0.5*r[s]*(q.u*q.u+q.v*q.v));
+        if(praw<pmin_run) pmin_run=praw; if(r[s]<rmin_run) rmin_run=r[s]; }
     // always save final density
     { std::vector<float> buf(N); for(int s=0;s<N;s++)buf[s]=(float)r[s];
       char fn[512]; snprintf(fn,sizeof(fn),"%s/final.bin",a.out.c_str());
@@ -282,7 +299,7 @@ int main(int argc,char**argv){
         std::ofstream ff(a.out+"/failt.bin",std::ios::binary); ff.write((char*)fb.data(),N*sizeof(float)); }
     std::ofstream meta(a.out+"/meta.txt");
     meta<<"nx "<<nx<<"\nny "<<ny<<"\nnframes "<<nf<<"\ntime "<<t<<"\nmode_"<<a.mode<<" 1\n"
-        <<"pmin "<<pmin_run<<"\nrhomin "<<rmin_run<<"\n";     // admissibility over the saved frames (raw pressure, before the 1e-6 floor)
+        <<"pmin "<<pmin_run<<"\nrhomin "<<rmin_run<<"\n";     // admissibility over every step of the run, final state included (raw pressure, before the 1e-6 floor)
     printf("done: %d frames, t=%.4f -> %s\n",nf,t,a.out.c_str());
     return 0;
 }

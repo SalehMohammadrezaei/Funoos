@@ -435,6 +435,50 @@ def test_spectral_products_do_not_alias_into_the_retained_band():
     assert float(kept.max()) < 1e-20, float(kept.max())
 
 
+def test_euler_held_blocks_neither_gain_nor_lose():
+    """A face against a held block is a wall. Solved as an ordinary Riemann problem between two
+    fluids it carried mass and energy into the block, and the reset applied after each stage
+    absorbed the difference, so nothing in the output ever showed it."""
+    import subprocess, tempfile
+    from pathlib import Path
+    exe = engine._bin("compressible", "euler2d")
+    d = tempfile.mkdtemp(prefix="wall_")
+    nx, ny = 120, 80
+    r = subprocess.run([str(exe), "--nx", str(nx), "--ny", str(ny), "--steps", "300",
+                        "--save_every", "100", "--mode", "blast", "--building", "1",
+                        "--strength", "500", "--p0", "3", "--out", d],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, (r.returncode, r.stderr[-300:])
+    sb = np.fromfile(Path(d, "solid.bin"), dtype=np.float32).reshape(ny, nx) > 0.5
+    fin = np.fromfile(Path(d, "final.bin"), dtype=np.float32).reshape(ny, nx)
+    assert int(sb.sum()) > 100, int(sb.sum())          # the test needs blocks to be worth anything
+    held = fin[sb]
+    assert float(held.min()) == 6.0 and float(held.max()) == 6.0, (float(held.min()), float(held.max()))
+    assert np.isfinite(fin).all()
+
+
+def test_euler_reported_extrema_cover_the_whole_run():
+    """The reported minima describe the run, not the frames that happened to be saved. Scanning
+    only on saving steps skipped every step in between and the separately saved final state, so
+    the metadata could claim a higher minimum than the final field itself contains."""
+    import subprocess, tempfile
+    from pathlib import Path
+    exe = engine._bin("compressible", "euler2d")
+    d = tempfile.mkdtemp(prefix="extrema_")
+    nx, ny = 120, 80
+    r = subprocess.run([str(exe), "--nx", str(nx), "--ny", str(ny), "--steps", "300",
+                        "--save_every", "97", "--mode", "blast", "--p0", "12", "--out", d],
+                       capture_output=True, text=True)      # 300 is not a multiple of 97, so the
+    assert r.returncode == 0, (r.returncode, r.stderr[-300:])   # final state is saved separately
+    meta = {}
+    for line in Path(d, "meta.txt").read_text().splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            meta[parts[0]] = parts[1]
+    fin = np.fromfile(Path(d, "final.bin"), dtype=np.float32).reshape(ny, nx)
+    assert float(meta["rhomin"]) <= float(fin.min()) + 1e-6, (meta["rhomin"], float(fin.min()))
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
