@@ -601,7 +601,9 @@ def _rb_convection(result):
                 f"Conductive flux −κ d⟨T⟩/dz (κ = {f['kappa']:g}), convective flux ⟨v T⟩ and their sum, all in "
                 "solver units, at the final frame. The Nusselt number is the layer-averaged total flux divided "
                 f"by the conduction flux κ ΔT/H of the motionless state ({nu_txt}); Nu = 1 means no convective "
-                "transport. Onset for rigid, conducting plates is Ra ≈ 1708 (see derived quantities for Ra)."))
+                "transport. The plates here are free-slip: the solver holds the normal velocity at zero and "
+                "lets the tangential one slide, and for stress-free conducting plates convection sets in past "
+                "Ra ≈ 657.5, not the Ra ≈ 1708 that rigid plates need (see derived quantities for Ra)."))
     return out
 
 

@@ -584,8 +584,11 @@ class Result:
 # ---------- parameter descriptors (pre-run only) ----------
 # Keys: see flowzoo/schema.py. min/max = recommended range; hard_min/hard_max = solver
 # limits; units; advanced (hidden in the approachable mode); fixed (what stays fixed).
-def P_RES(help="Grid resolution. Changes only the grid: the domain, parameters and simulated "
-               "interval stay the same, so results at different resolutions are comparable."):
+def P_RES(help="Grid resolution. It changes the grid, and with it whatever a scene ties to the grid: "
+               "the elapsed convective time in the wind tunnel, the Rayleigh number in the convection "
+               "scenes, the grain size in the rock, the extent of the blast box. The derived readouts "
+               "say what moved for this experiment; runs at different resolutions are comparable only "
+               "where they say so."):
     return {"name": "resolution", "label": "Resolution", "type": "choice",
             "choices": list(RES), "default": "Medium", "group": "Render", "help": help}
 
@@ -848,7 +851,10 @@ def _solve_porous(p, pr, tmp):
         k_end = kh[-1, 1]; k_prev = kh[max(0, int(0.9 * len(kh)) - 1), 1]
         k_change = float(abs(k_end - k_prev) / (abs(k_end) + 1e-30)); settled = k_change < 0.01
     upore = meta.get("mean_ux_pore") or 0.0; re_pore = abs(upore) * grain / cfg["nu"]
-    hints = {"porosity": poro, "permeability": perm, "grain": grain, "force": force, "tau": tau,
+    # The sample is packed from whole discs, so the porosity asked for is a target the packing can
+    # miss: 0.95 can land at 0.879. Both are reported, so "the same porosity" can be checked.
+    hints = {"porosity": poro, "porosity_requested": phi,
+             "permeability": perm, "grain": grain, "force": force, "tau": tau,
              "direction": "y" if fdir else "x", "seed": cfg["seed"],
              "nu": cfg["nu"], "mean_ux_pore": upore, "mean_ux": meta.get("mean_ux"),
              "k_status": "settled" if settled else "transient", "k_change_last10pct": k_change,
@@ -1204,10 +1210,12 @@ EXHIBITS = {
                       fixed="U and D stay; ν = U·D/Re changes"),
                    _f("speed", "Inflow speed", 0.08, 0.02, 0.15, "Physics", _H["U"], units="lattice",
                       hard_min=0.005, hard_max=0.25, fixed="Re stays; ν changes with U"),
-                   _f("xpos", "Obstacle position", 0.25, 0.15, 0.5, "Geometry",
-                      "Streamwise position of the obstacle centre as a fraction of the tunnel length "
-                      "(vehicles and text use their own placement).", units="× length", hard_min=0.05,
-                      hard_max=0.8, advanced=True),
+                   # Only the simple bodies are placed from this; the vehicles and the text set their
+                   # own position and overwrite it, so for those it is shown but does nothing.
+                   _when(_f("xpos", "Obstacle position", 0.25, 0.15, 0.5, "Geometry",
+                           "Streamwise position of the obstacle centre as a fraction of the tunnel "
+                           "length.", units="× length", hard_min=0.05, hard_max=0.8, advanced=True),
+                         "obstacle", ["Cylinder", "Square", "Diamond", "Airfoil"]),
                    P_RES(), P_DUR()],
         "solve": lambda p, pr, t: _solve_windtunnel(p, pr, t)},
     "Rising Smoke": {

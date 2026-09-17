@@ -108,7 +108,7 @@ int main(int argc,char**argv){
             }
         }
         for(int i=0;i<nx;i++){
-            q[IX(i,0)]    = (kind==2)?0.0:q[IX(i,1)];                 // no-slip / no-penetration floor
+            q[IX(i,0)]    = (kind==2)?0.0:q[IX(i,1)];                 // free-slip floor: normal velocity zeroed, tangential copied
             if(open_top) q[IX(i,ny-1)] = q[IX(i,ny-2)];              // open top: zero-gradient for u, v AND scalar
             else         q[IX(i,ny-1)] = (kind==2)?0.0:q[IX(i,ny-2)]; // closed top (RT/RB)
         }

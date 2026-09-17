@@ -380,7 +380,8 @@ DETAIL["Rayleigh-Benard"] = {
 "• ∂t T + u·∇T = κ∇²T — temperature is carried by the flow and diffuses with κ\n"
 "• α g T ŷ — Boussinesq buoyancy: warm fluid (high T) feels an upward force\n"
 "• ν∇²u — viscous damping; with κ it resists the overturning\n"
-"• Rayleigh number Ra = αgΔT d³/(νκ) — forcing ÷ damping; convection begins past Ra≈1708\n"
+"• Rayleigh number Ra = αgΔT d³/(νκ) — forcing ÷ damping; with the free-slip plates this\n"
+"  solver uses, convection begins past Ra≈657.5 (rigid plates would need Ra≈1708)\n"
 "• fixed-temperature plates top & bottom set ΔT across the layer depth d"),
 }
 DETAIL["Chimney Plume"] = {

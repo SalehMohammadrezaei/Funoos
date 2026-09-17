@@ -76,6 +76,22 @@ test that fails without the fix.
   quietly held to 2.12 m/s and still reported as the requested experiment. The setup now warns
   before the run, and the run reports how many times the limiter fired and the fastest motion it
   removed.
+* **Explanations corrected where they described something the code does not do.** The convection
+  scenes gave onset as Ra approximately 1708, which is the figure for rigid plates, while the solver
+  holds the normal velocity at zero and lets the tangential one slide: stress-free plates convect
+  past Ra approximately 657.5. A comment in that same solver called the boundary "no-slip". The
+  Taylor-Green docstring gave a single decay rate for the solution and for its energy, which differ
+  by a factor of two: the amplitudes decay as exp(-2vt), the energy as exp(-4vt), and it is the
+  energy the decay check measures. The resolution control said it changed only the grid, when it
+  also moves the elapsed convective time in the wind tunnel, the Rayleigh number in the convection
+  scenes, the grain size in the rock and the extent of the blast box.
+* **The rock reports the porosity it built, not only the one asked for.** The sample is packed from
+  whole discs, so the target can be missed: 0.95 requested can land at 0.879, and at low resolution
+  with large grains 0.85 lands at 0.758. Both numbers are now reported, so a comparison "at the same
+  porosity" can be checked rather than assumed.
+* **The obstacle position control is offered only where it does something.** The vehicles and the
+  text set their own streamwise position and overwrite it, so for four of the seven bodies the
+  control sat there taking input and changing nothing.
 
 ## 1.3.1
 

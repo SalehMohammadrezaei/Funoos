@@ -131,7 +131,9 @@ def double_shear_layer(n, L=2 * np.pi, delta=1 / 30, amp=0.05):
 
 def taylor_green(n, L=2 * np.pi):
     """Taylor–Green vortex (wavenumber 1): ψ = sin x sin y, ω = 2 sin x sin y. An exact solution of the
-    2-D Navier–Stokes equations that decays as exp(−2νk²t) = exp(−4νt) in a 2π box."""
+    2-D Navier–Stokes equations in a 2π box, where k² = 2. The vorticity and velocity amplitudes decay
+    as exp(−νk²t) = exp(−2νt); the kinetic energy is quadratic in them and so decays twice as fast,
+    as exp(−4νt). The decay check in the tests measures the energy."""
     x = np.linspace(0, L, n, endpoint=False)
     X, Y = np.meshgrid(x, x, indexing="ij")
     return np.fft.fft2(2.0 * np.sin(X) * np.sin(Y))
