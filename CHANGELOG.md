@@ -117,7 +117,22 @@ test that fails without the fix.
   number of 29. The readouts no longer state "Stokes regime" as a fact, the requested and achieved
   porosity and the measured pore Reynolds number are both reported, and the permeability plot says
   plainly when the sample is not the one that was asked for or the flow is not creeping.
-* **Recorded, not fixed: the projection leaves much of the divergence it measures.** The divergence
+* **The incompressible projection is fixed, not just recorded.** The divergence and the pressure
+  gradient were centred differences spanning three cells while the Laplacian solved between them
+  spanned one. Those do not compose, so converging the pressure could not cancel the divergence the
+  velocity operator measured: the old scheme left 31% of it in the smoke plume, 60% in
+  Rayleigh-Taylor, 89% in Rayleigh-Benard, 38% in the flame and 70% in the chimney, and iterating
+  fifty times longer changed nothing because it was converging accurately to the wrong system.
+  Velocity now lives on cell faces with pressure at centres, so both operators are compact and
+  compose into exactly the Laplacian being inverted; every mode now leaves about 1e-08. The fixed
+  iteration count became a residual criterion (a fixed count is not a fixed accuracy: 3000 sweeps
+  left 4e-09 at 60x90 and 1.4e-03 at 540x360), and the smoother became conjugate gradients, whose
+  iterations grow with the square root of the cell count rather than linearly. The chimney is now
+  closed faces inside the pressure operator instead of velocities zeroed afterwards, which had been
+  reintroducing the divergence the solve removed. This changes what the convection exhibits produce:
+  Rayleigh-Benard gains 55% in kinetic energy, the flame loses 82%, the chimney gains 157% in
+  enstrophy, and their gallery clips are re-rendered to match.
+* **Superseded: the projection limitation recorded in the previous entry.** The divergence
   and the pressure gradient are centred differences spanning three cells, while the pressure
   equation solved between them is the compact five-point Laplacian, so converging the pressure
   cannot cancel what the velocity operator sees. Measured immediately after the projection, before

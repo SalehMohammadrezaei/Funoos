@@ -975,19 +975,23 @@ def _solve_tracer(p, pr, tmp):
 def _solve_ns(mode, p, pr, tmp):
     cfg = _ns_config(mode, p); nx, ny, steps = cfg["nx"], cfg["ny"], cfg["steps"]
     _ensure(_bin("incompressible", "ins2d"))
+    # The pressure solve stops when its residual falls below target, so --iters is a backstop
+    # against a pathological case rather than a work quota. Production grids need 2000-2800 CG
+    # iterations; the old values (60 by default, 80 for rt/rb) were tuned for a fixed-count SOR
+    # sweep and would now cap every scene short of convergence while still reporting success.
     args = [str(_bin("incompressible", "ins2d")), "--mode", mode, "--nx", str(nx),
             "--ny", str(ny), "--steps", str(steps), "--save_every", str(cfg["save_every"]),
-            "--out", tmp, "--visc", str(p["viscosity"])]
+            "--out", tmp, "--visc", str(p["viscosity"]), "--iters", "20000"]
     if mode == "smoke":
         args += ["--buoy", str(p["buoyancy"]), "--conf", str(p["confinement"]), "--srcw", str(p["source"]),
                  "--flicker", str(p.get("flicker", 0.0))]
         hints = {"vlim": (0.0, 0.85), "gamma": 0.85, "label": "smoke density"}
     elif mode == "rt":
         args += ["--grav", str(p["gravity"]), "--pert", str(p["perturbation"]), "--conf", "0",
-                 "--iters", "80", "--atwood", str(p.get("atwood", 1.0)), "--modes", str(int(p.get("modes", 0)))]
+                 "--atwood", str(p.get("atwood", 1.0)), "--modes", str(int(p.get("modes", 0)))]
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "density ρ"}
     elif mode == "rb":
-        args += ["--buoy", str(p["buoyancy"]), "--conf", "0", "--iters", "80",
+        args += ["--buoy", str(p["buoyancy"]), "--conf", "0",
                  "--pert", str(p.get("perturbation", 1.0)), "--kappa", str(p.get("kappa", 0.02))]
         hints = {"vlim": (0.0, 1.0), "gamma": 1.0, "label": "temperature T", "kappa": float(p.get("kappa", 0.02))}
     elif mode == "flame":                           # laminar diffusion flame (Burke–Schumann)
@@ -1012,7 +1016,7 @@ def _solve_ns(mode, p, pr, tmp):
     # not imply a divergence-free field when the divergence, the gradient and the Laplacian between
     # them are not the same operator, so the residual is reported rather than assumed.
     _ns_meta = fio.read_meta(tmp)
-    for _k in ("div_pre", "div_post"):
+    for _k in ("div_pre", "div_post", "pressure_iters", "pressure_capped"):
         if _k in _ns_meta:
             hints[_k] = float(_ns_meta[_k])
     mask = None

@@ -88,24 +88,39 @@ control and defaulting to 0 where a measurement matters.
 **Checks.** RB conduction baseline and diffusion test; RT mixing width consistent
 across resolutions; Nusselt number from the conductive + convective flux budget.
 
-**Known limitation: the projection does not remove all the divergence it measures.**
-The divergence and the pressure gradient are centred differences spanning i-1..i+1,
-while the pressure equation solved between them is the compact five-point Laplacian.
-Those operators do not compose, so converging the pressure cannot cancel the
-divergence the velocity operator sees. On a manufactured field the pressure residual
-falls to 8e-15, a genuinely converged solve, and 49% of the divergence is still there.
-Measured on the shipped scenes, immediately after the projection and before any force
-is applied, it removes 59% of what it is handed in the smoke plume, 53% in
-Rayleigh-Taylor, 51% in the chimney and 16% in Rayleigh-Benard. This text used to say
-the field was divergence-free to the solver tolerance. It is not, so it no longer says so.
+**The projection is staggered.** Velocity lives on cell faces (u on the vertical faces, v on the
+horizontal ones) and pressure at cell centres, so the divergence and the pressure gradient are both
+compact differences and compose into exactly the five-point Laplacian the pressure solve inverts.
 
-Correcting the velocities on faces with the compact difference, which is the operator
-the solved Laplacian actually inverts, was tried and rejected on measurement: it made
-the manufactured case exact but removed only 11% in the smoke plume against the 59%
-the present scheme manages, shifted the exhibits' kinetic energy by 10 to 15% and
-their enstrophy by up to 4.3 times, and ran slower. A correct fix is a staggered
-arrangement in which the face field is the state rather than something reconstructed
-every step; that changes all five convection exhibits and is not a contained change.
+It was not always so. On the collocated grid this solver used until 2026-09-18, the divergence and
+the gradient were centred differences spanning three cells while the Laplacian between them spanned
+one. Those do not compose, so converging the pressure could not cancel the divergence the velocity
+operator measured, and the grid-scale checkerboard mode was invisible to the pressure entirely. The
+cost was not subtle: measured immediately after the projection, before any force was applied, the
+old scheme left **31% of the divergence in the smoke plume, 60% in Rayleigh-Taylor, 89% in
+Rayleigh-Benard, 38% in the flame and 70% in the chimney**. It was not under-converged; iterating
+fifty times longer changed nothing, because it was converging accurately to the wrong system.
+
+The staggered scheme leaves about 1e-08 in every mode. Two further changes were needed to make that
+affordable. The fixed iteration count became a residual criterion, because a fixed count is not a
+fixed accuracy: 3000 sweeps left 4e-09 at 60x90 and 1.4e-03 at 540x360. And the smoother became
+conjugate gradients, whose iteration count grows roughly with the square root of the cell count
+rather than linearly (317 to 1534 across that same range, against 2816 to 43136 for SOR). Warm
+starting the pressure from the previous step and deriving the over-relaxation from the grid gave a
+further factor of ten while SOR was still in use.
+
+The chimney is imposed as closed faces inside the pressure operator. Previously its velocities were
+zeroed after the projection, which put back the divergence the solve had just removed.
+
+`div_pre` and `div_post` are reported for every run, so the projection's residual is a measurement
+rather than an assumption. The wind case pins its inlet ghost pressure to zero, a Dirichlet
+condition that makes its system non-singular; that coupling is in the operator, and the de-meaning
+used for the closed, purely Neumann cases is skipped there.
+
+**These changes alter what the convection exhibits produce.** Against the previous solver at its
+shipped settings: Rayleigh-Benard gains 55% in kinetic energy, the flame loses 82%, the chimney
+plume gains 157% in enstrophy. The scenes were being driven by a substantially non-solenoidal
+velocity field and no longer are.
 
 ## 3. Compressible Euler (finite volume, HLLC) — `solvers/compressible`
 
