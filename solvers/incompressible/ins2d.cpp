@@ -77,9 +77,48 @@ int main(int argc,char**argv){
 
     auto clampd=[&](double x,double lo,double hi){ return x<lo?lo:(x>hi?hi:x); };
 
+    int sx = wind ? nx/4 : nx/2;                 // chimney sits upwind so the plume can bend across
+    // source geometry, bounded so it always fits inside the interior (i in [1, nx-2], j in [1, ny-2])
+    int sw=std::min(std::max(6,(int)(nx/12*a.srcw)), std::max(1,(nx-4)/2));
+    int sh=std::min(std::max(5,ny/26), std::max(1,(ny-4)/2));
+    int stack_h  = wind ? std::min((int)(0.32*ny), ny-sh-3) : 0;    // chimney height; the plume leaves its top
+    int stack_hw = std::min(std::max(2, sw/2), std::max(1,(nx-4)/2)); // chimney half-width (solid)
+    int sj = wind ? stack_h : 1;                 // source sits at the stack mouth, not on the floor
+    if(sj+sh>ny-1) sh=std::max(1, ny-1-sj);
+
+    // ---- staggered (MAC) layout -------------------------------------------------------
+    // u[IX(i,j)] is the VERTICAL face between cells (i,j) and (i+1,j); u[IX(nx-1,j)] is unused.
+    // v[IX(i,j)] is the HORIZONTAL face between cells (i,j) and (i,j+1); v[IX(i,ny-1)] is unused.
+    // p, s and div stay at cell centres. Divergence and gradient are then both compact, and their
+    // composition is exactly the five-point Laplacian the pressure solve inverts, so a converged
+    // pressure really does leave a divergence-free field. On a collocated grid they span three
+    // cells while the Laplacian spans one; they do not compose, and the grid-scale (checkerboard)
+    // mode is invisible to the pressure, which is why the old projection left 34% to 84% behind.
+    auto ufx=[&](int i,int j){ return u[IX(i,j)]; };          // face right of cell (i,j)
+    auto vfy=[&](int i,int j){ return v[IX(i,j)]; };          // face above cell (i,j)
+    // a face is closed when either neighbouring cell is solid; closed faces carry no flow and take
+    // no pressure gradient, which is how the chimney is imposed INSIDE the projection rather than
+    // stomped on afterwards (stomping reintroduced exactly the divergence the solve had removed)
+    // Precomputed once: the geometry never changes, and evaluating it inside the SOR inner loop
+    // meant up to eight predicate calls per cell per colour per sweep.
+    std::vector<char> sld(N,0), opx(N,0), opy(N,0);
+    for(int j=0;j<ny;j++)for(int i=0;i<nx;i++)
+        sld[IX(i,j)] = (wind && j<stack_h && i>=sx-stack_hw && i<=sx+stack_hw) ? 1 : 0;
+    for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){
+        opx[IX(i,j)] = (i+1<nx && !sld[IX(i,j)] && !sld[IX(i+1,j)]) ? 1 : 0;
+        opy[IX(i,j)] = (j+1<ny && !sld[IX(i,j)] && !sld[IX(i,j+1)]) ? 1 : 0;
+    }
+    auto solid_cell=[&](int i,int j){ return sld[IX(i,j)]!=0; };
+    auto openx=[&](int i,int j){ return opx[IX(i,j)]!=0; };
+    auto openy=[&](int i,int j){ return opy[IX(i,j)]!=0; };
+
+
     // bilinear sample of field q at (x,y) in cell units
     auto sample=[&](const std::vector<double>&q,double x,double y){
-        x=clampd(x,0.5,nx-1.5); y=clampd(y,0.5,ny-1.5);
+        // clamp so the 2x2 stencil below always sits inside the array; callers that sample a face
+        // field pass coordinates already shifted by half a cell, and the old centre-only clamp put
+        // their edge rows half a cell out of place every step
+        x=clampd(x,0.0,(double)nx-1.001); y=clampd(y,0.0,(double)ny-1.001);
         int i=(int)x, j=(int)y; double fx=x-i, fy=y-j;
         double q00=q[IX(i,j)],q10=q[IX(i+1,j)],q01=q[IX(i,j+1)],q11=q[IX(i+1,j+1)];
         return (1-fx)*(1-fy)*q00+fx*(1-fy)*q10+(1-fx)*fy*q01+fx*fy*q11;
@@ -95,61 +134,212 @@ int main(int argc,char**argv){
             d[IX(i,j)]=sample(d0,x,y);
         }
     };
-    // walls: free-slip sides/floor; open top for smoke/wind, closed for RT/RB.
-    // wind: left is a velocity inlet (u=U, v=0, clean air), right an outflow.
-    auto set_bc=[&](std::vector<double>&q,int kind){ // kind: 0 scalar,1 u,2 v
-        for(int j=0;j<ny;j++){
-            if(wind){
-                q[IX(0,j)]    = (kind==1)? a.wind : 0.0;   // inlet: u=U, v=0, s=0
-                q[IX(nx-1,j)] = q[IX(nx-2,j)];             // outflow (zero-gradient)
-            } else {
-                q[IX(0,j)]    = (kind==1)?0.0:q[IX(1,j)];
-                q[IX(nx-1,j)] = (kind==1)?0.0:q[IX(nx-2,j)];
-            }
-        }
-        for(int i=0;i<nx;i++){
-            q[IX(i,0)]    = (kind==2)?0.0:q[IX(i,1)];                 // free-slip floor: normal velocity zeroed, tangential copied
-            if(open_top) q[IX(i,ny-1)] = q[IX(i,ny-2)];              // open top: zero-gradient for u, v AND scalar
-            else         q[IX(i,ny-1)] = (kind==2)?0.0:q[IX(i,ny-2)]; // closed top (RT/RB)
+    // Face-aware versions. Each velocity component is traced from ITS OWN face position, with the
+    // other component interpolated to that position, and sampled out of its own face field. The
+    // collocated version traced both from the cell centre, which on a staggered grid is half a
+    // cell wrong for every component.
+    auto advect_u=[&](std::vector<double>&d,const std::vector<double>&u0f,
+                      const std::vector<double>&v0f){
+        #pragma omp parallel for schedule(static)
+        for(int j=1;j<ny-1;j++)for(int i=1;i<nx-2;i++){
+            if(!opx[IX(i,j)]){ d[IX(i,j)]=0.0; continue; }
+            // v at the u face (i+1/2, j): average the four v faces around it
+            double vhere=0.25*(v0f[IX(i,j)]+v0f[IX(i+1,j)]
+                              +v0f[IX(i,std::max(j-1,0))]+v0f[IX(i+1,std::max(j-1,0))]);
+            double x=(i+0.5)-a.dt*u0f[IX(i,j)], y=j-a.dt*vhere;
+            d[IX(i,j)]=sample(u0f, x-0.5, y);          // u faces are offset half a cell in x
         }
     };
+    auto advect_v=[&](std::vector<double>&d,const std::vector<double>&u0f,
+                      const std::vector<double>&v0f){
+        #pragma omp parallel for schedule(static)
+        for(int j=1;j<ny-2;j++)for(int i=1;i<nx-1;i++){
+            if(!opy[IX(i,j)]){ d[IX(i,j)]=0.0; continue; }
+            double uhere=0.25*(u0f[IX(i,j)]+u0f[IX(i,j+1)]
+                              +u0f[IX(std::max(i-1,0),j)]+u0f[IX(std::max(i-1,0),j+1)]);
+            double x=i-a.dt*uhere, y=(j+0.5)-a.dt*v0f[IX(i,j)];
+            d[IX(i,j)]=sample(v0f, x, y-0.5);          // v faces are offset half a cell in y
+        }
+    };
+    // walls: free-slip sides/floor; open top for smoke/wind, closed for RT/RB.
+    // wind: left is a velocity inlet (u=U, v=0, clean air), right an outflow.
+    // Boundary conditions on a staggered grid. Which index IS the wall differs per field, and the
+    // collocated version got this wrong once the layout changed: it zeroed u[IX(nx-1,j)] and
+    // v[IX(i,ny-1)], both of which are unused slots here, so the right wall and the closed top were
+    // never imposed at all, while the values it did write were fed straight into the divergence
+    // measurement that project() takes immediately afterwards.
+    //
+    //   u[IX(i,j)] is the face between cells i and i+1  -> the left wall is u[IX(0,j)],
+    //                                                      the right wall is u[IX(nx-2,j)]
+    //   v[IX(i,j)] is the face between cells j and j+1  -> the floor is v[IX(i,0)],
+    //                                                      the ceiling is v[IX(i,ny-2)]
+    //   scalars live at centres, so their ghost ring is the outermost cell as before.
+    auto set_bc=[&](std::vector<double>&q,int kind){ // kind: 0 scalar,1 u,2 v
+        if(kind==1){                                  // u faces
+            for(int j=0;j<ny;j++){
+                if(wind){
+                    q[IX(0,j)]    = a.wind;           // velocity inlet on the left wall face
+                    if(nx>=3) q[IX(nx-2,j)] = q[IX(nx-3,j)];   // outflow: zero-gradient
+                } else {
+                    q[IX(0,j)]    = 0.0;              // no flow through the side walls
+                    if(nx>=2) q[IX(nx-2,j)] = 0.0;
+                }
+                if(nx>=1) q[IX(nx-1,j)] = 0.0;        // unused slot, kept clean
+            }
+            for(int i=0;i<nx;i++){                    // free-slip floor/ceiling: tangential copied
+                q[IX(i,0)] = q[IX(i,1)];
+                q[IX(i,ny-1)] = q[IX(i,ny-2)];
+            }
+        } else if(kind==2){                           // v faces
+            for(int i=0;i<nx;i++){
+                q[IX(i,0)] = 0.0;                     // no flow through the floor
+                if(ny>=2) q[IX(i,ny-2)] = open_top ? q[IX(i,std::max(ny-3,0))] : 0.0;
+                q[IX(i,ny-1)] = 0.0;                  // unused slot, kept clean
+            }
+            for(int j=0;j<ny;j++){                    // free-slip side walls: tangential copied
+                q[IX(0,j)] = wind ? 0.0 : q[IX(1,j)];
+                q[IX(nx-1,j)] = q[IX(nx-2,j)];
+            }
+        } else {                                      // scalars, unchanged
+            for(int j=0;j<ny;j++){
+                if(wind){ q[IX(0,j)] = 0.0; q[IX(nx-1,j)] = q[IX(nx-2,j)]; }
+                else    { q[IX(0,j)] = q[IX(1,j)]; q[IX(nx-1,j)] = q[IX(nx-2,j)]; }
+            }
+            for(int i=0;i<nx;i++){
+                q[IX(i,0)] = q[IX(i,1)];
+                q[IX(i,ny-1)] = q[IX(i,ny-2)];
+            }
+        }
+    };
+    // velocity at a cell centre, averaged from the faces either side (used for output and for
+    // advecting the scalar; never written back into the face state)
+    auto uc=[&](int i,int j){ return 0.5*(u[IX(i,j)] + u[IX(std::max(i-1,0),j)]); };
+    auto vc=[&](int i,int j){ return 0.5*(v[IX(i,j)] + v[IX(i,std::max(j-1,0))]); };
+
     // RMS of the divergence the velocity operator actually measures, over the interior.
     // Reported so a projection can never again be assumed to have done its job: a converged
     // pressure solve does not imply a divergence-free field when the operators disagree.
-    double diag_div_pre=0.0, diag_div_post=0.0;
+    double diag_div_pre=0.0, diag_div_post=0.0, diag_div_mid=0.0;
+    int diag_iters_used=0, diag_iters_capped=0;
     auto div_rms=[&](){
         double acc=0.0; long cnt=0;
         for(int j=2;j<ny-2;j++)for(int i=2;i<nx-2;i++){
-            double d=0.5*((u[IX(i+1,j)]-u[IX(i-1,j)])+(v[IX(i,j+1)]-v[IX(i,j-1)]));
+            if(solid_cell(i,j)) continue;
+            double d=(ufx(i,j)-ufx(i-1,j))+(vfy(i,j)-vfy(i,j-1));   // compact, on the faces
             acc+=d*d; cnt++;
         }
         return cnt? sqrt(acc/(double)cnt) : 0.0;
     };
     auto project=[&](){
+        set_bc(u,1); set_bc(v,2);
         diag_div_pre = div_rms();
         #pragma omp parallel for schedule(static)
         for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
-            div[IX(i,j)]=-0.5*((u[IX(i+1,j)]-u[IX(i-1,j)])+(v[IX(i,j+1)]-v[IX(i,j-1)]));
-            p[IX(i,j)]=0;
+            div[IX(i,j)] = solid_cell(i,j) ? 0.0
+                         : -((ufx(i,j)-ufx(i-1,j))+(vfy(i,j)-vfy(i,j-1)));
+            // p is NOT reset: the pressure changes little between steps, so last step's field is
+            // a far better starting guess than zero, and the solve picks up where it left off.
         }
-        set_bc(div,0); set_bc(p,0);
-        const double omega=1.8;                 // SOR over-relaxation
-        for(int it=0;it<a.iters;it++){
-            for(int color=0;color<2;color++){   // red-black Gauss-Seidel (parallel-safe)
-                #pragma omp parallel for schedule(static)
-                for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++) if(((i+j)&1)==color){
-                    double gs=(div[IX(i,j)]+p[IX(i-1,j)]+p[IX(i+1,j)]
-                              +p[IX(i,j-1)]+p[IX(i,j+1)])*0.25;
-                    p[IX(i,j)]+=omega*(gs-p[IX(i,j)]);
-                }
+        set_bc(div,0);
+        // Conjugate gradients on the pressure Poisson.
+        //
+        //   A p = div,   (A p)_ij = sum over OPEN faces of (p_ij - p_neighbour)
+        //
+        // A is the graph Laplacian of the open-face connectivity: symmetric and positive
+        // semi-definite, which is what CG needs. SOR solved the same system correctly but its
+        // iteration count grows with the grid (2816 sweeps at 60x90, 43136 at 540x360 for the
+        // same accuracy), so the cost grew faster than the problem. CG converges in far fewer.
+        //
+        // Every boundary here is zero-gradient for pressure, so constants lie in the null space
+        // and the system is singular. The mean is removed from the right-hand side to make it
+        // compatible, and from the solution to pin the arbitrary constant.
+        // The wind case pins the inlet ghost pressure to zero (see set_bc, kind 0), which is a
+        // Dirichlet condition: it makes the system non-singular and lets it absorb the net
+        // inflow/outflow imbalance. That coupling has to appear in the operator, or CG solves a
+        // different system from the one the boundary conditions describe -- it then satisfies its
+        // own residual test while the divergence stays put, which is exactly what wind did.
+        const bool has_dirichlet = wind;
+        auto applyA=[&](const std::vector<double>& x, std::vector<double>& y){
+            #pragma omp parallel for schedule(static)
+            for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
+                int k=IX(i,j);
+                if(sld[k]){ y[k]=0.0; continue; }
+                double acc=0.0;
+                if(i>1    && opx[IX(i-1,j)]) acc += x[k]-x[IX(i-1,j)];
+                if(i<nx-2 && opx[IX(i,j)])   acc += x[k]-x[IX(i+1,j)];
+                if(j>1    && opy[IX(i,j-1)]) acc += x[k]-x[IX(i,j-1)];
+                if(j<ny-2 && opy[IX(i,j)])   acc += x[k]-x[IX(i,j+1)];
+                if(has_dirichlet && i==1 && opx[IX(0,j)]) acc += x[k];   // neighbour is p = 0
+                y[k]=acc;
             }
-            set_bc(p,0);
-        }
+        };
+        auto dotp=[&](const std::vector<double>& x, const std::vector<double>& y){
+            double acc=0.0;
+            #pragma omp parallel for schedule(static) reduction(+:acc)
+            for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
+                int k=IX(i,j); if(!sld[k]) acc += x[k]*y[k];
+            }
+            return acc;
+        };
+        auto demean=[&](std::vector<double>& x){
+            double acc=0.0; long cnt=0;
+            for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
+                int k=IX(i,j); if(!sld[k]){ acc+=x[k]; cnt++; }
+            }
+            if(!cnt) return;
+            double m=acc/(double)cnt;
+            for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
+                int k=IX(i,j); if(!sld[k]) x[k]-=m;
+            }
+        };
+        static std::vector<double> rr, pp, Ap;
+        rr.assign(N,0.0); pp.assign(N,0.0); Ap.assign(N,0.0);
+        // Only a purely Neumann system is singular and needs its right-hand side made compatible.
+        // With a Dirichlet boundary the imbalance is real and must be absorbed there, not averaged
+        // away across every cell.
+        if(!has_dirichlet) demean(div);
+        double rhs_scale = sqrt(dotp(div,div));
+        applyA(p, Ap);                                // warm start: p carries over between steps
         #pragma omp parallel for schedule(static)
         for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
-            u[IX(i,j)]-=0.5*(p[IX(i+1,j)]-p[IX(i-1,j)]);
-            v[IX(i,j)]-=0.5*(p[IX(i,j+1)]-p[IX(i,j-1)]);
+            int k=IX(i,j); if(!sld[k]) rr[k]=div[k]-Ap[k];
         }
+        pp = rr;
+        double rs = dotp(rr,rr);
+        const double target = 1e-8 * rhs_scale;
+        int used = 0;
+        if(rhs_scale > 0.0){
+            for(int it=0; it<a.iters; it++){
+                used = it + 1;
+                applyA(pp, Ap);
+                double pAp = dotp(pp,Ap);
+                if(fabs(pAp) < 1e-300) break;
+                double alpha = rs/pAp;
+                #pragma omp parallel for schedule(static)
+                for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
+                    int k=IX(i,j);
+                    if(!sld[k]){ p[k]+=alpha*pp[k]; rr[k]-=alpha*Ap[k]; }
+                }
+                double rs_new = dotp(rr,rr);
+                if(sqrt(rs_new) < target) break;
+                double beta = rs_new/rs;
+                #pragma omp parallel for schedule(static)
+                for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
+                    int k=IX(i,j); if(!sld[k]) pp[k]=rr[k]+beta*pp[k];
+                }
+                rs = rs_new;
+            }
+        }
+        if(!has_dirichlet) demean(p);                 // pin the constant only when it is arbitrary
+        set_bc(p,0);                                  // ghosts zero-gradient for the correction
+        diag_iters_used = used;
+        diag_iters_capped = (used >= a.iters) ? 1 : 0;
+        #pragma omp parallel for schedule(static)
+        for(int j=1;j<ny-1;j++)for(int i=0;i<nx-1;i++)
+            if(openx(i,j)) u[IX(i,j)] -= (p[IX(i+1,j)]-p[IX(i,j)]); else u[IX(i,j)]=0.0;
+        #pragma omp parallel for schedule(static)
+        for(int j=0;j<ny-1;j++)for(int i=1;i<nx-1;i++)
+            if(openy(i,j)) v[IX(i,j)] -= (p[IX(i,j+1)]-p[IX(i,j)]); else v[IX(i,j)]=0.0;
         set_bc(u,1); set_bc(v,2);
         diag_div_post = div_rms();
     };
@@ -177,14 +367,6 @@ int main(int argc,char**argv){
 
     std::error_code _ec; std::filesystem::create_directories(a.out, _ec);
     int nf=0;
-    int sx = wind ? nx/4 : nx/2;                 // chimney sits upwind so the plume can bend across
-    // source geometry, bounded so it always fits inside the interior (i in [1, nx-2], j in [1, ny-2])
-    int sw=std::min(std::max(6,(int)(nx/12*a.srcw)), std::max(1,(nx-4)/2));
-    int sh=std::min(std::max(5,ny/26), std::max(1,(ny-4)/2));
-    int stack_h  = wind ? std::min((int)(0.32*ny), ny-sh-3) : 0;    // chimney height; the plume leaves its top
-    int stack_hw = std::min(std::max(2, sw/2), std::max(1,(nx-4)/2)); // chimney half-width (solid)
-    int sj = wind ? stack_h : 1;                 // source sits at the stack mouth, not on the floor
-    if(sj+sh>ny-1) sh=std::max(1, ny-1-sj);
     // zero the velocity inside the solid chimney so the wind flows around it
     auto solidify=[&](){ if(!wind) return;
         for(int j=0;j<stack_h;j++) for(int i=std::max(0,sx-stack_hw);i<=std::min(nx-1,sx+stack_hw);i++){
@@ -200,7 +382,11 @@ int main(int argc,char**argv){
         char fn[512]; snprintf(fn,sizeof(fn),"%s/frame_%05d.bin",a.out.c_str(),nf);
         std::ofstream of(fn,std::ios::binary); of.write((char*)buf.data(),N*sizeof(float));
         std::vector<float> vb(2*N);                 // velocity field (for Speed/streamlines)
-        for(int k=0;k<N;k++){ vb[k]=(float)u[k]; vb[N+k]=(float)v[k]; }
+        // the state lives on faces; rendering wants cell centres, so average here and only here
+        for(int j=0;j<ny;j++)for(int i=0;i<nx;i++){
+            vb[IX(i,j)]   = (float)uc(i,j);
+            vb[N+IX(i,j)] = (float)vc(i,j);
+        }
         char vn[512]; snprintf(vn,sizeof(vn),"%s/vel_%05d.bin",a.out.c_str(),nf);
         std::ofstream vof(vn,std::ios::binary); vof.write((char*)vb.data(),2*N*sizeof(float)); of.close(); vof.close();
         if(!of||!vof){ fprintf(stderr,"error: could not write frame %d (disk full or not writable)\n",nf); exit(3); }
@@ -219,7 +405,7 @@ int main(int argc,char**argv){
             for(int j=sj;j<std::min(ny-1,sj+sh);j++)for(int i=std::max(1,sxx-sw);i<=std::min(nx-2,sxx+sw);i++){
                 double r=double(i-sxx)/sw; double g=exp(-3*r*r);
                 s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.55*g*str);
-                v[IX(i,j)] += 0.02*g*str;
+                if(opy[IX(i,j)]) v[IX(i,j)] += 0.02*g*str;      // v is the face above this cell
             }
         }
         if(flame){                                  // fuel-rich vapour rising off a thin wick
@@ -227,39 +413,63 @@ int main(int argc,char**argv){
             for(int j=1;j<std::min(ny-1,1+sh);j++)for(int i=std::max(1,sx-ww);i<=std::min(nx-2,sx+ww);i++){
                 double r=double(i-sx)/ww; double g=exp(-3*r*r);
                 s[IX(i,j)] = std::min(1.0, s[IX(i,j)]+0.6*g);        // mixture fraction Z→1 at the wick
-                v[IX(i,j)] += 0.06*g;                                // launch the fuel upward so it doesn't pool/creep on the floor
-                u[IX(i,j)] *= 0.5;                                   // and damp lateral drift at the wick to keep it anchored
+                if(opy[IX(i,j)]) v[IX(i,j)] += 0.06*g;               // launch the fuel upward off the wick
+                if(opx[IX(i,j)])   u[IX(i,j)]   *= 0.5;              // damp lateral drift on both faces
+                if(i>0 && opx[IX(i-1,j)]) u[IX(i-1,j)] *= 0.5;       // that bound this cell
             }
         }
+        // v lives on the face between (i,j) and (i,j+1), so the scalar driving it is the average
+        // of the two cells that face separates, not the value at one cell centre.
         #pragma omp parallel for schedule(static)
-        for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
-            if(hassrc)   v[IX(i,j)] += a.dt*a.buoy*s[IX(i,j)];        // hot rises
-            else if(flame) v[IX(i,j)] += a.dt*a.buoy*Tof(s[IX(i,j)]); // heat released at the flame sheet lifts the gas
-            else if(rb)  v[IX(i,j)] += a.dt*a.buoy*(s[IX(i,j)]-0.5);  // warm rises, cool sinks
-            else         v[IX(i,j)] -= a.dt*a.grav*s[IX(i,j)];        // RT: heavy sinks
+        for(int j=1;j<ny-2;j++)for(int i=1;i<nx-1;i++){
+            if(!opy[IX(i,j)]) continue;
+            double sf = 0.5*(s[IX(i,j)] + s[IX(i,j+1)]);
+            if(hassrc)     v[IX(i,j)] += a.dt*a.buoy*sf;
+            else if(flame) v[IX(i,j)] += a.dt*a.buoy*0.5*(Tof(s[IX(i,j)])+Tof(s[IX(i,j+1)]));
+            else if(rb)    v[IX(i,j)] += a.dt*a.buoy*(sf-0.5);
+            else           v[IX(i,j)] -= a.dt*a.grav*sf;
         }
         // vorticity confinement
         if(a.conf>0){
+            // On a staggered grid the curl falls naturally at the cell CORNER between the two
+            // faces it differences, with no averaging needed: dv/dx from the v faces either side,
+            // du/dy from the u faces above and below.
             std::vector<double> w(N,0);
             #pragma omp parallel for schedule(static)
+            for(int j=0;j<ny-1;j++)for(int i=0;i<nx-1;i++)
+                w[IX(i,j)] = (v[IX(i+1,j)]-v[IX(i,j)]) - (u[IX(i,j+1)]-u[IX(i,j)]);
+            // the magnitude gradient is taken at cell centres, where the four surrounding corners
+            // are available, and the resulting force is applied to the faces it belongs to
+            std::vector<double> wc(N,0);
+            #pragma omp parallel for schedule(static)
             for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++)
-                w[IX(i,j)]=0.5*((v[IX(i+1,j)]-v[IX(i-1,j)])-(u[IX(i,j+1)]-u[IX(i,j-1)]));
+                wc[IX(i,j)] = 0.25*(fabs(w[IX(i,j)])+fabs(w[IX(i-1,j)])
+                                   +fabs(w[IX(i,j-1)])+fabs(w[IX(i-1,j-1)]));
             #pragma omp parallel for schedule(static)
             for(int j=2;j<ny-2;j++)for(int i=2;i<nx-2;i++){
-                double gx=0.5*(fabs(w[IX(i+1,j)])-fabs(w[IX(i-1,j)]));
-                double gy=0.5*(fabs(w[IX(i,j+1)])-fabs(w[IX(i,j-1)]));
+                double gx=0.5*(wc[IX(i+1,j)]-wc[IX(i-1,j)]);
+                double gy=0.5*(wc[IX(i,j+1)]-wc[IX(i,j-1)]);
                 double m=sqrt(gx*gx+gy*gy)+1e-12; gx/=m; gy/=m;
-                u[IX(i,j)] += a.dt*a.conf*1e-2*( gy*w[IX(i,j)]);
-                v[IX(i,j)] += a.dt*a.conf*1e-2*(-gx*w[IX(i,j)]);
+                double wcen=0.25*(w[IX(i,j)]+w[IX(i-1,j)]+w[IX(i,j-1)]+w[IX(i-1,j-1)]);
+                if(opx[IX(i,j)]) u[IX(i,j)] += a.dt*a.conf*1e-2*( gy*wcen);
+                if(opy[IX(i,j)]) v[IX(i,j)] += a.dt*a.conf*1e-2*(-gx*wcen);
             }
         }
-        set_bc(u,1); set_bc(v,2); solidify();
+        set_bc(u,1); set_bc(v,2);
 
-        // advect velocity
-        u0=u; v0=v; advect(u,u0,u0,v0); advect(v,v0,u0,v0); set_bc(u,1); set_bc(v,2);
-        project(); solidify();
-        // advect scalar
-        s0=s; advect(s,s0,u,v); set_bc(s,0);
+        // advect velocity, each component from its own face
+        u0=u; v0=v; advect_u(u,u0,v0); advect_v(v,u0,v0); set_bc(u,1); set_bc(v,2);
+        project();          // the chimney is closed faces INSIDE this, not a stomp afterwards:
+                            // zeroing velocities after the projection put back the divergence the
+                            // solve had just removed, which no choice of operators could fix
+        // advect the scalar along the velocity at cell centres, where the scalar lives
+        s0=s;
+        #pragma omp parallel for schedule(static)
+        for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
+            double x=i-a.dt*uc(i,j), y=j-a.dt*vc(i,j);
+            s[IX(i,j)]=sample(s0,x,y);
+        }
+        set_bc(s,0);
         if(rb){ for(int i=0;i<nx;i++){ s[IX(i,0)]=1.0; s[IX(i,ny-1)]=0.0; } }  // fixed hot/cold plates
         if(rb && a.kappa>0){                        // thermal diffusion (conduction): dT/dt = kappa*lap(T)
             s0=s;                                   // explicit FTCS; stable for dt*kappa <= 0.25
@@ -285,9 +495,14 @@ int main(int argc,char**argv){
             u0=u; v0=v;
             #pragma omp parallel for schedule(static)
             for(int j=1;j<ny-1;j++)for(int i=1;i<nx-1;i++){
-                double lapu=u0[IX(i-1,j)]+u0[IX(i+1,j)]+u0[IX(i,j-1)]+u0[IX(i,j+1)]-4*u0[IX(i,j)];
-                double lapv=v0[IX(i-1,j)]+v0[IX(i+1,j)]+v0[IX(i,j-1)]+v0[IX(i,j+1)]-4*v0[IX(i,j)];
-                u[IX(i,j)]+=a.dt*a.visc*lapu; v[IX(i,j)]+=a.dt*a.visc*lapv;   // viscosity scales with dt
+                if(opx[IX(i,j)]){
+                    double lapu=u0[IX(i-1,j)]+u0[IX(i+1,j)]+u0[IX(i,j-1)]+u0[IX(i,j+1)]-4*u0[IX(i,j)];
+                    u[IX(i,j)]+=a.dt*a.visc*lapu;
+                }
+                if(opy[IX(i,j)]){
+                    double lapv=v0[IX(i-1,j)]+v0[IX(i+1,j)]+v0[IX(i,j-1)]+v0[IX(i,j+1)]-4*v0[IX(i,j)];
+                    v[IX(i,j)]+=a.dt*a.visc*lapv;
+                }
             }
             set_bc(u,1); set_bc(v,2);
         }
@@ -298,6 +513,7 @@ int main(int argc,char**argv){
     meta<<"nx "<<nx<<"\nny "<<ny<<"\nmode_smoke "<<(smoke?1:0)<<"\nnframes "<<nf<<"\n";
     // the last projection of the run: what it was handed, and what it left behind
     meta<<"div_pre "<<diag_div_pre<<"\ndiv_post "<<diag_div_post<<"\n";
+    meta<<"pressure_iters "<<diag_iters_used<<"\npressure_capped "<<diag_iters_capped<<"\n";
     printf("done: %d frames -> %s\n",nf,a.out.c_str());
     return 0;
 }
