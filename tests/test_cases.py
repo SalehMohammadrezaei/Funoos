@@ -615,14 +615,16 @@ def test_projection_actually_removes_the_divergence_it_measures():
     Measured against the real solver, not a harness: a standalone reproduction of these operators
     can be made exact while the solver itself removes almost nothing, because the solver also has
     solid faces, boundary conditions applied after the correction, and advection every step."""
-    for name in ("Rising Smoke", "Rayleigh-Benard"):
+    for name in ("Rising Smoke", "Rayleigh-Benard", "Candle Flame", "Chimney Plume"):
         r = engine.solve_exhibit(name, {"resolution": "Low (fast)", "duration": 0.08})
         pre, post = r.hints.get("div_pre"), r.hints.get("div_post")
         assert pre is not None and post is not None, f"{name}: the projection reports no residual"
         assert float(pre) > 0.0, (name, pre)
         left = float(post) / float(pre)
-        assert left < 1e-6, (f"{name}: the projection left {100 * left:.1f}% of the divergence it "
+        # measured: 1.5e-08 to 2.4e-07 in these four modes; 1e-5 keeps a 40x margin over the worst
+        assert left < 1e-5, (f"{name}: the projection left {100 * left:.1f}% of the divergence it "
                              f"measured (pre {float(pre):.3e}, post {float(post):.3e})")
+        assert not r.hints.get("pressure_capped"), f"{name}: the pressure solve hit its iteration cap"
 
 
 if __name__ == "__main__":
