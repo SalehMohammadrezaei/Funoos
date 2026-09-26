@@ -627,6 +627,25 @@ def test_projection_actually_removes_the_divergence_it_measures():
         assert not r.hints.get("pressure_capped"), f"{name}: the pressure solve hit its iteration cap"
 
 
+def test_the_chimney_plume_stays_bounded():
+    """A projection that removes the divergence exactly also stops draining energy, and that
+    exposed a boundary condition the collocated leak had hidden: in wind mode the inlet had both
+    velocity and pressure prescribed while the outflow and the open top had neither, so the flow
+    had no boundary it could leave through consistently. The kinetic energy then doubled every few
+    hundred steps: measured at 216x168 the peak speed reached 47 cells per step by step 1600 and
+    350 by step 2000, and at gallery resolution the fields went non-finite and the clips were
+    scattered dots. With the pressure pinned at the free boundaries instead, the peak speed stays
+    near 1.4 for the whole run. The bound below sits between the two by more than an order of
+    magnitude; a non-finite state now fails earlier still, because the solver exits 4."""
+    r = engine.solve_exhibit("Chimney Plume", {"resolution": "Low (fast)", "duration": 0.6})
+    speeds = [float(np.sqrt(v[0] ** 2 + v[1] ** 2).max()) for v in r.hints["vel"]]
+    assert speeds, "no velocity frames were kept"
+    worst = max(speeds)
+    assert worst < 4.0, (f"the chimney plume is blowing up: peak speed {worst:.1f} cells per step "
+                         f"(bounded runs stay near 1.4); frame peaks {[round(x, 2) for x in speeds]}")
+    assert r.quality[0] == "quantitative", r.quality
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
