@@ -5,6 +5,21 @@
 Fixes from an external numerical audit of 1.3.1. Each was reproduced first, and each now has a
 test that fails without the fix.
 
+* **The chimney plume no longer blows up.** The projection used to be collocated and leaked 31 to
+  89 percent of the divergence it measured (see the entry below); that leak was also draining
+  kinetic energy, and it hid a boundary condition that was the wrong way round. In wind mode the
+  inlet had both its velocity and its pressure prescribed, while the outflow and the open top had
+  neither: velocity copied from the neighbour and pressure zero-gradient, so the flow had no
+  boundary it could leave through consistently. Once the projection became exact, the kinetic
+  energy doubled every few hundred steps, the fields went non-finite around step 2500 at gallery
+  resolution, and the solver wrote the garbage out as frames and reported success. The
+  prescribed-velocity inlet is now zero-gradient in pressure and the free boundaries pin the
+  pressure to zero, the standard pairing; the energy peaks and settles (measured at 540x420,
+  crosswind 0.30: 67,000 at step 1600, 47,000 at 3200, against unbounded growth). Confinement and
+  viscosity were ruled out first: switching confinement off or raising viscosity 25 times changed
+  nothing, switching the wind off made the growth vanish. The solver now also refuses a non-finite
+  state with exit 4, as the lattice-Boltzmann solver already did, so an unstable run stops instead
+  of becoming a video.
 * **The tracer outlet no longer feeds the sample.** A few outlet faces run backwards, and the water
   they drew in was given the *injected* concentration, so a steady supply put tracer into the
   downstream end of the sample before any had travelled there. Backflow now draws from the effluent

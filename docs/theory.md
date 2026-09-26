@@ -113,9 +113,23 @@ The chimney is imposed as closed faces inside the pressure operator. Previously 
 zeroed after the projection, which put back the divergence the solve had just removed.
 
 `div_pre` and `div_post` are reported for every run, so the projection's residual is a measurement
-rather than an assumption. The wind case pins its inlet ghost pressure to zero, a Dirichlet
-condition that makes its system non-singular; that coupling is in the operator, and the de-meaning
-used for the closed, purely Neumann cases is skipped there.
+rather than an assumption.
+
+**Where the pressure is pinned matters as much as whether the projection converges.** The wind
+case is the only mode with a boundary the flow passes through, and its pressure conditions follow
+the standard pairing: where the velocity is prescribed (the inlet) the pressure is zero-gradient,
+and where the velocity is free (the outflow and the open top) the pressure ghost is pinned to zero,
+so the projection itself sets the outflow velocity. That Dirichlet coupling is in the operator, it
+makes the system non-singular, and the de-meaning used for the closed, purely Neumann cases is
+skipped. Until 2026-09-26 it was the other way round: pressure pinned at the inlet, where the
+velocity was already prescribed, and zero-gradient at the outflow, whose face velocity was copied
+from its neighbour after every correction. That gave the flow no boundary it could leave through
+consistently. The collocated projection's leak had been draining enough energy to hide it; with an
+exact projection the kinetic energy doubled every few hundred steps and the fields went non-finite
+around step 2500 at gallery resolution. Confinement and viscosity were not the cause (switching
+confinement off, or raising viscosity 25 times, changed nothing; switching the wind off removed the
+growth). With the pairing corrected the energy peaks and settles, and the solver now refuses a
+non-finite state with exit 4 instead of writing it out as frames.
 
 **These changes alter what the convection exhibits produce.** Against the previous solver at its
 shipped settings: Rayleigh-Benard gains 55% in kinetic energy, the flame loses 82%, the chimney

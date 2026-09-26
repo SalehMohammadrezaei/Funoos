@@ -179,7 +179,12 @@ int main(int argc,char**argv){
             for(int j=0;j<ny;j++){
                 if(wind){
                     q[IX(0,j)]    = a.wind;           // velocity inlet on the left wall face
-                    if(nx>=3) q[IX(nx-2,j)] = q[IX(nx-3,j)];   // outflow: zero-gradient
+                    // the outflow face u[nx-2] is NOT overwritten: with p = 0 pinned in the ghost
+                    // beyond it, the projection sets it so that whatever the interior pushes out
+                    // leaves. Copying the neighbour here undid that correction every step and
+                    // paired a free velocity with a zero-gradient pressure, which no outflow can
+                    // satisfy; the energy that could not leave grew without bound once the
+                    // projection stopped leaking it.
                 } else {
                     q[IX(0,j)]    = 0.0;              // no flow through the side walls
                     if(nx>=2) q[IX(nx-2,j)] = 0.0;
@@ -193,12 +198,25 @@ int main(int argc,char**argv){
         } else if(kind==2){                           // v faces
             for(int i=0;i<nx;i++){
                 q[IX(i,0)] = 0.0;                     // no flow through the floor
-                if(ny>=2) q[IX(i,ny-2)] = open_top ? q[IX(i,std::max(ny-3,0))] : 0.0;
+                if(ny>=2 && !wind) q[IX(i,ny-2)] = open_top ? q[IX(i,std::max(ny-3,0))] : 0.0;
+                // wind: the top face v[ny-2] is left to the projection, as the outflow face is
                 q[IX(i,ny-1)] = 0.0;                  // unused slot, kept clean
             }
             for(int j=0;j<ny;j++){                    // free-slip side walls: tangential copied
                 q[IX(0,j)] = wind ? 0.0 : q[IX(1,j)];
                 q[IX(nx-1,j)] = q[IX(nx-2,j)];
+            }
+        } else if(kind==3){                           // pressure ghosts
+            // Velocity prescribed on a boundary -> pressure zero-gradient there; velocity free
+            // (outflow, open top) -> pressure pinned to zero there. Wind is the only mode with a
+            // free boundary; every other mode is zero-gradient all round and singular.
+            for(int j=0;j<ny;j++){
+                q[IX(0,j)] = q[IX(1,j)];
+                q[IX(nx-1,j)] = wind ? 0.0 : q[IX(nx-2,j)];
+            }
+            for(int i=0;i<nx;i++){
+                q[IX(i,0)] = q[IX(i,1)];
+                q[IX(i,ny-1)] = wind ? 0.0 : q[IX(i,ny-2)];
             }
         } else {                                      // scalars, unchanged
             for(int j=0;j<ny;j++){
@@ -253,11 +271,18 @@ int main(int argc,char**argv){
         // Every boundary here is zero-gradient for pressure, so constants lie in the null space
         // and the system is singular. The mean is removed from the right-hand side to make it
         // compatible, and from the solution to pin the arbitrary constant.
-        // The wind case pins the inlet ghost pressure to zero (see set_bc, kind 0), which is a
-        // Dirichlet condition: it makes the system non-singular and lets it absorb the net
-        // inflow/outflow imbalance. That coupling has to appear in the operator, or CG solves a
-        // different system from the one the boundary conditions describe -- it then satisfies its
-        // own residual test while the divergence stays put, which is exactly what wind did.
+        // The wind case pins the pressure to zero in the ghosts beyond the outflow and the open
+        // top (see set_bc, kind 3): a Dirichlet condition where the velocity is free, which makes
+        // the system non-singular and lets the imbalance between the prescribed inflow and
+        // whatever leaves be absorbed at the boundaries that are free to pass it. The inlet, where
+        // the velocity is prescribed, is zero-gradient. (It was the other way round until
+        // 2026-09-26: p pinned at the inlet, zero-gradient at the outflow, with the outflow face
+        // copied from its neighbour after every correction. That is a boundary the flow cannot
+        // leave through consistently, and once the projection stopped leaking divergence the
+        // kinetic energy doubled every few hundred steps and the run went non-finite.) Either way
+        // the coupling has to appear in the operator, or CG solves a different system from the one
+        // the boundary conditions describe and satisfies its own residual while the divergence
+        // stays put.
         const bool has_dirichlet = wind;
         auto applyA=[&](const std::vector<double>& x, std::vector<double>& y){
             #pragma omp parallel for schedule(static)
@@ -269,7 +294,8 @@ int main(int argc,char**argv){
                 if(i<nx-2 && opx[IX(i,j)])   acc += x[k]-x[IX(i+1,j)];
                 if(j>1    && opy[IX(i,j-1)]) acc += x[k]-x[IX(i,j-1)];
                 if(j<ny-2 && opy[IX(i,j)])   acc += x[k]-x[IX(i,j+1)];
-                if(has_dirichlet && i==1 && opx[IX(0,j)]) acc += x[k];   // neighbour is p = 0
+                if(has_dirichlet && i==nx-2 && opx[IX(i,j)]) acc += x[k];   // outflow ghost p = 0
+                if(has_dirichlet && j==ny-2 && opy[IX(i,j)]) acc += x[k];   // open-top ghost p = 0
                 y[k]=acc;
             }
         };
@@ -331,7 +357,7 @@ int main(int argc,char**argv){
             }
         }
         if(!has_dirichlet) demean(p);                 // pin the constant only when it is arbitrary
-        set_bc(p,0);                                  // ghosts zero-gradient for the correction
+        set_bc(p,3);                                  // pressure ghosts: zero-gradient, or zero where the flow is free
         diag_iters_used = used;
         diag_iters_capped = (used >= a.iters) ? 1 : 0;
         #pragma omp parallel for schedule(static)
@@ -376,6 +402,20 @@ int main(int argc,char**argv){
     // frame 0 is the initial state and the final state is always saved after the loop
     std::ofstream ftimes(a.out+"/frame_times.txt"); int last_saved=-1;
     auto save_frame=[&](int step){
+        // Admissibility before anything is written: a velocity or scalar that is no longer finite
+        // cannot be rendered, and the semi-Lagrangian sampler indexes with it, so a run that has
+        // blown up produces frames of garbage that look like a result. The LBM solver already
+        // refuses such a state with exit 4; this solver used to write it out and report success.
+        {
+            long bad=0;
+            #pragma omp parallel for schedule(static) reduction(+:bad)
+            for(int k=0;k<N;k++) if(!std::isfinite(u[k])||!std::isfinite(v[k])||!std::isfinite(s[k])) bad++;
+            if(bad){
+                fprintf(stderr,"error: the calculation went unstable at step %d (%ld cells are no longer finite); "
+                               "try a lower buoyancy, less vorticity confinement or more viscosity\n",step,bad);
+                exit(4);
+            }
+        }
         std::vector<float> buf(N);
         // flame renders the luminous temperature field T(Z); other modes render the scalar
         for(int k=0;k<N;k++) buf[k]=(float)(flame ? Tof(s[k]) : s[k]);
