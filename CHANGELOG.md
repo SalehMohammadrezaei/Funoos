@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.2
 
 Fixes from an external numerical audit of 1.3.1. Each was reproduced first, and each now has a
 test that fails without the fix.
