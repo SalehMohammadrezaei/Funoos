@@ -118,8 +118,12 @@ rather than an assumption.
 **Where the pressure is pinned matters as much as whether the projection converges.** The wind
 case is the only mode with a boundary the flow passes through, and its pressure conditions follow
 the standard pairing: where the velocity is prescribed (the inlet) the pressure is zero-gradient,
-and where the velocity is free (the outflow and the open top) the pressure ghost is pinned to zero,
-so the projection itself sets the outflow velocity. That Dirichlet coupling is in the operator, it
+and where the velocity is free (the outflow) the pressure ghost is pinned to zero, so the
+projection itself sets the outflow velocity. The top is a free-slip lid rather than an open
+boundary: measured at 540x420 with a crosswind of 0.30, the lid keeps the mean wind at 0.30 in
+every column, whereas a top pinned to zero pressure lets buoyancy pump the box (air is drawn in
+through the outflow, mean wind -0.50 there, and the plume rises vertically), and a passive top with
+zero-gradient velocity and pressure still leaks the wind away (-0.14 at the outflow). That Dirichlet coupling is in the operator, it
 makes the system non-singular, and the de-meaning used for the closed, purely Neumann cases is
 skipped. Until 2026-09-26 it was the other way round: pressure pinned at the inlet, where the
 velocity was already prescribed, and zero-gradient at the outflow, whose face velocity was copied

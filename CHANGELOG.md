@@ -13,9 +13,13 @@ test that fails without the fix.
   boundary it could leave through consistently. Once the projection became exact, the kinetic
   energy doubled every few hundred steps, the fields went non-finite around step 2500 at gallery
   resolution, and the solver wrote the garbage out as frames and reported success. The
-  prescribed-velocity inlet is now zero-gradient in pressure and the free boundaries pin the
-  pressure to zero, the standard pairing; the energy peaks and settles (measured at 540x420,
-  crosswind 0.30: 67,000 at step 1600, 47,000 at 3200, against unbounded growth). Confinement and
+  prescribed-velocity inlet is now zero-gradient in pressure, the outflow pins the pressure to
+  zero so the projection sets what leaves there, and the top is a free-slip lid; the energy peaks
+  and settles (measured at 540x420, crosswind 0.30: 64,000 at step 1600, 44,000 at 3200, against
+  unbounded growth) and the crosswind holds 0.30 at every column. The top could not stay open:
+  pinned to zero pressure it let buoyancy pump the box, drawing air in through the outflow (mean
+  wind -0.50 there) with the plume rising vertically, and left passive it still leaked the wind
+  away through the top (-0.14 at the outflow). Confinement and
   viscosity were ruled out first: switching confinement off or raising viscosity 25 times changed
   nothing, switching the wind off made the growth vanish. The solver now also refuses a non-finite
   state with exit 4, as the lattice-Boltzmann solver already did, so an unstable run stops instead

@@ -66,7 +66,7 @@ int main(int argc,char**argv){
     const bool wind  = (a.mode=="wind");        // chimney plume in a crosswind
     const bool flame = (a.mode=="flame");       // laminar diffusion flame (Burke-Schumann)
     const bool hassrc   = smoke || wind;        // a continuous dyed/hot source
-    const bool open_top = smoke || wind || flame;  // open (zero-gradient) top boundary
+    const bool open_top = smoke || flame;       // open (zero-gradient) top boundary; wind has a lid, see set_bc
     // Burke-Schumann fast chemistry: temperature peaks at the stoichiometric mixture
     // fraction Z = zst (the flame sheet) and falls to ambient toward pure fuel or pure air.
     const double Zst = a.zst;
@@ -198,8 +198,14 @@ int main(int argc,char**argv){
         } else if(kind==2){                           // v faces
             for(int i=0;i<nx;i++){
                 q[IX(i,0)] = 0.0;                     // no flow through the floor
-                if(ny>=2 && !wind) q[IX(i,ny-2)] = open_top ? q[IX(i,std::max(ny-3,0))] : 0.0;
-                // wind: the top face v[ny-2] is left to the projection, as the outflow face is
+                if(ny>=2) q[IX(i,ny-2)] = open_top ? q[IX(i,std::max(ny-3,0))] : 0.0;
+                // wind: the top is a free-slip lid (v = 0), so everything the inlet pushes in
+                // leaves through the pressure-pinned outflow and the crosswind holds its speed
+                // across the box. Measured at 540x420, crosswind 0.30, step 3200: with the lid
+                // the mean wind is 0.30 at every column; with a passive top (zero-gradient v,
+                // zero-gradient p, as smoke uses) it is -0.14 at the outflow and the air leaves
+                // through the top instead; with the top pinned to p = 0 as well it is -0.50 at
+                // the outflow, air is drawn IN there, and the plume rises vertically.
                 q[IX(i,ny-1)] = 0.0;                  // unused slot, kept clean
             }
             for(int j=0;j<ny;j++){                    // free-slip side walls: tangential copied
@@ -208,7 +214,7 @@ int main(int argc,char**argv){
             }
         } else if(kind==3){                           // pressure ghosts
             // Velocity prescribed on a boundary -> pressure zero-gradient there; velocity free
-            // (outflow, open top) -> pressure pinned to zero there. Wind is the only mode with a
+            // (the wind outflow) -> pressure pinned to zero there. Wind is the only mode with a
             // free boundary; every other mode is zero-gradient all round and singular.
             for(int j=0;j<ny;j++){
                 q[IX(0,j)] = q[IX(1,j)];
@@ -216,7 +222,7 @@ int main(int argc,char**argv){
             }
             for(int i=0;i<nx;i++){
                 q[IX(i,0)] = q[IX(i,1)];
-                q[IX(i,ny-1)] = wind ? 0.0 : q[IX(i,ny-2)];
+                q[IX(i,ny-1)] = q[IX(i,ny-2)];
             }
         } else {                                      // scalars, unchanged
             for(int j=0;j<ny;j++){
@@ -271,11 +277,11 @@ int main(int argc,char**argv){
         // Every boundary here is zero-gradient for pressure, so constants lie in the null space
         // and the system is singular. The mean is removed from the right-hand side to make it
         // compatible, and from the solution to pin the arbitrary constant.
-        // The wind case pins the pressure to zero in the ghosts beyond the outflow and the open
-        // top (see set_bc, kind 3): a Dirichlet condition where the velocity is free, which makes
-        // the system non-singular and lets the imbalance between the prescribed inflow and
-        // whatever leaves be absorbed at the boundaries that are free to pass it. The inlet, where
-        // the velocity is prescribed, is zero-gradient. (It was the other way round until
+        // The wind case pins the pressure to zero in the ghost beyond the outflow (see set_bc,
+        // kind 3): a Dirichlet condition where the velocity is free, which makes the system
+        // non-singular and lets the projection set the outflow velocity so that everything the
+        // prescribed inflow pushes in leaves there. The inlet, where the velocity is prescribed,
+        // is zero-gradient, and the top is a free-slip lid. (It was the other way round until
         // 2026-09-26: p pinned at the inlet, zero-gradient at the outflow, with the outflow face
         // copied from its neighbour after every correction. That is a boundary the flow cannot
         // leave through consistently, and once the projection stopped leaking divergence the
@@ -295,7 +301,6 @@ int main(int argc,char**argv){
                 if(j>1    && opy[IX(i,j-1)]) acc += x[k]-x[IX(i,j-1)];
                 if(j<ny-2 && opy[IX(i,j)])   acc += x[k]-x[IX(i,j+1)];
                 if(has_dirichlet && i==nx-2 && opx[IX(i,j)]) acc += x[k];   // outflow ghost p = 0
-                if(has_dirichlet && j==ny-2 && opy[IX(i,j)]) acc += x[k];   // open-top ghost p = 0
                 y[k]=acc;
             }
         };
