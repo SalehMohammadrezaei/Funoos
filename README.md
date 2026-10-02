@@ -16,8 +16,8 @@ phenomenon: wakes and aerodynamics, porous media (flow and tracer transport), bu
 free surfaces and waves, vortices and mixing, pattern formation
 ([docs/gallery_map.md](docs/gallery_map.md)).
 
-<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4"><img src="docs/funoos_promo.gif" width="92%" alt="Funoos: views, palettes and the 27 experiments"></a></p>
-<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4">Full-quality video (MP4)</a></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4"><img src="docs/funoos_promo.gif" width="92%" alt="Funoos: views, palettes and the 28 experiments"></a></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4">Full-quality video (MP4)</a> · <a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_app_promo.mp4">One-minute walkthrough of the app (MP4)</a></p>
 
 ## What you can do
 
@@ -42,7 +42,10 @@ free surfaces and waves, vortices and mixing, pattern formation
 ## Model checks and limitations
 
 Every scene carries one of three status labels. The checks behind them run in CI
-(`tests/`); the numbers below are measured there.
+(`tests/`); the numbers below are measured there. The automated checks are 107 tests
+in seven Python suites (smoke, numerics, cases, scene matrix, parameter schema, job lifecycle, media),
+two frontend suites, a layout check at eleven window sizes and a packaging build, all
+run on every push.
 
 | status | meaning | examples (measured) |
 |---|---|---|
@@ -126,6 +129,15 @@ docs/                theory, performance, result schema, testing, Windows build
 tools/               pipeline profiler, layout check at eleven window sizes, card thumbnails, walkthrough recorder
 studio.py            legacy CustomTkinter UI, unsupported
 ```
+
+## How it was built
+
+The physics, the numerical methods and the validation approach were defined by the
+author. The code was developed iteratively with AI coding agents (Claude Code and Codex)
+under the author's direction: each generated change was reviewed, debugged, tested and
+verified against the checks above before it was kept. Version 1.3.2 also incorporates the
+findings of an independent numerical audit of 1.3.1; each finding was reproduced first
+and now has a test that fails without its fix ([CHANGELOG.md](CHANGELOG.md)).
 
 ## Citation and licence
 
