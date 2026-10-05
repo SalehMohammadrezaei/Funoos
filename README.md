@@ -16,8 +16,8 @@ phenomenon: wakes and aerodynamics, porous media (flow and tracer transport), bu
 free surfaces and waves, vortices and mixing, pattern formation
 ([docs/gallery_map.md](docs/gallery_map.md)).
 
-<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4"><img src="docs/funoos_promo.gif" width="92%" alt="Funoos: views, palettes and the 28 experiments"></a></p>
-<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4">Full-quality video (MP4)</a> · <a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_app_promo.mp4">One-minute walkthrough of the app (MP4)</a></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4"><img src="docs/funoos_promo.gif" width="92%" alt="Funoos trailer: external flow, convection, shocks, free surfaces, patterns and the app itself"></a></p>
+<p align="center"><a href="https://github.com/SalehMohammadrezaei/Funoos/raw/main/docs/funoos_promo.mp4">Watch the trailer with sound (MP4, 1080p, 1:37)</a></p>
 
 ## What you can do
 
@@ -89,7 +89,10 @@ python funoos_app.py --selftest               # checks solvers, font and encoder
 ```
 
 The gallery clips ship in `results/gallery/`; regenerate with
-`python render_gallery.py High 1.8` (exits non-zero if a scene fails).
+`python render_gallery.py High 1.8` (exits non-zero if a scene fails). The trailer is built
+from those clips plus a recording of the interface by `tools/make_trailer.py`
+(`tools/record_trailer_ui.py` captures the interface, `tools/cut_trailer_ui.py` cuts it); the
+soundtrack is synthesized by the same script, so nothing in it is licensed from elsewhere.
 
 ### Runs, memory and settings
 
