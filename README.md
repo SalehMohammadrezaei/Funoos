@@ -1,5 +1,11 @@
 # 🏮 Funoos
 
+> **New: Funoos is now on the web.** Explore all 28 experiments in the app's own interface,
+> with nothing to install: **[open the web version](https://salehmohammadrezaei.github.io/funoos-web/)**.
+>
+> It plays 216 simulations pre-run at Ultra resolution, with their measurements, plots and
+> explanations. To run your own values, geometry or duration, [install the desktop app](#install-and-run).
+
 ### Explore fluid motion through simulation.
 
 Funoos (فانوس, "lantern") is a desktop application for exploring two-dimensional
